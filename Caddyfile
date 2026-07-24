@@ -1,0 +1,22 @@
+# Replace finance.yourcompany.com with the real domain (also update the frontend
+# build args / root .env so NEXT_PUBLIC_API_URL and NEXT_PUBLIC_APP_URL match).
+# Caddy obtains and renews the HTTPS certificate automatically (Let's Encrypt).
+
+finance.yourcompany.com {
+    encode gzip
+
+    # API traffic -> FastAPI backend (routes live under /api/v1)
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+
+    # Backend health check (optional, handy for uptime monitoring)
+    handle /health {
+        reverse_proxy backend:8000
+    }
+
+    # Everything else -> Next.js frontend
+    handle {
+        reverse_proxy frontend:3000
+    }
+}

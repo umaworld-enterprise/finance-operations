@@ -1,0 +1,55 @@
+# Production stack for a single EC2 host: backend + frontend + Caddy (auto-HTTPS).
+# Supabase stays external and unchanged. Full runbook: DEPLOYMENT.md.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# NOTE: this is the PRODUCTION compose. The dev-only backend/docker-compose.yml
+# (which spins up a throwaway local Postgres) must NOT be used here.
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: ./secrets/backend.env        # real secrets — gitignored; see backend/.env.example
+    command: >
+      sh -c "alembic upgrade head &&
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
+    expose:
+      - "8000"                              # internal only; reached via Caddy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* are baked in at BUILD time. Provide them via a root .env
+        # (gitignored) or shell exports. Rebuild whenever the domain changes.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://finance.yourcompany.com/api/v1}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://finance.yourcompany.com}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
+        NEXT_PUBLIC_ADMIN_EMAIL: ${NEXT_PUBLIC_ADMIN_EMAIL:-admin@sunshine.com}
+    expose:
+      - "3000"                              # internal only; reached via Caddy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"                             # HTTP — used for the ACME challenge + redirect to 443
+      - "443:443"                           # HTTPS
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data                    # persisted TLS certificates
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
