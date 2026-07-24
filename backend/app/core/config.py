@@ -33,11 +33,8 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]
 
-    # Google integrations
-    google_webhook_secret: str = ""
+    # Google integrations (Drive — TT-copy uploads)
     google_service_account_json: str = ""
-    google_sheet_id: str = ""
-    google_sheet_tab_name: str = "Sheet1"
     google_drive_folder_id: str = ""
 
     # Web Push (VAPID) — empty → push disabled, in-app bell still works

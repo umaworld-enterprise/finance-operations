@@ -103,7 +103,6 @@ def create_app() -> FastAPI:
     from app.api.v1.payment import router as payment_router
     from app.api.v1.analytics import router as analytics_router
     from app.api.v1.reports import router as reports_router
-    from app.api.v1.webhooks import router as webhooks_router
     from app.api.v1.admin import router as admin_router
     from app.api.v1.masters.suppliers import router as suppliers_router
     from app.api.v1.masters.customers import router as customers_router
@@ -117,7 +116,6 @@ def create_app() -> FastAPI:
         payment_router,
         analytics_router,
         reports_router,
-        webhooks_router,
         admin_router,
         suppliers_router,
         customers_router,

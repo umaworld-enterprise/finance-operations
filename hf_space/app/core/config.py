@@ -33,12 +33,6 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]
 
-    # Google integrations
-    google_webhook_secret: str = ""
-    google_service_account_json: str = ""
-    google_sheet_id: str = ""
-    google_sheet_tab_name: str = "Sheet1"
-
     # Analytics defaults (overridden by system_config table at runtime)
     default_etd_grace_days: int = 10
     default_cost_of_fund_rate: float = 0.18

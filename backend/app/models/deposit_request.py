@@ -92,9 +92,6 @@ class DepositRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     accounts_actions: Mapped[list["AccountsAction"]] = relationship(
         back_populates="deposit_request", order_by="AccountsAction.performed_at"
     )
-    google_form_submission: Mapped["GoogleFormSubmission | None"] = relationship(
-        back_populates="deposit_request", uselist=False
-    )
     analytics_snapshot: Mapped["AnalyticsSnapshot | None"] = relationship(
         back_populates="deposit_request", uselist=False
     )
@@ -112,5 +109,4 @@ class DepositRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 from app.models.masters import Customer, Supplier, User, Vertical  # noqa: E402, F401
 from app.models.payment import PaymentDetails  # noqa: E402, F401
 from app.models.workflow import AccountsAction, MerchandiserAction, StatusHistory  # noqa: E402, F401
-from app.models.integrations import GoogleFormSubmission  # noqa: E402, F401
 from app.models.analytics import AnalyticsSnapshot  # noqa: E402, F401

@@ -279,31 +279,3 @@ async def delete_form_link(link_id: UUID, current_user: SuperAdmin, db: DB) -> M
     await db.delete(link)
     await db.commit()
     return MessageResponse(message="Form link deleted.")
-
-
-@router.post("/integrations/google-sheet/sync", response_model=MessageResponse)
-async def trigger_sheet_sync(current_user: SuperAdmin, db: DB) -> MessageResponse:
-    """Manually trigger a Google Sheet sync cycle."""
-    from app.core.database import AsyncSessionFactory
-    from app.integrations.google_sheets.sync_service import sync_from_sheet
-    count = await sync_from_sheet(AsyncSessionFactory)
-    return MessageResponse(message=f"Synced {count} new records from Google Sheet.")
-
-
-@router.get("/integrations/sync-logs")
-async def list_sync_logs(current_user: FinanceAdmin, db: DB) -> list[dict]:
-    from app.models.integrations import SyncLog
-    result = await db.execute(select(SyncLog).order_by(SyncLog.synced_at.desc()).limit(100))
-    logs = list(result.scalars().all())
-    return [
-        {
-            "id": str(log.id),
-            "source_type": log.source_type.value,
-            "source_reference": log.source_reference,
-            "sync_status": log.sync_status.value,
-            "records_synced": log.records_synced,
-            "error_message": log.error_message,
-            "synced_at": log.synced_at.isoformat(),
-        }
-        for log in logs
-    ]

@@ -6,5 +6,5 @@ from app.models.deposit_request import DepositRequest  # noqa: F401
 from app.models.payment import PaymentDetails  # noqa: F401
 from app.models.workflow import AccountsAction, MerchandiserAction, StatusHistory  # noqa: F401
 from app.models.audit import AuditLog  # noqa: F401
-from app.models.integrations import DefaultedSupplier, GoogleFormSubmission, SyncLog  # noqa: F401
+from app.models.integrations import DefaultedSupplier  # noqa: F401
 from app.models.analytics import AnalyticsSnapshot  # noqa: F401

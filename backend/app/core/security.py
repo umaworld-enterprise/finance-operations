@@ -1,7 +1,5 @@
 """JWT validation against Supabase-issued tokens."""
 
-import hashlib
-import hmac
 import time
 from typing import Any
 
@@ -87,16 +85,3 @@ def decode_supabase_token(token: str) -> dict[str, Any]:
     except httpx.HTTPError as exc:
         logger.warning("JWKS fetch failed", error=str(exc))
         raise AuthenticationError("Unable to verify token signing key") from exc
-
-
-def verify_webhook_signature(payload: bytes, signature: str) -> bool:
-    """Verify HMAC-SHA256 signature from Google Apps Script webhook."""
-    if not settings.google_webhook_secret:
-        raise ValueError("GOOGLE_WEBHOOK_SECRET is not configured — cannot verify webhook signature")
-
-    expected = hmac.new(
-        settings.google_webhook_secret.encode(),
-        payload,
-        hashlib.sha256,
-    ).hexdigest()
-    return hmac.compare_digest(expected, signature)

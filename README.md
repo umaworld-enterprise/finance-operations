@@ -17,7 +17,6 @@ Railway (Next.js frontend, PWA)
                     ├── Google Drive (TT copy uploads, service account)
                     └── Web Push (VAPID) + SMTP (optional)
 
-Google Form → Apps Script webhook → /api/v1/webhooks/google-form
 Public form → /form/{slug} → /api/v1/public-form
 ```
 
@@ -106,20 +105,6 @@ pytest tests/unit -v
 
 ---
 
-## Google Form Integration
-
-1. Open your Google Form → **Extensions → Apps Script**.
-2. Copy `integrations/google_apps_script/webhook.gs` into the editor.
-3. Set Script Properties (Project Settings → Script Properties):
-   - `WEBHOOK_URL` = `https://your-api.onrender.com/api/v1/webhooks/google-form`
-   - `SECRET_KEY` = same value as `GOOGLE_WEBHOOK_SECRET` in your backend `.env`
-4. Add trigger: **Triggers → Add Trigger → onFormSubmit → From form → On form submit**.
-5. Add a second time-based trigger for `retryFailedSubmissions` every 5 minutes for resilience.
-
-The `google_response_id` field deduplicates submissions — even if the Apps Script fires twice, only one record is created in the database.
-
----
-
 ## Deployment (Railway — current production)
 
 Both services live in one Railway project. **Always deploy from inside the service subdirectory** — running `railway up` from the monorepo root fails Railpack detection.
@@ -193,7 +178,7 @@ Advance Deposit Tracker/
 │   │   ├── repositories/       # Data access (SQLAlchemy async)
 │   │   ├── models/             # ORM models
 │   │   ├── analytics/          # Engine + snapshot job
-│   │   ├── integrations/       # Google Form + Sheets + Drive (TT copies)
+│   │   ├── integrations/       # Google Drive (TT copies)
 │   │   └── migrations/         # Alembic versions (head: 0016)
 │   ├── tests/                  # Unit tests (SQLite in-memory)
 │   ├── scripts/seed.py         # Master data seed
@@ -205,11 +190,8 @@ Advance Deposit Tracker/
 │       ├── hooks/              # TanStack Query hooks
 │       ├── services/           # API call wrappers
 │       └── types/              # TypeScript types
-├── supabase/
-│   └── rls_policies.sql        # Supabase RLS policies
-└── integrations/
-    └── google_apps_script/
-        └── webhook.gs          # Apps Script webhook sender
+└── supabase/
+    └── rls_policies.sql        # Supabase RLS policies
 ```
 
 ---
