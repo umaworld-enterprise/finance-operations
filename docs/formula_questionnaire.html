@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Advance Deposit Tracker — Formula Confirmation Questionnaire</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 10.5pt; }
+  body {
+    font-family: "Segoe UI", -apple-system, Roboto, Arial, sans-serif;
+    color: #1c2733; line-height: 1.55; background: #fff;
+  }
+  :root {
+    --navy: #1a3155; --navy2: #27466f; --accent: #2f6fb0;
+    --muted: #5b6b7c; --line: #d8dfe8; --bg: #f2f5f9;
+  }
+  h1, h2, h3 { color: var(--navy); font-weight: 650; line-height: 1.25; }
+  h1 { font-size: 19pt; }
+  h2 { font-size: 13pt; margin: 0 0 10px 0; padding-bottom: 6px; border-bottom: 2.5px solid var(--navy); }
+  p { margin: 0 0 9px 0; }
+  ul { margin: 0 0 10px 20px; }
+  li { margin-bottom: 4px; }
+  strong { color: #10202f; }
+  code {
+    font-family: Consolas, "Courier New", monospace; font-size: 9pt;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px;
+  }
+  .kicker { letter-spacing: 2.5px; text-transform: uppercase; font-size: 9pt; color: var(--accent); font-weight: 700; }
+  .head { border-bottom: 3px solid var(--navy); padding-bottom: 14px; margin-bottom: 18px; }
+  .head .meta { color: var(--muted); font-size: 9.5pt; margin-top: 6px; }
+  .callout {
+    border-left: 4px solid var(--accent); background: var(--bg);
+    padding: 9px 13px; margin: 10px 0 16px 0; border-radius: 0 6px 6px 0;
+  }
+  .q { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 14px 0; page-break-inside: avoid; }
+  .q .qhead {
+    background: var(--navy); color: #fff; padding: 7px 12px; border-radius: 7px 7px 0 0;
+    font-weight: 600; font-size: 10pt;
+  }
+  .q .qbody { padding: 10px 12px 12px 12px; }
+  .q .context { font-size: 9.4pt; color: var(--muted); margin-bottom: 7px; }
+  .q .question { font-size: 10.2pt; margin-bottom: 10px; }
+  .q .options { font-size: 9.4pt; margin-bottom: 10px; }
+  .q .options span { display: inline-block; margin-right: 18px; }
+  .box { display: inline-block; width: 11px; height: 11px; border: 1.4px solid var(--navy2); border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .answer { border: 1px dashed var(--navy2); border-radius: 6px; background: #fbfcfe; min-height: 52px; padding: 6px 10px; }
+  .answer .lbl { font-size: 8.4pt; color: var(--muted); letter-spacing: 0.5px; text-transform: uppercase; }
+  .sig { display: flex; gap: 24px; margin-top: 28px; }
+  .sig > div { flex: 1; border-top: 1.4px solid var(--navy2); padding-top: 5px; font-size: 9pt; color: var(--muted); }
+  .small { font-size: 9pt; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <div class="kicker">For Client Confirmation &nbsp;·&nbsp; Please return completed</div>
+  <h1>Advance Deposit Tracker — Formula Confirmation Questionnaire</h1>
+  <div class="meta">
+    Version 1.0 · 07 July 2026 · Companion to the “Formula &amp; Calculation Reference” (v1.1)<br>
+    Six alignment questions discovered while documenting every formula in the system. Nothing here
+    blocks day-to-day use — your answers let us finalise the remaining details.
+  </div>
+</div>
+
+<div class="callout">
+  <strong>How to complete:</strong> tick an option or write your preference in the answer box under
+  each question. Question 5 also feeds the pending CR8 (auto-flagging) discussion.
+</div>
+
+<!-- Q1 -->
+<div class="q">
+  <div class="qhead">Question 1 — Retired configuration parameter</div>
+  <div class="qbody">
+    <p class="context">The old Cost of Fund formula used a 30-day grace window counted from the payment
+    date (<code>cost_of_fund_grace_days</code>). The revised formula (07-Jul-2026) measures delay from the
+    Grace ETD instead, so this parameter no longer affects anything.</p>
+    <p class="question">OK to remove it from the configuration screen to avoid future confusion?</p>
+    <p class="options"><span><span class="box"></span>Yes, remove it</span><span><span class="box"></span>No, keep it visible</span></p>
+    <div class="answer"><span class="lbl">Notes</span></div>
+  </div>
+</div>
+
+<!-- Q2 -->
+<div class="q">
+  <div class="qhead">Question 2 — Grace period wording</div>
+  <div class="qbody">
+    <p class="context">A few on-screen hints still say the grace period defaults to "7 days"; the
+    actual configured value is <strong>10 days</strong>. We will correct the text to 10.</p>
+    <p class="question">Please confirm 10 calendar days remains the agreed grace period.</p>
+    <p class="options"><span><span class="box"></span>Confirmed — 10 days</span><span><span class="box"></span>Change it to: ______</span></p>
+    <div class="answer"><span class="lbl">Notes</span></div>
+  </div>
+</div>
+
+<!-- Q3 -->
+<div class="q">
+  <div class="qhead">Question 3 — “Contribution %” basis differs by tab</div>
+  <div class="qbody">
+    <p class="context">On the analytics breakdowns, the By-Merchandiser tab computes each row's
+    Contribution % as its share of the overdue <em>USD amount</em>, while the By-Vertical and By-Customer
+    tabs use share of the overdue <em>case count</em>.</p>
+    <p class="question">Should all three tabs use the same basis — and if so, which one?</p>
+    <p class="options">
+      <span><span class="box"></span>All by amount</span>
+      <span><span class="box"></span>All by case count</span>
+      <span><span class="box"></span>Keep as is</span>
+    </p>
+    <div class="answer"><span class="lbl">Notes</span></div>
+  </div>
+</div>
+
+<!-- Q4 -->
+<div class="q">
+  <div class="qhead">Question 4 — Cross-currency “Total Deposit” cards</div>
+  <div class="qbody">
+    <p class="context">The system never converts currencies. However, two drill-down summary cards add
+    USD + CNY + EUR deposit amounts together into one raw number labelled USD.</p>
+    <p class="question">Prefer per-currency figures on those cards, or keep the raw combined total?</p>
+    <p class="options">
+      <span><span class="box"></span>Split per currency</span>
+      <span><span class="box"></span>Keep combined total</span>
+    </p>
+    <div class="answer"><span class="lbl">Notes</span></div>
+  </div>
+</div>
+
+<!-- Q5 -->
+<div class="q">
+  <div class="qhead">Question 5 — Auto-flag sensitivity (links to CR8)</div>
+  <div class="qbody">
+    <p class="context">Currently, any request that goes even <strong>1 day</strong> past its Grace ETD
+    automatically flags its supplier as defaulted (~129 suppliers are actively flagged today). Every
+    future advance to a flagged supplier then requires Head-of-Merchandiser approval.</p>
+    <p class="question">Should there be a higher threshold — e.g. flag only beyond N days overdue, or
+    only after M overdue requests?</p>
+    <p class="options">
+      <span><span class="box"></span>Keep 1 day</span>
+      <span><span class="box"></span>Flag after ______ days overdue</span>
+      <span><span class="box"></span>Flag after ______ overdue requests</span>
+    </p>
+    <div class="answer"><span class="lbl">Notes</span></div>
+  </div>
+</div>
+
+<!-- Q6 -->
+<div class="q">
+  <div class="qhead">Question 6 — Delay-bucket boundary at exactly 1 day</div>
+  <div class="qbody">
+    <p class="context">In the aging analysis, a request exactly 1 day overdue sits on the boundary
+    between the "Graced ETD" bucket and the "G-15 Days" bucket (the backend and the screen apply the
+    edge slightly differently).</p>
+    <p class="question">Which bucket should a 1-day delay belong to?</p>
+    <p class="options">
+      <span><span class="box"></span>Graced ETD</span>
+      <span><span class="box"></span>G-15 Days</span>
+    </p>
+    <div class="answer"><span class="lbl">Notes</span></div>
+  </div>
+</div>
+
+<div class="sig">
+  <div>Completed by (name &amp; role)</div>
+  <div>Signature</div>
+  <div>Date</div>
+</div>
+
+<p class="small" style="margin-top:22px;">
+  Advance Deposit Tracker — Formula Confirmation Questionnaire · v1.0 · 07 July 2026 ·
+  Companion to the Formula &amp; Calculation Reference (v1.1) and Engineering Case Study (v1.2).
+</p>
+
+</body>
+</html>

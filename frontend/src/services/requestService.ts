@@ -1,0 +1,159 @@
+import { api } from "@/lib/api";
+import type { ActivityItem, DepositRequest, DepositRequestDetail, PaymentDetails } from "@/types";
+
+export interface PaginatedResponse<T> {
+  total: number;
+  page: number;
+  page_size: number;
+  items: T[];
+}
+
+export interface CreateRequestPayload {
+  supplier_id: string;
+  customer_id: string;
+  vertical_id: string;
+  supplier_invoice_number?: string;
+  sunshine_invoice_number?: string;
+  currency: string;
+  exchange_rate?: number;
+  deposit_amount: number;
+  deposit_percentage: number;
+  total_supplier_invoice_amount: number;
+  estimated_shipment_date?: string;
+  estimated_etd?: string;
+  payment_terms?: string;
+  remarks?: string;
+  override_flagged_supplier?: boolean;
+}
+
+export type UpdateRequestPayload = Partial<CreateRequestPayload>;
+
+export interface PaymentPayload {
+  payment_date?: string;
+  bank?: string;
+  payment_reference_number?: string;
+  payment_status?: string;
+  ship_date?: string;
+  actual_etd?: string;
+  accounts_remarks?: string;
+}
+
+const requestService = {
+  list: async (params?: Record<string, string>): Promise<DepositRequest[]> => {
+    // Fetch up to 1000 records for legacy callers (analytics, drill pages) that need all data.
+    const { data } = await api.get<PaginatedResponse<DepositRequest>>("/requests", {
+      params: { ...params, page: "1", page_size: "1000" },
+    });
+    return data.items;
+  },
+
+  listPaginated: async (
+    page: number,
+    pageSize: number,
+    params?: Record<string, string | string[]>,
+  ): Promise<PaginatedResponse<DepositRequest>> => {
+    const sp = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    if (params) {
+      for (const [k, v] of Object.entries(params)) {
+        if (Array.isArray(v)) v.forEach((s) => sp.append(k, s));
+        else sp.append(k, v);
+      }
+    }
+    const { data } = await api.get<PaginatedResponse<DepositRequest>>(`/requests?${sp}`);
+    return data;
+  },
+
+  pendingQueue: async (): Promise<DepositRequest[]> => {
+    const { data } = await api.get<DepositRequest[]>("/requests/pending-payment-queue");
+    return data;
+  },
+
+  get: async (id: string): Promise<DepositRequestDetail> => {
+    const { data } = await api.get<DepositRequestDetail>(`/requests/${id}`);
+    return data;
+  },
+
+  create: async (payload: CreateRequestPayload): Promise<DepositRequest> => {
+    const { data } = await api.post<DepositRequest>("/requests", payload);
+    return data;
+  },
+
+  update: async (id: string, payload: UpdateRequestPayload): Promise<DepositRequest> => {
+    const { data } = await api.patch<DepositRequest>(`/requests/${id}`, payload);
+    return data;
+  },
+
+  hold: async (id: string, remarks?: string): Promise<void> => {
+    await api.post(`/requests/${id}/hold`, { remarks });
+  },
+
+  resume: async (id: string, remarks?: string): Promise<void> => {
+    await api.post(`/requests/${id}/resume`, { remarks });
+  },
+
+  cancel: async (id: string, remarks?: string): Promise<void> => {
+    await api.post(`/requests/${id}/cancel`, { remarks });
+  },
+
+  reopen: async (id: string, remarks?: string): Promise<void> => {
+    await api.post(`/requests/${id}/reopen`, { remarks });
+  },
+
+  getPayment: async (id: string): Promise<PaymentDetails | null> => {
+    const { data } = await api.get<PaymentDetails | null>(`/requests/${id}/payment`);
+    return data;
+  },
+
+  savePayment: async (id: string, payload: PaymentPayload): Promise<PaymentDetails> => {
+    // Strip empty strings so date fields aren't sent as "" (FastAPI rejects "" for Optional[date]).
+    const clean = Object.fromEntries(Object.entries(payload).filter(([, v]) => v !== ""));
+    const { data } = await api.post<PaymentDetails>(`/requests/${id}/payment`, clean);
+    return data;
+  },
+
+  processPayment: async (id: string): Promise<void> => {
+    await api.post(`/requests/${id}/payment/process`);
+  },
+
+  // Works on locked (processed) records — recording the final ship date is the
+  // designed post-lock action that stops Cost of Fund accrual.
+  saveShipDate: async (id: string, shipDate: string): Promise<PaymentDetails> => {
+    const { data } = await api.post<PaymentDetails>(`/requests/${id}/payment/ship-date`, {
+      ship_date: shipDate,
+    });
+    return data;
+  },
+
+  updateRemarks: async (id: string, remarks: string): Promise<void> => {
+    await api.post(`/requests/${id}/remarks`, { remarks: remarks || null });
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/requests/${id}`);
+  },
+
+  homQueue: async (): Promise<DepositRequest[]> => {
+    const { data } = await api.get<DepositRequest[]>("/requests/hom-queue");
+    return data;
+  },
+
+  homApprove: async (id: string, remarks?: string): Promise<void> => {
+    await api.post(`/requests/${id}/hom-approve`, { remarks });
+  },
+
+  homReject: async (id: string, remarks?: string): Promise<void> => {
+    await api.post(`/requests/${id}/hom-reject`, { remarks });
+  },
+
+  myActivity: async (limit = 50): Promise<ActivityItem[]> => {
+    const { data } = await api.get<ActivityItem[]>(`/requests/my-activity?limit=${limit}`);
+    return data;
+  },
+
+  myFieldVisibility: async (): Promise<Record<string, boolean>> => {
+    const { data } = await api.get<Record<string, boolean>>("/requests/my-field-visibility");
+    return data;
+  },
+};
+
+export default requestService;

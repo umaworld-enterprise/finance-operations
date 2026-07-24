@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Advance Deposit Tracker — Release Notes (July 2026)</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 10.5pt; }
+  body {
+    font-family: "Segoe UI", -apple-system, Roboto, Arial, sans-serif;
+    color: #1c2733; line-height: 1.55; background: #fff;
+  }
+  :root {
+    --navy: #1a3155; --navy2: #27466f; --accent: #2f6fb0;
+    --muted: #5b6b7c; --line: #d8dfe8; --bg: #f2f5f9; --good: #1d7a46; --bad: #b03030;
+  }
+  .page-break { page-break-before: always; }
+  h1, h2, h3, h4 { color: var(--navy); font-weight: 650; line-height: 1.25; }
+  h1 { font-size: 21pt; }
+  h2 { font-size: 14.5pt; margin: 0 0 10px 0; padding-bottom: 6px; border-bottom: 2.5px solid var(--navy); }
+  h3 { font-size: 11.5pt; margin: 16px 0 6px 0; color: var(--navy2); }
+  p { margin: 0 0 9px 0; }
+  ul, ol { margin: 0 0 10px 20px; }
+  li { margin-bottom: 4px; }
+  strong { color: #10202f; }
+  code {
+    font-family: Consolas, "Courier New", monospace; font-size: 9pt;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 14px 0; font-size: 9.4pt; page-break-inside: avoid; }
+  th { background: var(--navy); color: #fff; text-align: left; padding: 6px 9px; font-weight: 600; }
+  td { border: 1px solid var(--line); padding: 5.5px 9px; vertical-align: top; }
+  tr:nth-child(even) td { background: #f7f9fc; }
+  .kicker { letter-spacing: 2.5px; text-transform: uppercase; font-size: 9pt; color: var(--accent); font-weight: 700; }
+  .section-num { color: var(--accent); margin-right: 8px; }
+  .callout {
+    border-left: 4px solid var(--accent); background: var(--bg);
+    padding: 9px 13px; margin: 10px 0 13px 0; border-radius: 0 6px 6px 0; page-break-inside: avoid;
+  }
+  .callout.good { border-left-color: var(--good); }
+  .callout.warn { border-left-color: #c07f1f; }
+  .cover { text-align: center; padding-top: 130px; page-break-after: always; }
+  .cover .rule { width: 90px; height: 4px; background: var(--accent); margin: 26px auto; }
+  .cover h1 { font-size: 27pt; margin: 14px 0 6px 0; }
+  .cover .sub { font-size: 13pt; color: var(--muted); }
+  .cover .meta { margin-top: 110px; color: var(--muted); font-size: 10pt; line-height: 1.9; }
+  .small { font-size: 9pt; color: var(--muted); }
+  .tag { display: inline-block; font-size: 8pt; font-weight: 700; letter-spacing: 0.5px;
+    padding: 1px 8px; border-radius: 10px; background: var(--navy); color: #fff; vertical-align: 2px; }
+  .date { font-size: 9pt; color: var(--muted); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<!-- ================= COVER ================= -->
+<div class="cover">
+  <div class="kicker">Product Update &nbsp;·&nbsp; For Client Review</div>
+  <h1>Advance Deposit Tracker</h1>
+  <div class="sub">Release Notes — July 2026</div>
+  <div class="rule"></div>
+  <div class="sub" style="font-size:11pt;">Everything delivered in the 9–11 July 2026 update cycle,<br>in plain language — what changed, why, and what to expect</div>
+  <div class="meta">
+    Document type: Release Notes<br>
+    Version 1.1 &nbsp;·&nbsp; 11 July 2026<br>
+    Covers production releases of 9–11 July 2026<br>
+    Companion documents: “Formula &amp; Calculation Reference” (v2.3)
+  </div>
+</div>
+
+<!-- ================= 1. COST OF FUND ================= -->
+<div>
+  <h2><span class="section-num">1</span>Cost of Fund — your confirmed rule, live <span class="tag">10 JUL</span></h2>
+  <p>The Cost of Fund calculation now follows the rule confirmed with you, verified against all
+  534 rows of your own analysis sheet:</p>
+  <ul>
+    <li><strong>Zero within grace.</strong> Nothing is charged while a shipment stays within the
+    10-day grace window after its Estimated ETD.</li>
+    <li><strong>Retroactive once grace is exceeded.</strong> The moment the grace period is missed,
+    the charge counts from the Estimated ETD itself (the full delay, not just the days past grace).</li>
+    <li><strong>Early shipment = notional gain.</strong> Shipping before the Estimated ETD shows a
+    negative amount, exactly as in your sheet.</li>
+    <li><strong>12% per annum</strong>, matching your sheet (previously 18%). Both the rate and the
+    grace days remain admin-configurable.</li>
+    <li>Unshipped orders accrue day by day once past grace, so exposure stays visible and current.</li>
+  </ul>
+  <p class="small">One deliberate difference from your sheet: shipments arriving within grace show 0
+  in the system, whereas the sheet charges them a small amount. This follows the rule you confirmed
+  on 10 July. All historical records were recalculated under the new rule.</p>
+
+  <h3>Recording the Ship Date — stopping the charge <span class="tag">10 JUL</span></h3>
+  <p>Payment is processed (and the record locked) long before goods actually ship — previously that
+  meant nobody could enter the real ship date, so the Cost of Fund kept accruing forever. Now:</p>
+  <ul>
+    <li>The <strong>Ship Date has its own dedicated box</strong> on the payment page that stays open
+    <strong>even after the record is locked</strong>.</li>
+    <li><strong>Super Admin, Finance Admin and Accounts Team</strong> can enter — or correct — it at
+    any time. Every entry is written to the audit trail with the old and new value and who made it.</li>
+    <li>The moment the date is saved, the Cost of Fund freezes at that date (or becomes a notional
+    gain if the date beat the Estimated ETD).</li>
+    <li>Finance Admins can now open the payment detail page (read-only apart from the Ship Date),
+    reaching it through the Analytics screens.</li>
+  </ul>
+
+  <h3>Shown in the transaction's own currency <span class="tag">10 JUL</span></h3>
+  <p>A EUR request's Cost of Fund now displays as <strong>€…</strong>, a CNY request's as
+  <strong>¥…</strong> — matching its deposit, everywhere a per-request figure appears. (The amount was
+  always computed correctly in the request's currency; only the symbol was previously shown as $.)
+  Company-wide “Total Cost of Fund” tiles still sum all currencies together and are indicative —
+  the per-currency views remain the authoritative monetary breakdowns.</p>
+</div>
+
+<!-- ================= 2. FINDING REQUESTS ================= -->
+<div class="page-break">
+  <h2><span class="section-num">2</span>Finding requests — search, sort &amp; the invoice number <span class="tag">10–11 JUL</span></h2>
+
+  <h3>Search on every request list</h3>
+  <p>A search box now sits above the tables on the Merchandiser “My Requests” page, the Accounts
+  payment queue (serving the Pending / On Hold / All tabs), the HoM approval queue, the Admin
+  Overview table, the User Management page, and the analytics drill-down views. One box matches:</p>
+  <ul>
+    <li>Request # (ADT-…)</li>
+    <li>Sunshine Invoice #</li>
+    <li>Supplier Invoice #</li>
+    <li>Supplier name</li>
+    <li>Customer name</li>
+  </ul>
+  <p>Results narrow as you type; the × clears back to the full list.</p>
+
+  <h3>Sort options</h3>
+  <p>Next to each search box: <strong>Newest first · Oldest first · Largest amount first ·
+  Smallest amount first</strong>. Sorting is correct across pages on the large lists. The accounts
+  <em>Pending</em> queue keeps its “oldest first — process in order” discipline until someone
+  actively chooses a different order.</p>
+
+  <h3>Sunshine Invoice # as the visible number</h3>
+  <p>All request list tables now show the <strong>Sunshine Invoice #</strong> as the identifying
+  number once Accounts enters it. Until then the internal request number (ADT-YYYY-NNNNN) stands in,
+  so no row is ever blank. The ADT number remains the permanent reference on detail pages, audit
+  logs, notifications and report exports — and the search box finds a request by either number.</p>
+
+  <h3>Invoice number corrections — Super Admin only, fully tracked <span class="tag">11 JUL</span></h3>
+  <p>Because the invoice number is now the visible identifier, changing it after a request exists is
+  a controlled action:</p>
+  <ul>
+    <li><strong>Only a Super Admin can update</strong> the Sunshine Invoice # or Supplier Invoice #
+    on an existing request — every other role is refused by the system itself, not just the screen.
+    Entering the numbers when a request is first created is unchanged.</li>
+    <li>A dedicated <strong>“Invoice Numbers”</strong> panel on the request's payment page (visible
+    to Super Admins only) is where corrections are made — it works even on locked, processed
+    records.</li>
+    <li><strong>Every change is written to the audit log</strong> showing the old value, the new
+    value, who made the change and when — visible under Admin → Audit Logs and included in the
+    audit CSV export.</li>
+  </ul>
+</div>
+
+<!-- ================= 3. DASHBOARDS ================= -->
+<div>
+  <h2 style="margin-top:22px;"><span class="section-num">3</span>Dashboards — drill-down from the numbers <span class="tag">11 JUL</span></h2>
+  <p>On the Admin Overview, the headline cards are now clickable:</p>
+  <table>
+    <tr><th style="width:30%">Card</th><th>Clicking it opens</th></tr>
+    <tr><td>Total Requests</td><td>The full All Requests table (searchable, sortable, filterable by status)</td></tr>
+    <tr><td>Active Users</td><td>User Management, now with its own search (name / email / role)</td></tr>
+    <tr><td>Overdue Shipments</td><td>The list of exactly those overdue requests, with search</td></tr>
+  </table>
+</div>
+
+<!-- ================= 4. NOTIFICATIONS ================= -->
+<div>
+  <h2 style="margin-top:22px;"><span class="section-num">4</span>Notifications &amp; mobile <span class="tag">10 JUL</span></h2>
+  <ul>
+    <li><strong>Payment notifications with the TT copy.</strong> When Accounts processes a payment and
+    uploads the bank's TT copy, the requesting merchandiser is notified instantly — in-app bell and a
+    push notification on their phone — with the document link attached. A fallback notice goes out if
+    the TT copy hasn't been uploaded within an hour of processing.</li>
+    <li><strong>Full notifications page.</strong> The bell's quick view now opens into a dedicated
+    page listing every notification with paging, unread indicators, TT-copy links and mark-all-read.</li>
+    <li><strong>Push opt-in.</strong> After signing in, every user is invited once to enable push
+    notifications; a small reminder appears later for those who skipped it, and it can always be
+    turned on from Settings.</li>
+    <li><strong>Mobile app polish.</strong> On phones with the app installed, the page header no longer
+    sits under the phone's clock/status bar, and the notification panel no longer overflows the screen
+    edge.</li>
+  </ul>
+</div>
+
+<!-- ================= 5. PRIVACY ================= -->
+<div>
+  <h2 style="margin-top:22px;"><span class="section-num">5</span>Data privacy — analytics scoped by role <span class="tag">11 JUL</span></h2>
+  <p>A review found that two analytics views — the month-on-month trend charts and the shipment
+  KPIs — showed <strong>company-wide</strong> figures to merchandisers. This is fixed:
+  <strong>merchandisers now see only their own requests</strong> in every analytics number, chart and
+  trend, consistent with the rest of the system. Admin, Finance and Accounts views are unchanged
+  (still company-wide). Access to the specialised analytics tabs remains controlled per role from
+  Admin → Analytics Access.</p>
+</div>
+
+<!-- ================= SUMMARY TABLE ================= -->
+<div class="page-break">
+  <h2><span class="section-num">6</span>Release summary</h2>
+  <table>
+    <tr><th style="width:14%">Date</th><th>Change</th></tr>
+    <tr><td class="date">9 Jul 2026</td><td>Payment notifications with TT copy link (bell + push); Settings page with font size &amp; push toggle</td></tr>
+    <tr><td class="date">10 Jul 2026</td><td>Cost of Fund aligned to your sheet (12%, from Estimated ETD, signed) and grace rule applied (zero within grace, retroactive past it); all historical records recalculated</td></tr>
+    <tr><td class="date">10 Jul 2026</td><td>Mobile status-bar fix; full notifications page; push opt-in prompt</td></tr>
+    <tr><td class="date">10 Jul 2026</td><td>Ship Date recordable after payment lock (Super Admin / Finance Admin / Accounts) — stops Cost of Fund; audited</td></tr>
+    <tr><td class="date">10 Jul 2026</td><td>Cost of Fund displayed in each request's own currency</td></tr>
+    <tr><td class="date">10 Jul 2026</td><td>Search on all request lists; Sunshine Invoice # shown as the list identifier (ADT number as fallback)</td></tr>
+    <tr><td class="date">11 Jul 2026</td><td>Sort options (newest / oldest / largest / smallest amount); Admin Overview cards drill into searchable lists; search on User Management and analytics drill-downs</td></tr>
+    <tr><td class="date">11 Jul 2026</td><td>Privacy fix: merchandiser analytics scoped to their own requests only</td></tr>
+    <tr><td class="date">11 Jul 2026</td><td>Invoice number updates restricted to Super Admin, with old → new values recorded in the audit log</td></tr>
+  </table>
+
+  <p class="small" style="margin-top:26px; border-top:1px solid var(--line); padding-top:10px;">
+    Advance Deposit Tracker — Release Notes · v1.1 · 11 July 2026 ·
+    Companion document: “Advance Deposit Tracker — Formula &amp; Calculation Reference” (v2.3),
+    which specifies every formula in the system for line-by-line confirmation.
+  </p>
+</div>
+
+</body>
+</html>

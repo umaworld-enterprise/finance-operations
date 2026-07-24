@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Advance Deposit Tracker — Formula &amp; Calculation Reference</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 10.5pt; }
+  body {
+    font-family: "Segoe UI", -apple-system, Roboto, Arial, sans-serif;
+    color: #1c2733; line-height: 1.55; background: #fff;
+  }
+  :root {
+    --navy: #1a3155; --navy2: #27466f; --accent: #2f6fb0;
+    --muted: #5b6b7c; --line: #d8dfe8; --bg: #f2f5f9; --good: #1d7a46; --bad: #b03030;
+  }
+  .page-break { page-break-before: always; }
+  h1, h2, h3, h4 { color: var(--navy); font-weight: 650; line-height: 1.25; }
+  h1 { font-size: 21pt; }
+  h2 { font-size: 14.5pt; margin: 0 0 10px 0; padding-bottom: 6px; border-bottom: 2.5px solid var(--navy); }
+  h3 { font-size: 11.5pt; margin: 16px 0 6px 0; color: var(--navy2); }
+  p { margin: 0 0 9px 0; }
+  ul, ol { margin: 0 0 10px 20px; }
+  li { margin-bottom: 4px; }
+  strong { color: #10202f; }
+  code {
+    font-family: Consolas, "Courier New", monospace; font-size: 9pt;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 14px 0; font-size: 9.4pt; page-break-inside: avoid; }
+  th { background: var(--navy); color: #fff; text-align: left; padding: 6px 9px; font-weight: 600; }
+  td { border: 1px solid var(--line); padding: 5.5px 9px; vertical-align: top; }
+  tr:nth-child(even) td { background: #f7f9fc; }
+  .kicker { letter-spacing: 2.5px; text-transform: uppercase; font-size: 9pt; color: var(--accent); font-weight: 700; }
+  .section-num { color: var(--accent); margin-right: 8px; }
+  .callout {
+    border-left: 4px solid var(--accent); background: var(--bg);
+    padding: 9px 13px; margin: 10px 0 13px 0; border-radius: 0 6px 6px 0; page-break-inside: avoid;
+  }
+  .callout.good { border-left-color: var(--good); }
+  .callout.warn { border-left-color: #c07f1f; }
+  .formula {
+    font-family: Consolas, "Courier New", monospace; font-size: 9.6pt;
+    background: var(--bg); border: 1px solid var(--line); border-left: 4px solid var(--navy);
+    border-radius: 0 6px 6px 0; padding: 10px 14px; margin: 8px 0 12px 0;
+    white-space: pre; line-height: 1.6; page-break-inside: avoid; overflow-x: hidden;
+  }
+  .toc-item { display: flex; padding: 5px 0; border-bottom: 1px dotted var(--line); font-size: 10.5pt; }
+  .toc-item .n { color: var(--accent); font-weight: 700; width: 30px; }
+  .cover { text-align: center; padding-top: 130px; page-break-after: always; }
+  .cover .rule { width: 90px; height: 4px; background: var(--accent); margin: 26px auto; }
+  .cover h1 { font-size: 27pt; margin: 14px 0 6px 0; }
+  .cover .sub { font-size: 13pt; color: var(--muted); }
+  .cover .meta { margin-top: 110px; color: var(--muted); font-size: 10pt; line-height: 1.9; }
+  .small { font-size: 9pt; color: var(--muted); }
+  .tag { display: inline-block; font-size: 8pt; font-weight: 700; letter-spacing: 0.5px;
+    padding: 1px 8px; border-radius: 10px; background: var(--navy); color: #fff; vertical-align: 2px; }
+</style>
+</head>
+<body>
+
+<!-- ================= COVER ================= -->
+<div class="cover">
+  <div class="kicker">System Reference &nbsp;·&nbsp; For Client Sign-off</div>
+  <h1>Advance Deposit Tracker</h1>
+  <div class="sub">Formula &amp; Calculation Reference</div>
+  <div class="rule"></div>
+  <div class="sub" style="font-size:11pt;">Every formula, threshold and derived value in the system,<br>documented for joint review and confirmation</div>
+  <div class="meta">
+    Document type: Calculation Specification<br>
+    Version 2.3 &nbsp;·&nbsp; 11 July 2026<br>
+    Reflects production as deployed on 11-Jul-2026 — Cost of Fund per the client-confirmed grace rule<br>
+    (zero within grace, retroactive from Estimated ETD once exceeded, early-shipment gains kept),<br>
+    the Ship Date entry rule that stops the charge (recordable even after payment lock),<br>
+    per-currency Cost of Fund display, and role-scoped analytics (merchandisers see own data only)
+  </div>
+</div>
+
+<!-- ================= TOC ================= -->
+<div>
+  <h2>Table of Contents</h2>
+  <div class="toc-item"><span class="n">1</span><span>Conventions &amp; Configurable Parameters</span></div>
+  <div class="toc-item"><span class="n">2</span><span>Request Intake — Deposits &amp; Numbering</span></div>
+  <div class="toc-item"><span class="n">3</span><span>Shipment Risk — Grace ETD, Overdue Days, Risk Status</span></div>
+  <div class="toc-item"><span class="n">4</span><span>Cost of Fund (Client rule — 10-Jul-2026)</span></div>
+  <div class="toc-item"><span class="n">5</span><span>Payment Timing Metrics</span></div>
+  <div class="toc-item"><span class="n">6</span><span>Dashboard &amp; Analytics Aggregations</span></div>
+  <div class="toc-item"><span class="n">7</span><span>Supplier Auto-Flagging Rule</span></div>
+  <div class="toc-item"><span class="n">8</span><span>Report Exports — Computed Columns</span></div>
+  <div class="toc-item"><span class="n">9</span><span>What the System Deliberately Does NOT Calculate</span></div>
+
+  <div class="callout" style="margin-top:24px;">
+    <strong>Purpose of this document.</strong> It lists every formula the platform uses so we can confirm,
+    line by line, that the system's mathematics matches your business intent. A short companion
+    document — the <em>Formula Confirmation Questionnaire</em> — collects the handful of points where
+    we would like your explicit confirmation.
+  </div>
+  <p class="small">Conventions: all day counts are <strong>calendar days</strong>; <em>today</em> means the
+  server date at calculation time; amounts are rounded to 2 decimals at the end of each formula;
+  soft-deleted requests are excluded from every calculation and report.</p>
+</div>
+
+<!-- ================= 1. CONFIG ================= -->
+<div class="page-break">
+  <h2><span class="section-num">1</span>Conventions &amp; Configurable Parameters</h2>
+  <p>Three business parameters drive the risk and cost formulas. They are stored in system
+  configuration and editable by a Super Admin without code changes:</p>
+  <table>
+    <tr><th style="width:26%">Parameter</th><th style="width:14%">Current value</th><th>Meaning &amp; where it is used</th></tr>
+    <tr><td><code>etd_grace_days</code></td><td><strong>10</strong> days</td><td>Grace period added to the supplier's Estimated ETD to form the <strong>Grace ETD</strong>. Drives overdue days, risk status, auto-flagging — and acts as the <strong>threshold</strong> for Cost of Fund: nothing is charged within grace; once exceeded, the charge counts retroactively from the Estimated ETD itself (Section 4).</td></tr>
+    <tr><td><code>cost_of_fund_rate</code></td><td><strong>0.12</strong> (12% p.a.)</td><td>Annual interest rate applied in the Cost of Fund formula. Changed from 18% to 12% on 10-Jul-2026 to match the rate used throughout your sheet.</td></tr>
+    <tr><td><code>cost_of_fund_grace_days</code></td><td>30 days</td><td><strong>No longer used.</strong> A leftover from the original payment-relative formula; kept in configuration only for compatibility.</td></tr>
+  </table>
+  <p>Snapshot refresh cadence: every request's metrics are recomputed automatically every
+  <strong>30 minutes</strong>, immediately after any payment entry/update, immediately after a request is
+  edited, and on demand via the <strong>Recalculate</strong> button (Super Admin / Finance Admin).</p>
+</div>
+
+<!-- ================= 2. INTAKE ================= -->
+<div>
+  <h2 style="margin-top:22px;"><span class="section-num">2</span>Request Intake — Deposits &amp; Numbering</h2>
+
+  <h3>2.1 Deposit amount and deposit percentage</h3>
+  <p>The two fields are captured <strong>independently</strong> — the system does not derive one from the
+  other on the in-app or public forms. Validation: <code>0 &lt; deposit_percentage ≤ 100</code>;
+  <code>deposit_amount &gt; 0</code>; <code>total_supplier_invoice_amount &gt; 0</code>.</p>
+  <div class="formula">Balance (%) shown on forms = 100 − Deposit %          (display only, not stored)</div>
+  <p>The one channel that auto-computes the amount is the <strong>Google Form integration</strong>:</p>
+  <div class="formula">Deposit Amount (Google Form intake) = round( Total Supplier Invoice Amount × Deposit % ÷ 100 , 2 )</div>
+
+  <h3>2.2 Fixed deposit suppliers</h3>
+  <p>If a supplier has a <strong>fixed deposit amount</strong> configured in the supplier master, both forms
+  force the deposit amount to that value, clear the percentage, and lock the field. No arithmetic —
+  a straight substitution.</p>
+
+  <h3>2.3 Request numbering</h3>
+  <div class="formula">Request # = ADT-{year}-{5-digit sequence}     e.g. ADT-2026-00417
+sequence  = highest existing number for that year + 1   (concurrency-safe)</div>
+</div>
+
+<!-- ================= 3. SHIPMENT RISK ================= -->
+<div class="page-break">
+  <h2><span class="section-num">3</span>Shipment Risk — Grace ETD, Overdue Days, Risk Status</h2>
+
+  <h3>3.1 Grace ETD</h3>
+  <div class="formula">Grace ETD = Estimated ETD + etd_grace_days            (currently +10 calendar days)</div>
+  <p>If a request has no Estimated ETD, no risk metrics can be computed and its status is
+  <em>pending</em>.</p>
+
+  <h3>3.2 Overdue days (the central risk metric)</h3>
+  <div class="formula">reference date = Actual Shipment Date   (once recorded by Accounts)
+                 otherwise today                (keeps counting daily)
+
+Overdue Days = max( reference date − Grace ETD , 0 )</div>
+  <p>Once the actual shipment date is recorded, the value <strong>freezes permanently</strong> at that
+  date. While unshipped it grows by one every day. This same number is used for the delay buckets,
+  supplier flagging and the NPA panel. (Cost of Fund uses grace only as a threshold — when charged,
+  the amount runs on the grace-free day count of Section 3.4, not this number.)</p>
+
+  <h3>3.3 Risk status classification</h3>
+  <table>
+    <tr><th style="width:22%">Status</th><th>Condition (on Overdue Days)</th></tr>
+    <tr><td><strong>Pending</strong></td><td>No Estimated ETD on the request (nothing to measure against)</td></tr>
+    <tr><td><strong>On Time</strong></td><td>Overdue Days = 0 (shipped, or still within Grace ETD)</td></tr>
+    <tr><td><strong>Delayed</strong></td><td>1 – 30 days overdue</td></tr>
+    <tr><td><strong>Critical</strong></td><td>More than 30 days overdue</td></tr>
+  </table>
+
+  <h3>3.4 Actual ETD Overdue Days <span class="tag">ALIGNED 10-JUL-2026</span></h3>
+  <div class="formula">Actual ETD Overdue Days = ( Actual Shipment Date, or Today while unshipped ) − Estimated ETD</div>
+  <p>This is your sheet's "Actual ETD Overdue Days" column, reproduced exactly. In plain words:
+  <strong>how many days late (or early) did the shipment actually run against the supplier's promise</strong>
+  — with no grace period applied.</p>
+  <ul>
+    <li><strong>Signed:</strong> shipped 7 days <em>before</em> the Estimated ETD → <strong>−7</strong>. A negative number means the supplier beat their promise.</li>
+    <li><strong>Accrues daily while unshipped</strong> — grows by one every day past the Estimated ETD.</li>
+    <li><strong>Freezes at the shipment date</strong> once Accounts records it.</li>
+    <li>This is the day count that feeds Cost of Fund (Section 4).</li>
+  </ul>
+</div>
+
+<!-- ================= 4. COST OF FUND ================= -->
+<div class="page-break">
+  <h2><span class="section-num">4</span>Cost of Fund <span class="tag">CLIENT RULE — 10-JUL-2026</span></h2>
+  <p>Confirmed with the client on 10-Jul-2026. The 10-day grace period acts as a
+  <strong>threshold</strong>: nothing is charged while the shipment stays within grace — but the moment
+  grace is exceeded, the charge kicks in and counts <strong>from the Estimated ETD itself</strong>
+  (day 1, not day 11).</p>
+
+  <div class="formula">While within grace (shipped, or waiting, up to Estimated ETD + 10 days):
+
+    Cost of Fund = 0
+
+Once the grace period is exceeded:
+
+    Cost of Fund = Deposit Amount × 12% × ( (Actual Shipment Date or Today) − Estimated ETD ) ÷ 365
+
+Shipped EARLY (before the Estimated ETD):
+
+    same formula — the day count is negative, giving a negative Cost of Fund (a notional gain)</div>
+
+  <p>In plain words: <strong>if the supplier stays inside the grace window nothing is charged; once they
+  miss it, the charge is the interest the deposit money would have earned (at 12% per year) over the
+  full delay measured from the promised ETD — and beating the ETD earns a notional gain.</strong></p>
+  <ul>
+    <li><strong>Within grace → zero.</strong> ETD 7-Jul → grace runs until 17-Jul; shipping (or waiting) up
+    to 17-Jul costs nothing.</li>
+    <li><strong>Grace exceeded → retroactive.</strong> Shipping on 18-Jul is charged for the full 11 days
+    since 7-Jul, not just 1 day.</li>
+    <li><strong>Shipped early → negative "notional gain"</strong> (e.g. shipping 6 days before ETD shows a
+    negative amount), exactly as in your sheet.</li>
+    <li><strong>Not yet shipped → 0 until grace runs out, then accrues daily</strong> from the Estimated ETD,
+    so exposure stays visible and grows day by day.</li>
+    <li><strong>Shipment date recorded → frozen.</strong> The figure never changes again
+    (see <em>When does the charge stop?</em> below).</li>
+    <li><strong>No advance paid yet → 0.</strong> No capital is locked, so no cost of fund.</li>
+    <li>Rounded to 2 decimals. The 12% p.a. rate and the 10-day grace are admin-configurable, no code
+    change needed.</li>
+    <li><strong>Shown in the request's own currency.</strong> A EUR request's Cost of Fund appears as
+    €…, a CNY request's as ¥…, matching its deposit amount (since 10-Jul-2026). Company-wide
+    "Total Cost of Fund" tiles still sum across all currencies — see the note in Section 6.</li>
+  </ul>
+
+  <h3>When does the charge stop? — recording the Ship Date</h3>
+  <p>The charge (or the daily accrual on an unshipped order) stops the moment the <strong>actual
+  Ship Date</strong> is entered into the system: the day count freezes at that date and the Cost of
+  Fund never moves again. Because the payment is processed — and the record locked — long before the
+  goods actually ship, the Ship Date is <strong>deliberately kept open for entry and correction even
+  after the record is locked</strong>. It has its own dedicated box on the request's payment page.</p>
+  <ul>
+    <li><strong>Who can record it:</strong> anyone from the Super Admin, Finance Admin or Accounts Team.</li>
+    <li><strong>When:</strong> at any time — before or after the payment is processed and locked. This is
+    the only detail that stays editable on a locked record (alongside the TT copy).</li>
+    <li><strong>Corrections:</strong> allowed; every entry and change is written to the audit trail with
+    the old and the new date, and by whom.</li>
+    <li><strong>Effect is immediate:</strong> the Cost of Fund recalculates the moment the date is saved —
+    frozen at the recorded date, or shown as a notional gain if that date beat the Estimated ETD.</li>
+  </ul>
+
+  <h3>Worked examples (real rows from your own sheet)</h3>
+  <table>
+    <tr><th>Scenario</th><th>Deposit</th><th>Estimated ETD</th><th>Shipped</th><th>Days</th><th>Cost of Fund</th></tr>
+    <tr><td>Shipped late, past grace</td><td>49,059.00</td><td>16-Jan-2026</td><td>08-Feb-2026</td><td>+23</td><td><strong>370.97</strong></td></tr>
+    <tr><td>Shipped late but within grace</td><td>8,424.00</td><td>15-Jan-2026</td><td>25-Jan-2026</td><td>+10</td><td><strong>0.00</strong></td></tr>
+    <tr><td>Shipped early (notional gain)</td><td>5,832.00</td><td>15-Jan-2026</td><td>23-Dec-2025</td><td>−23</td><td><strong>−44.10</strong></td></tr>
+    <tr><td>Shipped exactly on ETD</td><td>7,446.13</td><td>31-Dec-2025</td><td>31-Dec-2025</td><td>0</td><td><strong>0.00</strong></td></tr>
+    <tr><td>Not yet shipped (as of 10-Jul-2026)</td><td>30,294.00</td><td>05-Jan-2026</td><td>—</td><td>+186</td><td><strong>1,852.50</strong></td></tr>
+  </table>
+  <p class="small">These rows — and more covering every scenario, including the grace boundary itself —
+  are encoded as automated tests in the codebase, so any future code change that alters a result will
+  fail the build.</p>
+
+  <div class="callout warn">
+    <strong>One deliberate difference from your sheet.</strong> Your sheet charges Cost of Fund even on
+    shipments that arrive within the 10-day grace (e.g. it shows 27.70 on the 10-day row above). Per the
+    rule confirmed on 10-Jul-2026, the system shows <strong>0</strong> for those rows. Everything else —
+    late shipments past grace, early-shipment gains, unshipped accrual — matches your sheet to the cent
+    (originally verified against all 534 rows).
+  </div>
+
+  <div class="callout good">
+    <strong>Single source of truth.</strong> Cost of Fund is computed in exactly one function and stored
+    once per request. The Payment Queue snapshot, the HoM dashboard, all analytics tabs, charts and
+    report exports read that same stored value — they cannot disagree. It recalculates immediately when
+    a payment or shipment date is saved, when a request is edited, every 30 minutes automatically, and on
+    the Recalculate button.
+  </div>
+
+  <div class="callout warn">
+    <strong>One thing to be aware of:</strong> your sheet's <em>dashboard</em> tab contains a few
+    aggregation quirks (summary ranges that stop partway down the data, fixed percentage denominators)
+    that we deliberately did not copy. The system computes its totals from the same row-level values, so
+    small differences against your sheet's dashboard percentages are the sheet's quirks — the row-level
+    figures match exactly.
+  </div>
+
+  <h3>“Notional Gain / Loss” on dashboards</h3>
+  <p>Everywhere a “Notional Gain” figure appears (overdue KPI tiles, delay buckets, by-merchandiser /
+  vertical / customer tables) it is simply the <strong>sum of Cost of Fund</strong> over the rows in that
+  group, split per currency. It is the same number under a different label, not a separate formula.</p>
+</div>
+
+<!-- ================= 5. PAYMENT METRICS ================= -->
+<div class="page-break">
+  <h2><span class="section-num">5</span>Payment Timing Metrics</h2>
+  <table>
+    <tr><th style="width:30%">Metric</th><th>Formula</th><th style="width:32%">Where shown</th></tr>
+    <tr><td>Payment-to-Ship Days</td><td><code>Actual Shipment Date − Payment Date</code> (only when both exist)</td><td>Analytics table “Pmt→Ship”; Delay report; summary average</td></tr>
+    <tr><td>Payment-to-Request Days</td><td><code>Payment Date − Request Created Date</code></td><td>Analytics table “Pmt→Request”</td></tr>
+    <tr><td>Avg Payment-to-Ship</td><td><code>AVERAGE(Payment-to-Ship Days)</code> over the filtered set</td><td>Analytics summary KPI</td></tr>
+  </table>
+</div>
+
+<!-- ================= 6. AGGREGATIONS ================= -->
+<div>
+  <h2 style="margin-top:22px;"><span class="section-num">6</span>Dashboard &amp; Analytics Aggregations</h2>
+  <p>“Overdue” in every aggregate below means <strong>Overdue Days &gt; 0</strong> (Section 3.2).
+  Monetary sums are kept <strong>per currency</strong> (USD / CNY / EUR columns) — see Section 9.</p>
+
+  <div class="callout">
+    <strong>Who sees these numbers (role scoping, since 11-Jul-2026).</strong> Every analytics figure —
+    summary KPIs, per-request table, monthly MoM/YTD trends and shipment KPIs — respects the viewer's
+    role: <strong>merchandisers see only their own requests</strong> (submitted in-app or via the public
+    form with their registered email); admin, finance and accounts roles see company-wide figures.
+    Access to the specialised tabs (overdue by currency, delay buckets, by-merchandiser/vertical/customer)
+    is additionally controlled per role from Admin → Analytics Access.
+  </div>
+
+  <div class="callout warn">
+    <strong>Cross-currency totals.</strong> Per-request Cost of Fund is always displayed in the request's
+    own currency. Single-figure tiles such as "Total Cost of Fund" sum ALL currencies together and are
+    indicative only — the per-currency breakdowns (Section 6.2 buckets, overdue-by-currency KPIs) are the
+    authoritative monetary views.
+  </div>
+
+  <h3>6.1 Summary KPIs</h3>
+  <table>
+    <tr><th style="width:34%">KPI</th><th>Definition</th></tr>
+    <tr><td>Total Requests</td><td>Count of all (non-deleted) requests in the filter</td></tr>
+    <tr><td>Pending Payment / Processed</td><td>Counts by current workflow status</td></tr>
+    <tr><td>Total Deposit Exposure</td><td>Sum of deposit amounts</td></tr>
+    <tr><td>Overdue Shipments</td><td>Count of requests with Overdue Days &gt; 0</td></tr>
+    <tr><td>Total Cost of Fund</td><td>Sum of Cost of Fund (Section 4)</td></tr>
+  </table>
+
+  <h3>6.2 Delay buckets (aging analysis)</h3>
+  <p>Buckets on Overdue Days: <strong>Graced ETD</strong> (0 or not overdue), then 15-day ranges —
+  G-15, 15-30, 30-45, … 135-150 — extended automatically in further 15-day steps if any request is
+  more than 150 days overdue. A request falls in the bucket where
+  <code>lower &lt; Overdue Days ≤ upper</code>. Each bucket shows: case count, overdue deposit per
+  currency, notional (Cost of Fund) per currency, and</p>
+  <div class="formula">% of Delayed Cases = bucket cases ÷ total overdue cases × 100      (1 decimal)</div>
+
+  <h3>6.3 Breakdown tables (by Merchandiser / Vertical / Customer)</h3>
+  <p>Each groups the <em>overdue</em> requests and shows: overdue cases, overdue deposit per currency,
+  <code>Avg Delay = AVERAGE(Overdue Days)</code>, Notional Gain = sum of Cost of Fund. The
+  <strong>Contribution %</strong> denominators differ by tab (flagged in the companion questionnaire):</p>
+  <table>
+    <tr><th style="width:30%">Tab</th><th>Contribution % =</th></tr>
+    <tr><td>By Merchandiser</td><td>that merchandiser's overdue <strong>USD amount</strong> ÷ total overdue USD × 100</td></tr>
+    <tr><td>By Vertical</td><td>that vertical's overdue <strong>case count</strong> ÷ total overdue cases × 100</td></tr>
+    <tr><td>By Customer</td><td>that customer's overdue <strong>case count</strong> ÷ total overdue cases × 100</td></tr>
+  </table>
+
+  <h3>6.4 Monthly trends (MoM / YTD)</h3>
+  <div class="formula">MoM (per month, by request created date):
+  Total Overdue Days = SUM(Overdue Days)        Total Cost of Fund = SUM(Cost of Fund)
+
+YTD = running cumulative total of the MoM values, January → December</div>
+
+  <h3>6.5 Shipment KPIs</h3>
+  <table>
+    <tr><th style="width:34%">KPI</th><th>Definition</th></tr>
+    <tr><td>Total Active</td><td>All non-deleted requests</td></tr>
+    <tr><td>Shipped</td><td>Status = Payment Processed</td></tr>
+    <tr><td>Yet to Ship</td><td>Status = Pending Payment</td></tr>
+    <tr><td>Total Overdue</td><td>Overdue Days &gt; 0</td></tr>
+    <tr><td>ETD −10 Grace Days</td><td>Requests approaching their deadline (within the 10-day window before Grace ETD)</td></tr>
+  </table>
+
+  <h3>6.6 NPA panel (HoM dashboard)</h3>
+  <p><strong>Overdue Suppliers list:</strong> every supplier with at least one overdue request; shows
+  <code>Overdue Request Count</code> and <code>Max Overdue Days = MAX(Overdue Days)</code>, plus the flag
+  details when the supplier is formally flagged. <strong>Merchandiser performance:</strong> per
+  merchandiser — total requests, overdue count, and
+  <code>Avg Overdue Days = AVERAGE(Overdue Days, excluding zeros)</code>.</p>
+</div>
+
+<!-- ================= 7. AUTO-FLAG ================= -->
+<div class="page-break">
+  <h2><span class="section-num">7</span>Supplier Auto-Flagging Rule</h2>
+  <div class="formula">IF a request's Overdue Days &gt; 0            (even 1 day past Grace ETD)
+AND the supplier has no active default flag
+THEN flag the supplier automatically:
+     reason = "Auto-flagged: {N}d past ETD grace period"
+     outstanding amount = 0 · flagged date = today · marked as auto-flagged</div>
+  <ul>
+    <li>One active flag per supplier — repeated overdue requests do not create duplicates.</li>
+    <li>A flagged supplier's new requests are routed to <strong>Head of Merchandiser approval</strong> before entering the payment queue.</li>
+    <li>Flags are cleared manually via <strong>Resolve</strong> on the Supplier Risk page.</li>
+    <li>Cancelled and rejected requests can never trigger a flag.</li>
+  </ul>
+</div>
+
+<!-- ================= 8. REPORTS ================= -->
+<div>
+  <h2 style="margin-top:22px;"><span class="section-num">8</span>Report Exports — Computed Columns</h2>
+  <table>
+    <tr><th style="width:26%">Report</th><th>Included rows</th><th>Computed columns</th></tr>
+    <tr><td>Request report</td><td>All requests in date range</td><td>Overdue Days, Cost of Fund (from stored snapshot — no new math)</td></tr>
+    <tr><td>Cost of Fund report</td><td>Only rows where Cost of Fund applies (advance paid + Estimated ETD present)</td><td>Cost of Fund (signed — early shipments appear as negative gains), <strong>Delay Days</strong> (= the grace-based Overdue Days of Section 3.2, shown for risk context; the Cost of Fund amount itself uses the grace-free day count of Section 3.4), sorted highest cost first</td></tr>
+    <tr><td>Delay report</td><td>Only overdue rows</td><td>Grace ETD, Overdue Days, Payment-to-Ship Days, Risk Status</td></tr>
+    <tr><td>Supplier / Payment reports</td><td>—</td><td>Pass-through of stored values, no calculations</td></tr>
+  </table>
+  <p class="small">Date-range filters are inclusive of the full end day.</p>
+</div>
+
+<!-- ================= 9. NOT CALCULATED ================= -->
+<div>
+  <h2 style="margin-top:22px;"><span class="section-num">9</span>What the System Deliberately Does NOT Calculate</h2>
+  <ul>
+    <li><strong>No currency conversion.</strong> USD, CNY and EUR figures are always aggregated in
+    separate columns and never combined at a rate. The <em>Exchange Rate</em> field on a request is
+    stored and shown in reports for reference only — it is not used in any formula.</li>
+    <li><strong>Payment terms are descriptive.</strong> The Balance Due / payment-terms selection (T/T,
+    L/C, etc.) drives no calculation.</li>
+    <li><strong>Deposit % is not enforced against the amounts.</strong> On the in-app and public forms the
+    percentage and the deposit amount are entered independently; the system does not check
+    <code>amount = invoice × %</code> (only the Google Form channel auto-computes it).</li>
+    <li><strong>Outstanding amount on auto-flags is always 0.</strong> Only manual flags carry a
+    finance-entered outstanding amount.</li>
+  </ul>
+
+  <p class="small" style="margin-top:26px; border-top:1px solid var(--line); padding-top:10px;">
+    Advance Deposit Tracker — Formula &amp; Calculation Reference · v2.3 · 11 July 2026 ·
+    Reflects production deployment of 11-Jul-2026 (Cost of Fund per the client-confirmed grace rule;
+    Ship Date recordable post-lock by Super Admin / Finance Admin / Accounts Team to stop the charge;
+    Cost of Fund displayed in each request's own currency; analytics role-scoped so merchandisers see
+    only their own data; day counts and rate originally verified against the
+    "Sunshine Deposits Analysis V2-PWA" sheet, 534 rows).
+    Companion documents: “Advance Deposit Tracker — Engineering Case Study” (v1.2) and
+    “Advance Deposit Tracker — Formula Confirmation Questionnaire” (v1.0).
+  </p>
+</div>
+
+</body>
+</html>
