@@ -5,12 +5,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.database import get_db_session
 from app.core.dependencies import CurrentUser, get_current_user
+from app.core.rate_limit import limiter
 from app.schemas.auth import CurrentUserResponse, PreferencesUpdate, ProfileUpdate
 from app.services.user_service import UserService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+settings = get_settings()
 
 
 def _ip(req: Request) -> str | None:
@@ -19,6 +22,7 @@ def _ip(req: Request) -> str | None:
 
 
 @router.get("/me", response_model=CurrentUserResponse)
+@limiter.limit(settings.rate_limit_auth_default)
 async def get_me(
     request: Request,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
@@ -45,7 +49,9 @@ async def get_me(
 
 
 @router.patch("/preferences", response_model=CurrentUserResponse)
+@limiter.limit(settings.rate_limit_auth_default)
 async def update_preferences(
+    request: Request,
     data: PreferencesUpdate,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
@@ -74,7 +80,9 @@ async def update_preferences(
 
 
 @router.patch("/profile", response_model=CurrentUserResponse)
+@limiter.limit(settings.rate_limit_auth_default)
 async def complete_profile(
+    request: Request,
     data: ProfileUpdate,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db_session)],

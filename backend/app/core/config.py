@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     default_cost_of_fund_rate: float = 0.12
     default_cost_of_fund_grace_days: int = 30
 
+    # Rate limiting (slowapi "N/period" strings)
+    rate_limit_public_default: str = "20/minute"
+    rate_limit_public_submit: str = "5/minute"
+    rate_limit_ai_query: str = "15/minute"
+    rate_limit_auth_default: str = "60/minute"
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors(cls, value: str | list) -> list[str]:

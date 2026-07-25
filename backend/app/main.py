@@ -8,12 +8,15 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from app.core.config import get_settings
 from app.core.exceptions import AppError
 from app.core.logging import configure_logging, get_logger
+from app.core.rate_limit import limiter
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -143,12 +146,15 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ── GZip + Error envelope + CORS ──────────────────────────────────────────
+    app.state.limiter = limiter
+
+    # ── GZip + Error envelope + CORS + rate limiting ──────────────────────────
     # Order matters: add_middleware() prepends, so the LAST one added is
     # outermost. The envelope must be added before CORS so it sits INSIDE it —
     # its JSON 500s then pass through CORS and get their headers.
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(JSONErrorEnvelopeMiddleware)
+    app.add_middleware(SlowAPIMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -158,6 +164,17 @@ def create_app() -> FastAPI:
     )
 
     # ── Global error handlers ─────────────────────────────────────────────────
+    @app.exception_handler(RateLimitExceeded)
+    async def rate_limit_handler(_: Request, exc: RateLimitExceeded) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={
+                "error_code": "RATE_LIMITED",
+                "message": "Too many requests. Please slow down and try again shortly.",
+                "detail": str(exc.detail) if exc.detail else None,
+            },
+        )
+
     @app.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
         return JSONResponse(

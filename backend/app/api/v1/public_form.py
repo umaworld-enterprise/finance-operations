@@ -9,14 +9,16 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 
 from app.analytics.snapshot_job import seed_snapshot_for_request
 from pydantic import BaseModel, EmailStr, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.database import get_db_session
+from app.core.rate_limit import limiter
 import json
 
 from app.models.enums import CurrencyCode
@@ -26,6 +28,7 @@ from app.schemas.deposit_request import DepositRequestCreate
 from app.services.deposit_request_service import DepositRequestService
 
 router = APIRouter(prefix="/public", tags=["public-form"])
+settings = get_settings()
 
 DB = Annotated[AsyncSession, Depends(get_db_session)]
 
@@ -53,7 +56,8 @@ class PublicMasters(BaseModel):
 
 
 @router.get("/form-config")
-async def get_public_form_config(db: DB, response: Response) -> dict:
+@limiter.limit(settings.rate_limit_public_default)
+async def get_public_form_config(request: Request, db: DB, response: Response) -> dict:
     """Return the current field configuration for the public form."""
     response.headers["Cache-Control"] = "public, max-age=300"
     result = await db.execute(
@@ -67,7 +71,8 @@ async def get_public_form_config(db: DB, response: Response) -> dict:
 
 
 @router.get("/masters", response_model=PublicMasters)
-async def get_masters(db: DB, response: Response) -> PublicMasters:
+@limiter.limit(settings.rate_limit_public_default)
+async def get_masters(request: Request, db: DB, response: Response) -> PublicMasters:
     """Return active verticals, customers, and suppliers for the public form dropdowns."""
     response.headers["Cache-Control"] = "public, max-age=300"
     verticals_res = await db.execute(
@@ -141,8 +146,9 @@ class PublicSubmissionResponse(BaseModel):
 
 
 @router.post("/submit", response_model=PublicSubmissionResponse)
+@limiter.limit(settings.rate_limit_public_submit)
 async def submit_public_form(
-    body: PublicSubmissionRequest, db: DB, background_tasks: BackgroundTasks
+    request: Request, body: PublicSubmissionRequest, db: DB, background_tasks: BackgroundTasks
 ) -> PublicSubmissionResponse:
     """Accept a deposit request from the public form (no login required)."""
     from app.core.exceptions import BusinessRuleError

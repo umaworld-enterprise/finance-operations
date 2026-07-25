@@ -14,14 +14,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.database import get_db_session
 from app.core.dependencies import CurrentUser, RequireSuperAdmin, get_current_user
 from app.core.exceptions import AuthorizationError, BusinessRuleError, ValidationError
+from app.core.rate_limit import limiter
 from app.models.enums import UserRole
 from app.models.masters import User
 from app.services.bi_service import run_bi_query
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+settings = get_settings()
 
 DB = Annotated[AsyncSession, Depends(get_db_session)]
 
@@ -112,11 +115,12 @@ async def check_ai_access(
 
 
 @router.post("/query", response_model=BIQueryResponse)
+@limiter.limit(settings.rate_limit_ai_query)
 async def bi_query(
+    request: Request,
     body: BIQueryRequest,
     current_user: AIUser,
     db: DB,
-    request: Request,
 ) -> BIQueryResponse:
     """Convert a natural language question into a BI answer."""
     from app.services.audit_service import AuditService
