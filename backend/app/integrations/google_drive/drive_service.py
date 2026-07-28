@@ -35,11 +35,18 @@ ALLOWED_MIME_TYPES = {
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
-def build_tt_copy_filename(request_number: str, mime_type: str, today: date | None = None) -> str:
-    """TT_{request_number}_{YYYYMMDD}{ext} — extension derived from mime type."""
+def build_tt_copy_filename(
+    request_number: str,
+    mime_type: str,
+    today: date | None = None,
+    tranche_number: int | None = None,
+) -> str:
+    """TT_{request_number}[_T{n}]_{YYYYMMDD}{ext} — extension derived from
+    mime type; the T{n} segment identifies the tranche the copy belongs to."""
     ext = ALLOWED_MIME_TYPES[mime_type]
     stamp = (today or date.today()).strftime("%Y%m%d")
-    return f"TT_{request_number}_{stamp}{ext}"
+    tranche_part = f"_T{tranche_number}" if tranche_number is not None else ""
+    return f"TT_{request_number}{tranche_part}_{stamp}{ext}"
 
 
 def validate_tt_copy(mime_type: str | None, size_bytes: int) -> str | None:

@@ -11,6 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PaymentForm } from "@/components/forms/PaymentForm";
+import { TrancheList } from "@/components/tranches/TrancheList";
+import { RequestAuditTrail } from "@/components/tranches/RequestAuditTrail";
+import { RequestAdjustments } from "@/components/tranches/RequestAdjustments";
 import { useRequest, usePayment, useRequestAction, useFieldVisibility, useUpdateRequest } from "@/hooks/useRequests";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -292,12 +295,42 @@ export default function AccountsPaymentPage() {
           </Card>
         )}
 
+        {/* Advance Payment Tranches — Accounts pays tranche-by-tranche and
+            uploads the TT copy against the specific tranche it paid. */}
+        <Card>
+          <CardContent className="p-5 md:p-6">
+            <h2 className="font-semibold text-foreground text-sm mb-1">Advance Payment Tranches</h2>
+            <p className="text-xs text-muted-foreground mb-4">
+              Select the unpaid tranche you processed and upload the bank&apos;s TT copy
+              against it. The merchandiser is notified per tranche. Paying the final
+              tranche completes and locks the request.
+            </p>
+            <TrancheList
+              requestId={id}
+              tranches={req.tranches ?? []}
+              currency={req.currency}
+              mode={
+                isFinance ||
+                ["cancelled_by_merchandiser", "cancelled_by_accounts", "rejected_by_hom"].includes(
+                  req.current_status,
+                )
+                  ? "readonly"
+                  : "accounts"
+              }
+            />
+          </CardContent>
+        </Card>
+
+        <RequestAdjustments requestId={id} currency={req.currency} linkBase="/accounts" />
+
         <Card>
           <CardContent className="p-5 md:p-6">
             <h2 className="font-semibold text-foreground mb-4">Payment Details</h2>
-            <PaymentForm requestId={id} isLocked={req.is_locked} existing={payment} readOnly={isFinance} />
+            <PaymentForm requestId={id} isLocked={req.is_locked} existing={payment} readOnly={isFinance} trancheMode />
           </CardContent>
         </Card>
+
+        <RequestAuditTrail requestId={id} />
 
         {fv.status_history !== false && req.status_history && req.status_history.length > 0 && (
           <Card>

@@ -227,6 +227,71 @@ export function useUpdateRemarks(id: string) {
   });
 }
 
+// ── Advance Payment Tranches ──────────────────────────────────────────────────
+
+function invalidateRequestAndTranches(qc: QueryClient, requestId: string) {
+  invalidateRequestLists(qc);
+  qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId] });
+  qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId, "tranches"] });
+  qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId, "audit"] });
+}
+
+export function useTranches(requestId: string) {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, requestId, "tranches"],
+    queryFn: () => requestService.listTranches(requestId),
+    enabled: !!requestId,
+    staleTime: 0,
+    gcTime: GC,
+  });
+}
+
+export function useUpdateTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ trancheId, data }: { trancheId: string; data: { amount?: number; tentative_payment_date?: string } }) =>
+      requestService.updateTranche(requestId, trancheId, data),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+export function usePayTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (trancheId: string) => requestService.payTranche(requestId, trancheId),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+export function useUploadTrancheTtCopy(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ trancheId, file }: { trancheId: string; file: File }) =>
+      requestService.uploadTrancheTtCopy(requestId, trancheId, file),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+export function useRequestAuditTrail(requestId: string) {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, requestId, "audit"],
+    queryFn: () => requestService.auditTrail(requestId),
+    enabled: !!requestId,
+    staleTime: 0,
+    gcTime: GC,
+  });
+}
+
+export function useRequestAdjustments(requestId: string) {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, requestId, "adjustments"],
+    queryFn: () => requestService.adjustments(requestId),
+    enabled: !!requestId,
+    staleTime: STALE,
+    gcTime: GC,
+  });
+}
+
 export function useFieldVisibility() {
   return useQuery({
     queryKey: ["field-visibility"],

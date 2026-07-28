@@ -113,7 +113,7 @@ class ReportService:
             ]
             for r in requests
         ]
-        return self._render("Deposit Request Report", headers, rows, fmt,
+        return self._render("Supplier Advance Payment Request Report", headers, rows, fmt,
                             col_widths=[6, 5, 9, 8, 7, 5, 6, 4, 6, 6, 6, 8, 8, 8, 8, 5, 10, 10,
                                         6, 8, 8, 8, 6, 6, 10, 5, 6])
 

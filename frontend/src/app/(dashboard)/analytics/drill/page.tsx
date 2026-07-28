@@ -92,7 +92,7 @@ function getDrillMeta(
         `  AND is_deleted = false`,
       ],
       explanation:
-        `Every active deposit request denominated in ${currency} whose Grace ETD has already passed is included. ` +
+        `Every active advance payment request denominated in ${currency} whose Grace ETD has already passed is included. ` +
         `The KPI total on the dashboard is the sum of each row's Deposit Amount.`,
       isMonetary: true,
       isEntity: false,
@@ -153,7 +153,7 @@ function getDrillMeta(
     return {
       title: name,
       subtitle: "Merchandiser",
-      countLabel: "deposit requests",
+      countLabel: "advance payment requests",
       formulaLines: [],
       explanation: "",
       isMonetary: false,
@@ -167,7 +167,7 @@ function getDrillMeta(
     return {
       title: name,
       subtitle: "Vertical / Category",
-      countLabel: "deposit requests",
+      countLabel: "advance payment requests",
       formulaLines: [],
       explanation: "",
       isMonetary: false,
@@ -181,7 +181,7 @@ function getDrillMeta(
     return {
       title: name,
       subtitle: "Customer",
-      countLabel: "deposit requests",
+      countLabel: "advance payment requests",
       formulaLines: [],
       explanation: "",
       isMonetary: false,
@@ -196,7 +196,7 @@ function getDrillMeta(
       title: `Delay Bucket: ${bucketLabel}`,
       countLabel: "requests in this bucket",
       formulaLines: [],
-      explanation: `All deposit requests whose Grace ETD overdue days fall in the "${bucketLabel}" range.`,
+      explanation: `All advance payment requests whose Grace ETD overdue days fall in the "${bucketLabel}" range.`,
       isMonetary: false,
       isEntity: false,
       sumColumn: null,

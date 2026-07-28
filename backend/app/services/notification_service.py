@@ -50,6 +50,9 @@ settings = get_settings()
 
 TYPE_PAYMENT_PROCESSED = "payment_processed"
 TYPE_TT_COPY_ATTACHED = "tt_copy_attached"
+TYPE_TRANCHE_PAID = "tranche_paid"
+TYPE_TRANCHE_TT_ATTACHED = "tranche_tt_attached"
+TYPE_TRANCHE_UPDATED = "tranche_updated"
 
 _EMAIL_ROLES = (UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN)
 
@@ -76,6 +79,47 @@ def build_notification_message(
         "title": "Payment processed",
         "body": body,
         "url": url,
+        "attachment_url": tt_copy_url,
+    }
+
+
+def build_tranche_notification_message(
+    type_: str,
+    request_number: str,
+    tranche_label: str,
+    request_id: UUID | str,
+    tt_copy_url: str | None = None,
+    changes: str | None = None,
+) -> dict:
+    """Title/body/url/attachment for tranche-level notifications.
+
+    tranche_paid / tranche_tt_attached go to the merchandiser who raised the
+    request; tranche_updated goes to the Accounts Team.
+    """
+    if type_ == TYPE_TRANCHE_UPDATED:
+        body = f"{tranche_label} of {request_number} was updated by the merchandiser."
+        if changes:
+            body += f" {changes}"
+        return {
+            "title": "Tranche updated",
+            "body": body,
+            "url": f"/accounts/{request_id}",
+            "attachment_url": None,
+        }
+    if type_ == TYPE_TRANCHE_TT_ATTACHED:
+        return {
+            "title": "TT copy attached",
+            "body": f"The TT copy for {tranche_label} of {request_number} is now available.",
+            "url": f"/merchandiser/{request_id}",
+            "attachment_url": tt_copy_url,
+        }
+    body = f"{tranche_label} of {request_number} has been paid."
+    if tt_copy_url:
+        body += " TT copy attached."
+    return {
+        "title": "Tranche paid",
+        "body": body,
+        "url": f"/merchandiser/{request_id}",
         "attachment_url": tt_copy_url,
     }
 
@@ -273,6 +317,105 @@ async def notify_payment_processed_if_ready(request_id: UUID) -> None:
     except Exception as exc:
         logger.error(
             "notify_payment_processed_if_ready failed", request_id=str(request_id), error=str(exc)
+        )
+
+
+async def notify_tranche_event(request_id: UUID, tranche_id: UUID, event: str) -> None:
+    """After a tranche payment or TT upload — bell + push to the merchandiser
+    who raised the request, naming the paid tranche and request number.
+
+    event: 'paid' or 'tt_attached'. When the tranche payment completed the
+    whole request, HoM / super admins also get the payment-processed email.
+    Own session; failures logged and swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+    from app.models.tranche import PaymentTranche
+
+    try:
+        async with AsyncSessionFactory() as session:
+            request = await _load_request(session, request_id)
+            tranche = await session.get(PaymentTranche, tranche_id)
+            if request is None or tranche is None:
+                return
+            type_ = TYPE_TRANCHE_TT_ATTACHED if event == "tt_attached" else TYPE_TRANCHE_PAID
+            message = build_tranche_notification_message(
+                type_, request.request_number, tranche.label, request.id,
+                tt_copy_url=tranche.tt_copy_url,
+            )
+            target = await _find_target_user(session, request)
+            if target is not None:
+                session.add(
+                    Notification(
+                        user_id=target.id,
+                        type=type_,
+                        title=message["title"],
+                        body=message["body"],
+                        url=message["url"],
+                        attachment_url=message["attachment_url"],
+                        deposit_request_id=request.id,
+                    )
+                )
+                await session.commit()
+                await _push_to_user(session, target.id, message)
+                await session.commit()
+            # Full payment completion keeps the existing admin email behaviour.
+            if (
+                type_ == TYPE_TRANCHE_PAID
+                and request.current_status == RequestStatus.PAYMENT_PROCESSED
+            ):
+                await _email_admins(session, request.request_number, tranche.tt_copy_url)
+    except Exception as exc:
+        logger.error(
+            "notify_tranche_event failed",
+            request_id=str(request_id), tranche_id=str(tranche_id), error=str(exc),
+        )
+
+
+async def notify_tranche_updated(request_id: UUID, tranche_id: UUID, changes: str) -> None:
+    """After a merchandiser edits an unpaid tranche — bell + push to every
+    active Accounts Team user so they work from the latest values.
+
+    Own session; failures logged and swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+    from app.models.tranche import PaymentTranche
+
+    try:
+        async with AsyncSessionFactory() as session:
+            request = await _load_request(session, request_id)
+            tranche = await session.get(PaymentTranche, tranche_id)
+            if request is None or tranche is None:
+                return
+            message = build_tranche_notification_message(
+                TYPE_TRANCHE_UPDATED, request.request_number, tranche.label, request.id,
+                changes=changes,
+            )
+            result = await session.execute(
+                select(User).where(
+                    User.role == UserRole.ACCOUNTS_TEAM, User.is_active == True  # noqa: E712
+                )
+            )
+            accounts_users = list(result.scalars().all())
+            for user in accounts_users:
+                session.add(
+                    Notification(
+                        user_id=user.id,
+                        type=TYPE_TRANCHE_UPDATED,
+                        title=message["title"],
+                        body=message["body"],
+                        url=message["url"],
+                        attachment_url=None,
+                        deposit_request_id=request.id,
+                    )
+                )
+            await session.commit()
+            for user in accounts_users:
+                await _push_to_user(session, user.id, message)
+            await session.commit()
+    except Exception as exc:
+        logger.error(
+            "notify_tranche_updated failed",
+            request_id=str(request_id), tranche_id=str(tranche_id), error=str(exc),
         )
 
 

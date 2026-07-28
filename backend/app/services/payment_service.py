@@ -98,6 +98,31 @@ class PaymentService:
         # the history and audit rows record old_status == new_status.
         old_status = request.current_status
 
+        # Legacy request-level processing (kept for API compatibility) must
+        # not leave unpaid tranches behind on a processed request — mark them
+        # all paid so tranche-level state stays consistent.
+        from datetime import datetime, timezone
+
+        from app.models.enums import TrancheStatus
+        from app.repositories.tranche_repo import TrancheRepository
+
+        tranche_repo = TrancheRepository(self._session)
+        for tranche in await tranche_repo.list_for_request(request_id):
+            if tranche.status == TrancheStatus.UNPAID:
+                await tranche_repo.update(
+                    tranche,
+                    status=TrancheStatus.PAID,
+                    paid_at=datetime.now(timezone.utc),
+                    paid_by=user_id,
+                )
+                await self._audit.record_update(
+                    "payment_tranches", tranche.id, user_id,
+                    field_name="status",
+                    old_value=TrancheStatus.UNPAID.value,
+                    new_value=TrancheStatus.PAID.value,
+                    ip_address=ip_address, user_agent=user_agent,
+                )
+
         # Lock the request and update status
         await self._request_repo.update(
             request,

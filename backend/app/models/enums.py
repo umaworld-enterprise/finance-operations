@@ -82,6 +82,25 @@ class PaymentStatus(str, enum.Enum):
     HOLD = "hold"
 
 
+class TrancheStatus(str, enum.Enum):
+    UNPAID = "unpaid"
+    PAID = "paid"
+
+
+class AdjustmentStatus(str, enum.Enum):
+    """Invoice adjustment lifecycle.
+
+    Approval requirements for invoice adjustments are still an open business
+    decision — adjustments are created directly as COMPLETED today, but the
+    enum carries the approval states so a review workflow can be added
+    without a schema change.
+    """
+
+    COMPLETED = "completed"
+    PENDING_APPROVAL = "pending_approval"
+    REJECTED = "rejected"
+
+
 class AuditAction(str, enum.Enum):
     CREATE = "CREATE"
     UPDATE = "UPDATE"

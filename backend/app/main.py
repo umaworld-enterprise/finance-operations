@@ -200,7 +200,15 @@ def create_app() -> FastAPI:
         )
 
     @app.exception_handler(IntegrityError)
-    async def integrity_error_handler(_: Request, exc: IntegrityError) -> JSONResponse:
+    async def integrity_error_handler(request: Request, exc: IntegrityError) -> JSONResponse:
+        # Log the underlying constraint violation — without this the real
+        # cause (FK / unique / check constraint name) is unrecoverable.
+        logger.error(
+            "Integrity error",
+            path=request.url.path,
+            method=request.method,
+            error=str(exc.orig) if exc.orig is not None else str(exc),
+        )
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={"error_code": "CONFLICT", "message": "A record with these details already exists."},
@@ -284,12 +292,18 @@ def create_app() -> FastAPI:
     from app.api.v1.ai import router as ai_router
     from app.api.v1.public_form import router as public_form_router
     from app.api.v1.notifications import router as notifications_router
+    from app.api.v1.tranches import audit_router as request_audit_router
+    from app.api.v1.tranches import router as tranches_router
+    from app.api.v1.adjustments import router as adjustments_router
 
     prefix = "/api/v1"
     for r in [
         auth_router,
         requests_router,
         payment_router,
+        tranches_router,
+        request_audit_router,
+        adjustments_router,
         analytics_router,
         reports_router,
         admin_router,

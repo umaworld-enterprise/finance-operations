@@ -156,7 +156,7 @@ export default function SupplierDrillPage() {
                 <EmptyState
                   icon={ClipboardList}
                   title="No requests"
-                  description="No deposit requests found for this supplier."
+                  description="No advance payment requests found for this supplier."
                 />
               </div>
             ) : (

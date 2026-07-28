@@ -1,8 +1,8 @@
 import type { Metadata, ReactNode } from "next";
 
 export const metadata: Metadata = {
-  title: "Submit Deposit Request — Sunshine",
-  description: "Submit an advance deposit request to the Sunshine finance team.",
+  title: "Submit Supplier Advance Payment Request — Sunshine",
+  description: "Submit a Supplier Advance Payment Request to the Sunshine finance team.",
 };
 
 export default function PublicFormLayout({ children }: { children: ReactNode }) {

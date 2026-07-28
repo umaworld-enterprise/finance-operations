@@ -95,6 +95,9 @@ class DepositRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     analytics_snapshot: Mapped["AnalyticsSnapshot | None"] = relationship(
         back_populates="deposit_request", uselist=False
     )
+    tranches: Mapped[list["PaymentTranche"]] = relationship(
+        back_populates="deposit_request", order_by="PaymentTranche.tranche_number"
+    )
 
     __table_args__ = (
         Index("idx_deposit_requests_status", "current_status"),
@@ -110,3 +113,4 @@ from app.models.masters import Customer, Supplier, User, Vertical  # noqa: E402,
 from app.models.payment import PaymentDetails  # noqa: E402, F401
 from app.models.workflow import AccountsAction, MerchandiserAction, StatusHistory  # noqa: E402, F401
 from app.models.analytics import AnalyticsSnapshot  # noqa: E402, F401
+from app.models.tranche import PaymentTranche  # noqa: E402, F401

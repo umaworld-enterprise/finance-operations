@@ -45,7 +45,7 @@ const QUICK_LINKS = [
   { label: "Audit Logs",        href: "/admin/audit",             desc: "Full field-level change trail",                               icon: ScrollText },
   { label: "Analytics",         href: "/analytics",               desc: "Metrics & cost of fund",                                      icon: BarChart3 },
   { label: "Analytics Access",  href: "/admin/analytics-access",  desc: "Control which roles see which analytics sections",            icon: ShieldCheck },
-  { label: "Form Configuration",href: "/admin/form-config",       desc: "Customise fields on the public deposit request form",         icon: FormInput },
+  { label: "Form Configuration",href: "/admin/form-config",       desc: "Customise fields on the public Supplier Advance Payment Request form",         icon: FormInput },
   { label: "Field Visibility",  href: "/admin/field-visibility",  desc: "Control which columns each role sees in request details",     icon: Eye },
   { label: "Form Links",        href: "/admin/form-links",        desc: "Create shareable public form links with custom slugs",        icon: Link2 },
   { label: "Payment Terms",     href: "/admin/payment-terms",     desc: "Manage the payment terms available in request forms",         icon: ListChecks },

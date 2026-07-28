@@ -1,11 +1,24 @@
 import { api } from "@/lib/api";
-import type { ActivityItem, DepositRequest, DepositRequestDetail, PaymentDetails } from "@/types";
+import type {
+  ActivityItem,
+  DepositRequest,
+  DepositRequestDetail,
+  InvoiceAdjustment,
+  PaymentDetails,
+  PaymentTranche,
+  RequestAuditEntry,
+} from "@/types";
 
 export interface PaginatedResponse<T> {
   total: number;
   page: number;
   page_size: number;
   items: T[];
+}
+
+export interface TranchePayload {
+  amount: number;
+  tentative_payment_date: string;
 }
 
 export interface CreateRequestPayload {
@@ -16,14 +29,16 @@ export interface CreateRequestPayload {
   sunshine_invoice_number?: string;
   currency: string;
   exchange_rate?: number;
-  deposit_amount: number;
-  deposit_percentage: number;
+  // Derived from tranches when they are supplied.
+  deposit_amount?: number;
+  deposit_percentage?: number;
   total_supplier_invoice_amount: number;
   estimated_shipment_date?: string;
   estimated_etd?: string;
   payment_terms?: string;
   remarks?: string;
   override_flagged_supplier?: boolean;
+  tranches?: TranchePayload[];
 }
 
 export type UpdateRequestPayload = Partial<CreateRequestPayload>;
@@ -152,6 +167,55 @@ const requestService = {
 
   myFieldVisibility: async (): Promise<Record<string, boolean>> => {
     const { data } = await api.get<Record<string, boolean>>("/requests/my-field-visibility");
+    return data;
+  },
+
+  // ── Advance Payment Tranches ─────────────────────────────────────────────
+
+  listTranches: async (id: string): Promise<PaymentTranche[]> => {
+    const { data } = await api.get<PaymentTranche[]>(`/requests/${id}/tranches`);
+    return data;
+  },
+
+  updateTranche: async (
+    id: string,
+    trancheId: string,
+    payload: Partial<TranchePayload>,
+  ): Promise<PaymentTranche> => {
+    const { data } = await api.patch<PaymentTranche>(
+      `/requests/${id}/tranches/${trancheId}`,
+      payload,
+    );
+    return data;
+  },
+
+  payTranche: async (id: string, trancheId: string): Promise<PaymentTranche> => {
+    const { data } = await api.post<PaymentTranche>(`/requests/${id}/tranches/${trancheId}/pay`);
+    return data;
+  },
+
+  uploadTrancheTtCopy: async (
+    id: string,
+    trancheId: string,
+    file: File,
+  ): Promise<PaymentTranche> => {
+    const form = new FormData();
+    form.append("file", file);
+    const { data } = await api.post<PaymentTranche>(
+      `/requests/${id}/tranches/${trancheId}/tt-copy`,
+      form,
+      { headers: { "Content-Type": "multipart/form-data" } },
+    );
+    return data;
+  },
+
+  auditTrail: async (id: string): Promise<RequestAuditEntry[]> => {
+    const { data } = await api.get<RequestAuditEntry[]>(`/requests/${id}/audit`);
+    return data;
+  },
+
+  adjustments: async (id: string): Promise<InvoiceAdjustment[]> => {
+    const { data } = await api.get<InvoiceAdjustment[]>(`/requests/${id}/adjustments`);
     return data;
   },
 };

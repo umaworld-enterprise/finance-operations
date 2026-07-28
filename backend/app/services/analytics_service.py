@@ -25,6 +25,7 @@ ANALYTICS_SECTIONS = [
     "by_merchandiser",
     "by_vertical",
     "by_customer",
+    "outstanding_tracker",
 ]
 
 DEFAULT_PERMISSIONS: dict[str, list[str]] = {
@@ -35,6 +36,7 @@ DEFAULT_PERMISSIONS: dict[str, list[str]] = {
     "by_merchandiser": ["finance_admin", "head_of_merchandiser"],
     "by_vertical":     ["finance_admin", "accounts_team"],
     "by_customer":     ["finance_admin", "accounts_team"],
+    "outstanding_tracker": ["finance_admin", "accounts_team", "head_of_merchandiser"],
 }
 
 
@@ -565,6 +567,104 @@ class AnalyticsService:
                 "notional_gain": float(r.notional_gain),
             }
             for r in rows
+        ]
+
+    async def get_outstanding_tracker(
+        self,
+        group_by: str,
+        date_from: Date | None = None,
+        date_to: Date | None = None,
+    ) -> list[dict]:
+        """Outstanding deposits — requested but not yet paid, at TRANCHE level.
+
+        Every unpaid tranche on a live (not cancelled / rejected / deleted)
+        request counts as outstanding; paid tranches are excluded, so partial
+        payment is reflected correctly. Grouped by ISO week of the request's
+        CREATED date (per the process note), merchandiser, customer or
+        vertical, with per-currency totals (USD, CNY/RMB, EUR, … — whatever
+        currencies exist in the data).
+        """
+        from datetime import timedelta
+
+        from app.models.enums import TrancheStatus
+        from app.models.tranche import PaymentTranche
+
+        _EXCLUDED = (
+            RequestStatus.CANCELLED_BY_MERCHANDISER,
+            RequestStatus.CANCELLED_BY_ACCOUNTS,
+            RequestStatus.REJECTED_BY_HOM,
+        )
+        stmt = (
+            select(
+                PaymentTranche.amount,
+                DepositRequest.id.label("request_id"),
+                DepositRequest.currency,
+                DepositRequest.created_at,
+                User.full_name.label("merchandiser_name"),
+                DepositRequest.submitter_email,
+                Customer.name.label("customer_name"),
+                Vertical.name.label("vertical_name"),
+            )
+            .join(DepositRequest, PaymentTranche.deposit_request_id == DepositRequest.id)
+            .join(Customer, Customer.id == DepositRequest.customer_id)
+            .outerjoin(User, User.id == DepositRequest.created_by)
+            .outerjoin(Vertical, Vertical.id == DepositRequest.vertical_id)
+            .where(
+                DepositRequest.is_deleted == False,  # noqa: E712
+                DepositRequest.current_status.notin_(_EXCLUDED),
+                PaymentTranche.status == TrancheStatus.UNPAID,
+            )
+        )
+        if date_from:
+            stmt = stmt.where(DepositRequest.created_at >= date_from)
+        if date_to:
+            stmt = stmt.where(DepositRequest.created_at <= date_to)
+        rows = (await self._session.execute(stmt)).fetchall()
+
+        def group_key(r) -> tuple:
+            if group_by == "week":
+                # ISO week of the request-created date: Monday–Sunday,
+                # boundaries explicit in the label.
+                created = r.created_at.date() if hasattr(r.created_at, "date") else r.created_at
+                week_start = created - timedelta(days=created.weekday())
+                week_end = week_start + timedelta(days=6)
+                return (week_start.isoformat(), f"{week_start.isoformat()} – {week_end.isoformat()}")
+            if group_by == "merchandiser":
+                name = r.merchandiser_name or r.submitter_email or "Unassigned"
+                return (name.lower(), name)
+            if group_by == "customer":
+                return (r.customer_name.lower(), r.customer_name)
+            # vertical
+            name = r.vertical_name or "Unassigned"
+            return (name.lower(), name)
+
+        groups: dict[tuple, dict] = {}
+        for r in rows:
+            key = group_key(r)
+            g = groups.setdefault(
+                key,
+                {"group": key[1], "tranche_count": 0, "request_ids": set(), "outstanding": {}},
+            )
+            cur = r.currency.value if hasattr(r.currency, "value") else (r.currency or "OTHER")
+            g["tranche_count"] += 1
+            g["request_ids"].add(r.request_id)
+            g["outstanding"][cur] = g["outstanding"].get(cur, 0.0) + float(r.amount or 0)
+
+        # Weeks newest-first; name groups by largest outstanding first.
+        if group_by == "week":
+            ordered = sorted(groups.items(), key=lambda kv: kv[0][0], reverse=True)
+        else:
+            ordered = sorted(
+                groups.items(), key=lambda kv: -sum(kv[1]["outstanding"].values())
+            )
+        return [
+            {
+                "group": g["group"],
+                "tranche_count": g["tranche_count"],
+                "request_count": len(g["request_ids"]),
+                "outstanding": g["outstanding"],
+            }
+            for _, g in ordered
         ]
 
     async def get_monthly_trends(self, year: int, role: UserRole, user_id: UUID) -> list[dict]:

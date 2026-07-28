@@ -73,9 +73,11 @@ class CurrentUser:
         return self._user.role == UserRole.SUPER_ADMIN  # type: ignore[union-attr]
 
 
+_DEV_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
+
 _DEV_USER = CurrentUser(
     types.SimpleNamespace(
-        id=UUID("00000000-0000-0000-0000-000000000001"),
+        id=_DEV_USER_ID,
         email="admin@sunshine.dev",
         full_name="Dev Admin",
         role=UserRole.SUPER_ADMIN,
@@ -88,6 +90,31 @@ _DEV_USER = CurrentUser(
 )
 
 
+async def _get_or_create_dev_user(db: AsyncSession) -> CurrentUser:
+    """Development bypass with a REAL users row.
+
+    Audit logs, tranche payments and adjustments all carry FK references to
+    users.id — an in-memory fake identity breaks every write path with a
+    ForeignKeyViolation. Persist the dev admin on first use instead.
+    """
+    from app.models.masters import User
+
+    user = await db.get(User, _DEV_USER_ID)
+    if user is None:
+        user = User(
+            id=_DEV_USER_ID,
+            email=_DEV_USER.email,
+            full_name=_DEV_USER.full_name,
+            role=UserRole.SUPER_ADMIN,
+            supabase_uid=_DEV_USER.supabase_uid,
+            is_active=True,
+            onboarding_completed=True,
+        )
+        db.add(user)
+        await db.flush()
+    return CurrentUser(user)
+
+
 async def get_current_user(
     authorization: Annotated[str | None, Header()] = None,
     db: Annotated[AsyncSession, Depends(get_db_session)] = None,
@@ -95,7 +122,7 @@ async def get_current_user(
     """Resolve Supabase JWT → application user record. Bypassed in development."""
     settings = get_settings()
     if settings.app_env == "development":
-        return _DEV_USER
+        return await _get_or_create_dev_user(db)
 
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(

@@ -1,0 +1,146 @@
+"""ORM models for Advance Payment Tranches and Invoice Adjustments.
+
+A deposit request carries one or more payment tranches (Tranche I, II, …).
+Accounts pays tranche-by-tranche; a paid tranche is immutable. Value from a
+paid tranche can be reallocated to a tranche on another invoice of the same
+supplier through an InvoiceAdjustment — an additive, linked record that never
+mutates the source tranche.
+"""
+
+import uuid
+from datetime import date, datetime
+
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.enums import AdjustmentStatus, TrancheStatus, pg_enum
+
+# Roman numerals for tranche labels — supports far more tranches than any
+# realistic request will carry; falls back to the plain number beyond that.
+_ROMAN = [
+    (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
+    (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+]
+
+
+def tranche_label(number: int) -> str:
+    """1 → 'Tranche I', 2 → 'Tranche II', …"""
+    if number < 1:
+        return f"Tranche {number}"
+    n, out = number, ""
+    for value, numeral in _ROMAN:
+        while n >= value:
+            out += numeral
+            n -= value
+    return f"Tranche {out}"
+
+
+class PaymentTranche(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "payment_tranches"
+
+    deposit_request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("deposit_requests.id"), nullable=False
+    )
+    tranche_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
+    # Required for new in-app tranches (enforced at the schema layer); nullable
+    # here because backfilled legacy tranches have no recorded tentative date.
+    tentative_payment_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[TrancheStatus] = mapped_column(
+        pg_enum(TrancheStatus, "tranche_status"), nullable=False, default=TrancheStatus.UNPAID
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paid_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    # Per-tranche TT copy (bank transfer confirmation) — Google Drive link.
+    tt_copy_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    tt_copy_file_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    tt_copy_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # True for tranches synthesised from pre-tranche records (migration 0018
+    # backfill or API compat mode) — these may lack a tentative date.
+    is_legacy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    deposit_request: Mapped["DepositRequest"] = relationship(back_populates="tranches")
+    paid_by_user: Mapped["User | None"] = relationship(foreign_keys=[paid_by])
+    adjustments_out: Mapped[list["InvoiceAdjustment"]] = relationship(
+        back_populates="source_tranche",
+        foreign_keys="InvoiceAdjustment.source_tranche_id",
+        order_by="InvoiceAdjustment.created_at",
+    )
+    adjustments_in: Mapped[list["InvoiceAdjustment"]] = relationship(
+        back_populates="destination_tranche",
+        foreign_keys="InvoiceAdjustment.destination_tranche_id",
+        order_by="InvoiceAdjustment.created_at",
+    )
+
+    @property
+    def label(self) -> str:
+        return tranche_label(self.tranche_number)
+
+    __table_args__ = (
+        UniqueConstraint("deposit_request_id", "tranche_number", name="uq_tranche_request_number"),
+        CheckConstraint("amount > 0", name="ck_tranche_amount_positive"),
+        Index("idx_payment_tranches_request", "deposit_request_id"),
+        Index("idx_payment_tranches_status", "status"),
+    )
+
+
+class InvoiceAdjustment(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "invoice_adjustments"
+
+    source_tranche_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("payment_tranches.id"), nullable=False
+    )
+    destination_tranche_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("payment_tranches.id"), nullable=False
+    )
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[AdjustmentStatus] = mapped_column(
+        pg_enum(AdjustmentStatus, "adjustment_status"),
+        nullable=False,
+        default=AdjustmentStatus.COMPLETED,
+    )
+    performed_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    source_tranche: Mapped["PaymentTranche"] = relationship(
+        back_populates="adjustments_out", foreign_keys=[source_tranche_id]
+    )
+    destination_tranche: Mapped["PaymentTranche"] = relationship(
+        back_populates="adjustments_in", foreign_keys=[destination_tranche_id]
+    )
+    performer: Mapped["User"] = relationship(foreign_keys=[performed_by])
+
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_adjustment_amount_positive"),
+        CheckConstraint(
+            "source_tranche_id != destination_tranche_id", name="ck_adjustment_distinct_tranches"
+        ),
+        Index("idx_invoice_adjustments_source", "source_tranche_id"),
+        Index("idx_invoice_adjustments_destination", "destination_tranche_id"),
+    )
+
+
+from app.models.deposit_request import DepositRequest  # noqa: E402
+from app.models.masters import User  # noqa: E402
