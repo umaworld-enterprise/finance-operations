@@ -1,0 +1,102 @@
+# CI/CD for the finance-operations APPLICATION repo.
+# Copy this file to .github/workflows/deploy.yml IN THE APP REPO (it lives
+# here only as a template).
+#
+# push to `staging` -> GitHub environment "staging"    -> deploys staging stack
+# push to `main`    -> GitHub environment "production" -> deploys production stack
+#
+# Per-environment configuration (Settings -> Environments -> staging/production):
+#   Variables: AWS_ROLE_ARN, AWS_REGION,
+#              NEXT_PUBLIC_API_URL, NEXT_PUBLIC_APP_URL,
+#              NEXT_PUBLIC_GOOGLE_CLIENT_ID,
+#              NEXT_PUBLIC_VAPID_PUBLIC_KEY, NEXT_PUBLIC_ADMIN_EMAIL
+#     (public-by-design build-time values — mirror them from the server's
+#      <env>/.env.frontend; app SECRETS never live in GitHub)
+#   Secrets:   EC2_HOST, EC2_USER, EC2_SSH_PRIVATE_KEY
+#
+# AWS side (see UMA-SML-Docker-Services/docs/setup.md): a GitHub-OIDC IAM role
+# with ECR push access, and two ECR repositories:
+#   advance-deposit-tracker-backend, advance-deposit-tracker-frontend
+
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main, staging]
+
+permissions:
+  id-token: write # required for AWS OIDC
+  contents: read
+
+# Never run two deploys of the same branch at once; let the in-flight one finish.
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    env:
+      DEPLOY_ENV: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+      BACKEND_REPO: advance-deposit-tracker-backend
+      FRONTEND_REPO: advance-deposit-tracker-frontend
+      # Where UMA-SML-Docker-Services is cloned on the EC2 host
+      DEPLOY_ROOT: /home/shared/uma-sml-docker-services
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC — no stored keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Each image gets an immutable "<env>-<sha>" tag (what gets deployed and
+      # what rollbacks reference) plus a moving "<env>" convenience tag.
+      - name: Build & push backend image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          docker build ./backend \
+            -t "$REGISTRY/$BACKEND_REPO:$DEPLOY_ENV-$GITHUB_SHA" \
+            -t "$REGISTRY/$BACKEND_REPO:$DEPLOY_ENV"
+          docker push --all-tags "$REGISTRY/$BACKEND_REPO"
+
+      - name: Build & push frontend image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          # NEXT_PUBLIC_* are compiled into the bundle at BUILD time, so they
+          # come from this GitHub environment's variables — a staging build and
+          # a production build are different images by design.
+          docker build ./frontend \
+            --build-arg NEXT_PUBLIC_API_URL="${{ vars.NEXT_PUBLIC_API_URL }}" \
+            --build-arg NEXT_PUBLIC_APP_URL="${{ vars.NEXT_PUBLIC_APP_URL }}" \
+            --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID="${{ vars.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}" \
+            --build-arg NEXT_PUBLIC_VAPID_PUBLIC_KEY="${{ vars.NEXT_PUBLIC_VAPID_PUBLIC_KEY }}" \
+            --build-arg NEXT_PUBLIC_ADMIN_EMAIL="${{ vars.NEXT_PUBLIC_ADMIN_EMAIL }}" \
+            -t "$REGISTRY/$FRONTEND_REPO:$DEPLOY_ENV-$GITHUB_SHA" \
+            -t "$REGISTRY/$FRONTEND_REPO:$DEPLOY_ENV"
+          docker push --all-tags "$REGISTRY/$FRONTEND_REPO"
+
+      # deploy.sh on the host does the rest: ECR pull, alembic migrations,
+      # compose up of ONLY this environment, backend health gate, image cleanup.
+      # A failed health check makes deploy.sh (and therefore this job) fail.
+      - name: Deploy on EC2 over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          command_timeout: 15m
+          script: |
+            "${{ env.DEPLOY_ROOT }}/scripts/deploy.sh" \
+              "${{ env.DEPLOY_ENV }}" \
+              "${{ env.DEPLOY_ENV }}-${{ github.sha }}"

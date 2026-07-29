@@ -124,7 +124,6 @@ The following are off-limits. Do not reference them in any query under any circu
 - system_config (table) — contains API keys and internal configuration
 - ip_address (column)  — personally identifiable network data
 - user_agent (column)  — client fingerprinting data
-- supabase_uid (column) — internal auth identifier
 If a user asks for any of this data, respond with GENERAL:I'm sorry, that information is restricted and cannot be accessed through this assistant.
 """
 
@@ -162,7 +161,7 @@ _BLOCKED = re.compile(
 # This runs AFTER AI generation, so it catches prompt-injection / jailbreak attempts too.
 # Secure by default: adding a new sensitive column here is all that's needed to protect it.
 _RESTRICTED = re.compile(
-    r"\b(audit_logs|system_config|ip_address|user_agent|supabase_uid|ai_api_key)\b",
+    r"\b(audit_logs|system_config|ip_address|user_agent|ai_api_key)\b",
     re.IGNORECASE,
 )
 

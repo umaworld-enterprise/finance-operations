@@ -4,16 +4,17 @@ Enterprise web application replacing the Google Form → Google Sheet → manual
 
 **Status:** ✅ **Project completed 11 July 2026.** Kick-off meeting 18 June 2026, work started 19 June 2026, finished 11 July 2026 (44 production deploys · 22 change requests). Now in **live usage / maintenance** — awaiting any updates or user-suggested changes arising from real-world use.
 
-**Stack:** Next.js 15 (App Router) · FastAPI · Supabase PostgreSQL · TanStack Query · Tailwind CSS · ShadCN UI · SQLAlchemy 2.x · Alembic
+**Stack:** Next.js 15 (App Router) · FastAPI · PostgreSQL · Google OAuth (direct, app-issued JWTs) · TanStack Query · Tailwind CSS · ShadCN UI · SQLAlchemy 2.x · Alembic
 
 ---
 
 ## Architecture Overview
 
 ```
-Railway (Next.js frontend, PWA)
-  └── REST/JSON → Railway (FastAPI backend, 2 uvicorn workers)
-                    ├── Supabase PostgreSQL (+ Auth + RLS)
+Next.js frontend (PWA)
+  └── REST/JSON → FastAPI backend (2 uvicorn workers)
+                    ├── PostgreSQL (Docker container in deployment)
+                    ├── Google OAuth (sign-in) → app-issued JWTs
                     ├── Google Drive (TT copy uploads, service account)
                     └── Web Push (VAPID) + SMTP (optional)
 
@@ -28,7 +29,7 @@ Public form → /form/{slug} → /api/v1/public-form
 - **Per-user accessibility:** font size (Default / Large / Extra Large) from the Settings page, persisted per account
 - **Analytics engine** computes 5 metrics: Grace ETD, ETD Grace Overdue Days, Payment-to-Ship Days, Payment-to-Request Days, Cost of Fund
 - **3 export formats:** Excel (openpyxl), CSV, PDF (ReportLab)
-- **Supabase RLS** enforces role scoping at the database layer
+- **RBAC in the backend** enforces role scoping on every endpoint (`require_roles` guards); sign-in is invite-only — a Google identity must match a pre-registered active user row
 
 ---
 
@@ -39,7 +40,7 @@ Public form → /form/{slug} → /api/v1/public-form
 - Python 3.12+
 - Node.js 20+
 - Docker & Docker Compose
-- A Supabase project (free tier works)
+- A Google OAuth client (only needed to test real sign-in — dev mode bypasses auth)
 
 ### 1. Clone & configure environment
 
@@ -49,11 +50,12 @@ cd "Advance Deposit Tracker"
 
 # Backend
 cp backend/.env.example backend/.env
-# Fill in SUPABASE_URL, SUPABASE_JWT_SECRET, DATABASE_URL, GOOGLE_WEBHOOK_SECRET
+# Fill in SECRET_KEY, DATABASE_URL (and GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET
+# if you want to exercise the real login flow — dev mode auto-signs-in)
 
 # Frontend
 cp frontend/.env.local.example frontend/.env.local
-# Fill in NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, NEXT_PUBLIC_API_URL
+# Fill in NEXT_PUBLIC_API_URL (and NEXT_PUBLIC_GOOGLE_CLIENT_ID for real login)
 ```
 
 ### 2. Start the backend
@@ -63,7 +65,7 @@ cd backend
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# Run migrations (against Supabase or local postgres from docker-compose)
+# Run migrations (against the local postgres from docker-compose)
 alembic upgrade head
 
 # Seed master data
@@ -79,15 +81,7 @@ Or with Docker Compose (spins up FastAPI + local PostgreSQL):
 docker compose up --build
 ```
 
-### 3. Apply Supabase RLS policies
-
-In the Supabase SQL editor, run the contents of:
-
-```
-supabase/rls_policies.sql
-```
-
-### 4. Start the frontend
+### 3. Start the frontend
 
 ```bash
 cd frontend
@@ -96,7 +90,7 @@ npm run dev
 # Opens at http://localhost:3000
 ```
 
-### 5. Run tests
+### 4. Run tests
 
 ```bash
 cd backend
@@ -129,18 +123,20 @@ railway up --service frontend
 
 ---
 
-## Supabase Setup
+## Google OAuth Setup
 
-1. Create a new Supabase project.
-2. Under **Settings → API**, copy:
-   - `Project URL` → `SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_URL`
-   - `anon public` key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `service_role` key → `SUPABASE_SERVICE_ROLE_KEY` (backend only, never expose to client)
-   - `JWT Secret` → `SUPABASE_JWT_SECRET`
-3. Under **Authentication → Providers**, enable **Google** and add your OAuth credentials.
-4. Set the redirect URL to `https://your-frontend.vercel.app/auth/callback`.
-5. Run Alembic migrations against the Supabase connection string (use the **Transaction pooler** URL for serverless or the **Session pooler** URL for the Docker container).
-6. Run `supabase/rls_policies.sql` in the SQL editor.
+Sign-in is direct Google OAuth — no third-party auth service. The frontend
+opens the Google popup (auth-code flow), the backend exchanges the code using
+the client secret, verifies the ID token, matches the email against a
+pre-registered `users` row, and issues its own HS256 JWT (`SECRET_KEY`,
+12 h expiry by default via `ACCESS_TOKEN_EXPIRE_MINUTES`).
+
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an **OAuth client ID** of type **Web application**.
+2. Add every frontend origin under **Authorized JavaScript origins** — e.g. `http://localhost:3000`, `https://staging.example.com`, `https://app.example.com`. (No redirect URIs are needed — the popup flow uses `postmessage`.)
+3. Copy the values:
+   - Client ID → backend `GOOGLE_CLIENT_ID` **and** frontend `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (public by design)
+   - Client secret → backend `GOOGLE_CLIENT_SECRET` (server-side only)
+4. Register users (email + role) via the admin panel or `scripts/seed.py` — an unknown Google account gets a 403, exactly like before.
 
 ---
 
@@ -148,9 +144,10 @@ railway up --service frontend
 
 | Variable | Where | Description |
 |---|---|---|
-| `SUPABASE_URL` | Backend | Supabase project URL |
-| `SUPABASE_JWT_SECRET` | Backend | JWT secret from Supabase settings |
-| `SUPABASE_SERVICE_ROLE_KEY` | Backend | Service role key for admin operations |
+| `SECRET_KEY` | Backend | Signs the app-issued JWTs — generate with `openssl rand -hex 32` |
+| `GOOGLE_CLIENT_ID` | Backend | Google OAuth client id (same value as the frontend's) |
+| `GOOGLE_CLIENT_SECRET` | Backend | Google OAuth client secret — server-side only |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Backend | Session lifetime (default 720 = 12 h) |
 | `DATABASE_URL` | Backend | PostgreSQL connection string (asyncpg driver) |
 | `GOOGLE_WEBHOOK_SECRET` | Backend | HMAC shared secret with Apps Script |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Backend | Service account JSON (single line) — used for Sheets sync AND Drive TT copy uploads |
@@ -159,8 +156,7 @@ railway up --service frontend
 | `VAPID_CLAIMS_EMAIL` | Backend | Contact email in VAPID claims |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | Backend | HoM/super-admin payment emails. Empty host → silently disabled |
 | `CORS_ORIGINS` | Backend | JSON array of allowed origins |
-| `NEXT_PUBLIC_SUPABASE_URL` | Frontend | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Frontend | Supabase anon key |
+| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Frontend | Google OAuth client id (public — the secret never leaves the backend) |
 | `NEXT_PUBLIC_API_URL` | Frontend | FastAPI base URL |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Frontend | Same value as backend `VAPID_PUBLIC_KEY`; **inlined at build time** |
 
@@ -179,19 +175,17 @@ Advance Deposit Tracker/
 │   │   ├── models/             # ORM models
 │   │   ├── analytics/          # Engine + snapshot job
 │   │   ├── integrations/       # Google Drive (TT copies)
-│   │   └── migrations/         # Alembic versions (head: 0016)
+│   │   └── migrations/         # Alembic versions (head: 0019)
 │   ├── tests/                  # Unit tests (SQLite in-memory)
 │   ├── scripts/seed.py         # Master data seed
 │   └── Dockerfile
-├── frontend/                   # Next.js 15 application
-│   └── src/
-│       ├── app/(dashboard)/    # Role-scoped pages
-│       ├── components/         # UI, forms, charts, tables
-│       ├── hooks/              # TanStack Query hooks
-│       ├── services/           # API call wrappers
-│       └── types/              # TypeScript types
-└── supabase/
-    └── rls_policies.sql        # Supabase RLS policies
+└── frontend/                   # Next.js 15 application
+    └── src/
+        ├── app/(dashboard)/    # Role-scoped pages
+        ├── components/         # UI, forms, charts, tables
+        ├── hooks/              # TanStack Query hooks
+        ├── services/           # API call wrappers
+        └── types/              # TypeScript types
 ```
 
 ---
