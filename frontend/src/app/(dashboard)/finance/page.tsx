@@ -124,7 +124,7 @@ export default function FinanceDashboard() {
                     <DialogHeader>
                       <DialogTitle>Flag Defaulted Supplier</DialogTitle>
                       <DialogDescription>
-                        Flagged suppliers will be blocked from new deposit requests.
+                        Flagged suppliers will be blocked from new advance payment requests.
                       </DialogDescription>
                     </DialogHeader>
 
@@ -283,7 +283,7 @@ export default function FinanceDashboard() {
           open={resolveConfirm !== null}
           onOpenChange={(open) => !open && setResolveConfirm(null)}
           title="Resolve this defaulted supplier flag?"
-          description="The supplier will be unblocked and can receive new advance deposit requests again."
+          description="The supplier will be unblocked and can receive new Supplier Advance Payment Requests again."
           confirmLabel="Yes, resolve flag"
           onConfirm={() => resolveConfirm && handleResolve(resolveConfirm)}
         />

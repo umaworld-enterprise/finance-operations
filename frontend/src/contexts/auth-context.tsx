@@ -1,8 +1,10 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from "react";
-import { createClient } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
 import { api, ApiHttpError } from "@/lib/api";
+import { getToken, setToken, clearToken } from "@/lib/auth-token";
+import { loadGoogleIdentity } from "@/lib/google-identity";
 import type { AppUser } from "@/types";
 
 const DEV_USER: AppUser = {
@@ -20,6 +22,13 @@ const DEV_USER: AppUser = {
 
 const isDev = process.env.NODE_ENV === "development";
 
+interface LoginResponse {
+  access_token: string;
+  token_type: "bearer";
+  expires_in: number;
+  user: AppUser;
+}
+
 interface AuthState {
   user: AppUser | null;
   loading: boolean;
@@ -34,8 +43,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(isDev ? DEV_USER : null);
   const [loading, setLoading] = useState(!isDev);
   const [authError, setAuthError] = useState<string | null>(null);
-  const supabaseRef = useRef(createClient());
   const fetchedRef = useRef(false);
+  const router = useRouter();
 
   const fetchAppUser = useCallback(async () => {
     if (isDev) {
@@ -47,17 +56,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (fetchedRef.current) return;
     fetchedRef.current = true;
 
-    const supabase = supabaseRef.current;
-    try {
-      // getSession() reads from localStorage — no blocking network call.
-      // getUser() makes a Supabase network round-trip that can hang on stale PKCE/refresh state.
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) {
-        setUser(null);
-        setLoading(false);
-        return;
-      }
+    if (!getToken()) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
 
+    try {
       const { data } = await api.get<AppUser>("/auth/me");
       setUser(data);
       setAuthError(null);
@@ -67,8 +72,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (err.status === 403) {
           setAuthError(/deactiv/i.test(err.message) ? "deactivated" : "not_registered");
         } else if (err.status === 401) {
-          // Expired token — clear session so the user sees the sign-in button cleanly.
-          await supabaseRef.current.auth.signOut();
+          // Expired token — clear it so the user sees the sign-in button cleanly.
+          clearToken();
           setAuthError(null);
         } else {
           // Backend returned an unexpected HTTP error (e.g. 500) — don't claim the user is unregistered.
@@ -85,39 +90,72 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (isDev) return;
     fetchAppUser();
-
-    const { data: { subscription } } = supabaseRef.current.auth.onAuthStateChange(
-      async (event) => {
-        if (event === "SIGNED_IN") {
-          // If already fetched, this is a background token refresh — don't re-verify.
-          if (fetchedRef.current) return;
-          setLoading(true);
-          await fetchAppUser();
-        } else if (event === "SIGNED_OUT") {
-          setUser(null);
-          setAuthError(null);
-          setLoading(false);
-          fetchedRef.current = false;
-        }
-      }
-    );
-
-    return () => subscription.unsubscribe();
   }, [fetchAppUser]);
+
+  const handleAuthCode = useCallback(
+    async (code: string) => {
+      try {
+        const { data } = await api.post<LoginResponse>("/auth/google/login", { code });
+        setToken(data.access_token, data.expires_in);
+        fetchedRef.current = true;
+        setUser(data.user);
+        setAuthError(null);
+        router.push("/"); // RootPage routes to the user's role home
+      } catch (err: unknown) {
+        setUser(null);
+        if (err instanceof ApiHttpError && err.status === 403) {
+          setAuthError(/deactiv/i.test(err.message) ? "deactivated" : "not_registered");
+          router.push("/"); // RootPage renders the matching error screen
+        } else {
+          // Google exchange failed / backend unreachable — stay on the login
+          // page and let it show the failure banner.
+          setAuthError("auth_failed");
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [router]
+  );
 
   const signInWithGoogle = useCallback(async () => {
     setAuthError(null);
-    await supabaseRef.current.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-  }, []);
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      console.error("[auth] NEXT_PUBLIC_GOOGLE_CLIENT_ID is not set");
+      setAuthError("auth_failed");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await loadGoogleIdentity();
+      const codeClient = window.google!.accounts!.oauth2!.initCodeClient({
+        client_id: clientId,
+        scope: "openid email profile",
+        ux_mode: "popup",
+        callback: (response) => {
+          if (response.code) {
+            void handleAuthCode(response.code);
+          } else {
+            setLoading(false);
+            if (response.error) setAuthError("auth_failed");
+          }
+        },
+        // Popup closed or blocked — just stop the spinner, no error banner.
+        error_callback: () => setLoading(false),
+      });
+      codeClient.requestCode();
+    } catch (err) {
+      console.error("[auth] Google sign-in failed to start:", err);
+      setLoading(false);
+      setAuthError("auth_failed");
+    }
+  }, [handleAuthCode]);
 
   const signOut = useCallback(async () => {
     if (!isDev) {
-      await supabaseRef.current.auth.signOut();
+      clearToken();
     }
     setUser(null);
     setAuthError(null);

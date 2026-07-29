@@ -12,6 +12,9 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { TrancheList } from "@/components/tranches/TrancheList";
+import { RequestAuditTrail } from "@/components/tranches/RequestAuditTrail";
+import { RequestAdjustments } from "@/components/tranches/RequestAdjustments";
 import { useRequest, useRequestAction, useFieldVisibility, useUpdateRemarks, usePayment } from "@/hooks/useRequests";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useState, useEffect } from "react";
@@ -184,6 +187,33 @@ export default function MerchandiserRequestDetail() {
           </CardContent>
         </Card>
 
+        {/* Advance Payment Tranches — unpaid tranches stay editable by the
+            request owner; paid tranches are locked. */}
+        <Card>
+          <CardContent className="p-5 md:p-6">
+            <h2 className="text-sm font-semibold text-foreground mb-1">Advance Payment Tranches</h2>
+            <p className="text-xs text-muted-foreground mb-4">
+              You can edit the amount and tentative payment date of unpaid tranches.
+              The Accounts team is notified of every change. Paid tranches are locked.
+            </p>
+            <TrancheList
+              requestId={id}
+              tranches={req.tranches ?? []}
+              currency={req.currency}
+              mode={
+                req.is_locked ||
+                ["cancelled_by_merchandiser", "cancelled_by_accounts", "rejected_by_hom"].includes(
+                  req.current_status,
+                )
+                  ? "readonly"
+                  : "merchandiser"
+              }
+            />
+          </CardContent>
+        </Card>
+
+        <RequestAdjustments requestId={id} currency={req.currency} linkBase="/merchandiser" />
+
         {snap && (fv.grace_etd !== false || fv.etd_grace_overdue_days !== false || fv.actual_etd_overdue_days !== false || fv.default_status !== false) && (
           <Card>
             <CardContent className="p-5 md:p-6">
@@ -253,6 +283,8 @@ export default function MerchandiserRequestDetail() {
           </CardContent>
         </Card>
 
+        <RequestAuditTrail requestId={id} />
+
         {(canHold || canResume || canCancel) && (
           <Card>
             <CardContent className="p-5 md:p-6 space-y-4">
@@ -292,7 +324,7 @@ export default function MerchandiserRequestDetail() {
         open={cancelConfirm}
         onOpenChange={setCancelConfirm}
         title="Cancel this request?"
-        description="This will cancel your advance deposit request. The Accounts team will be notified. This action may not be reversible."
+        description="This will cancel your Supplier Advance Payment Request. The Accounts team will be notified. This action may not be reversible."
         confirmLabel="Yes, cancel request"
         destructive
         onConfirm={() => doAction("cancel")}

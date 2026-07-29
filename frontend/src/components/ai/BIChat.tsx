@@ -48,7 +48,7 @@ interface BIQueryResponse {
 // ── Suggested prompts ─────────────────────────────────────────────────────────
 
 const SUGGESTIONS = [
-  { label: "Status overview", prompt: "Give me a complete status overview of all deposit requests" },
+  { label: "Status overview", prompt: "Give me a complete status overview of all supplier advance payment requests" },
   { label: "Pending payments", prompt: "Which requests are still pending payment and how old are they?" },
   { label: "Overdue shipments", prompt: "Show all overdue or critical shipments with their supplier names" },
   { label: "Cost of fund", prompt: "What is the total cost of fund and which requests contribute the most?" },

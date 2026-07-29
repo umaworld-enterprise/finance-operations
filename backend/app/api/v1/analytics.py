@@ -224,6 +224,22 @@ async def get_by_customer(
     )
 
 
+@router.get("/outstanding")
+async def get_outstanding_tracker(
+    current_user: User, db: DB,
+    group_by: str = Query("week", pattern="^(week|merchandiser|customer|vertical)$"),
+    date_from: str | None = Query(None), date_to: str | None = Query(None),
+) -> list[dict]:
+    """Outstanding Deposit Tracker — unpaid requested tranche value grouped by
+    weekly request-date range, merchandiser, customer or vertical, with
+    per-currency totals."""
+    await _check_section_access("outstanding_tracker", current_user, db)
+    svc = AnalyticsService(db)
+    return await svc.get_outstanding_tracker(
+        group_by, _parse_d(date_from), _parse_d(date_to)
+    )
+
+
 @router.get("/npa", response_model=NpaResponse)
 async def get_npa(
     current_user: User,

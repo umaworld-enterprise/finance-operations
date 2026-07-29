@@ -60,18 +60,18 @@ def build_payment_processed_email(
     subject = f"Payment processed — {request_number}"
     if tt_copy_url:
         text = (
-            f"The payment for deposit request {request_number} has been processed.\n\n"
+            f"The payment for Supplier Advance Payment Request {request_number} has been processed.\n\n"
             f"TT copy: {tt_copy_url}\n"
         )
         html = (
-            f"<p>The payment for deposit request <strong>{request_number}</strong> "
+            f"<p>The payment for Supplier Advance Payment Request <strong>{request_number}</strong> "
             f"has been processed.</p>"
             f'<p><a href="{tt_copy_url}">View the TT copy</a></p>'
         )
     else:
-        text = f"The payment for deposit request {request_number} has been processed.\n"
+        text = f"The payment for Supplier Advance Payment Request {request_number} has been processed.\n"
         html = (
-            f"<p>The payment for deposit request <strong>{request_number}</strong> "
+            f"<p>The payment for Supplier Advance Payment Request <strong>{request_number}</strong> "
             f"has been processed.</p>"
         )
     return subject, text, html

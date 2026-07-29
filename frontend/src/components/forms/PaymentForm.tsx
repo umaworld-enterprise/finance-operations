@@ -40,9 +40,13 @@ interface Props {
   onProcessed?: () => void;
   // Finance Admin: may record the ship date only — everything else read-only.
   readOnly?: boolean;
+  // Tranche-driven requests: processing and TT copies happen per tranche, so
+  // the request-level Process button and TT upload are hidden. A legacy
+  // request-level TT copy link (pre-tranche records) is still shown.
+  trancheMode?: boolean;
 }
 
-export function PaymentForm({ requestId, isLocked, existing, onProcessed, readOnly = false }: Props) {
+export function PaymentForm({ requestId, isLocked, existing, onProcessed, readOnly = false, trancheMode = false }: Props) {
   const savePayment = useSavePayment();
   const processPayment = useProcessPayment();
   const saveShipDate = useSaveShipDate();
@@ -203,13 +207,16 @@ export function PaymentForm({ requestId, isLocked, existing, onProcessed, readOn
       </div>
 
       {/* TT Copy — stays interactive even when locked: the flow is process
-          (locks the record) → then upload the bank's TT copy. */}
+          (locks the record) → then upload the bank's TT copy. In tranche mode
+          uploads happen per tranche; a legacy request-level link still shows. */}
+      {(!trancheMode || ttCopyUrl) && (
       <div className="pt-4 border-t border-border space-y-3">
         <div>
           <p className="text-sm font-medium text-foreground">TT Copy</p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Upload the bank&apos;s TT copy (PDF or image, max 10 MB). It is saved to Google
-            Drive and the link is shared with the merchandiser automatically.
+            {trancheMode
+              ? "Request-level TT copy from before tranche-level payments."
+              : "Upload the bank's TT copy (PDF or image, max 10 MB). It is saved to Google Drive and the link is shared with the merchandiser automatically."}
           </p>
         </div>
 
@@ -225,7 +232,7 @@ export function PaymentForm({ requestId, isLocked, existing, onProcessed, readOn
           </a>
         )}
 
-        {!readOnly && (
+        {!readOnly && !trancheMode && (
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           <input
             ref={fileInputRef}
@@ -245,12 +252,14 @@ export function PaymentForm({ requestId, isLocked, existing, onProcessed, readOn
         </div>
         )}
       </div>
+      )}
 
       {!isLocked && !readOnly && (
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-border">
           <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
             {isSubmitting ? "Saving…" : "Save Details"}
           </Button>
+          {!trancheMode && (
           <Button
             type="button"
             onClick={() => setConfirmOpen(true)}
@@ -259,6 +268,7 @@ export function PaymentForm({ requestId, isLocked, existing, onProcessed, readOn
           >
             {processPayment.isPending ? "Processing…" : "Process Payment & Lock"}
           </Button>
+          )}
         </div>
       )}
 

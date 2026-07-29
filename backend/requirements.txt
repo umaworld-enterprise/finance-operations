@@ -17,9 +17,6 @@ slowapi==0.1.9
 pydantic==2.10.3
 pydantic-settings==2.6.1
 
-# Supabase
-supabase==2.10.0
-
 # Google integrations
 google-auth==2.36.0
 google-api-python-client==2.154.0
@@ -52,5 +49,6 @@ anthropic>=0.30.0
 pytest==8.3.4
 pytest-asyncio==0.24.0
 pytest-cov==6.0.0
+aiosqlite==0.20.0
 black==24.10.0
 ruff==0.8.3

@@ -238,6 +238,27 @@ function useByCustomer(enabled: boolean, filters: TabFilters) {
   });
 }
 
+interface OutstandingRow {
+  group: string;
+  tranche_count: number;
+  request_count: number;
+  outstanding: Record<string, number>;
+}
+
+function useOutstandingTracker(enabled: boolean, groupBy: string, dateFrom?: string, dateTo?: string) {
+  return useQuery<OutstandingRow[]>({
+    queryKey: ["analytics-outstanding", groupBy, dateFrom, dateTo],
+    queryFn: async () => {
+      const r = await api.get(`/analytics/outstanding${buildQs({ group_by: groupBy, date_from: dateFrom, date_to: dateTo })}`);
+      return r.data;
+    },
+    enabled,
+    staleTime: ANALYTICS_STALE,
+    gcTime: ANALYTICS_GC,
+    placeholderData: keepPreviousData,
+  });
+}
+
 function useMonthlyTrends(year: number) {
   return useQuery<MonthlyTrendPoint[]>({
     queryKey: ["analytics-monthly-trends", year],
@@ -258,6 +279,7 @@ const ALL_TABS = [
   { key: "by_merchandiser", label: "By Merchandiser", permKey: "by_merchandiser" },
   { key: "by_vertical",     label: "By Vertical",     permKey: "by_vertical" },
   { key: "by_customer",     label: "By Customer",     permKey: "by_customer" },
+  { key: "outstanding_tracker", label: "Outstanding", permKey: "outstanding_tracker" },
 ] as const;
 
 type TabKey = typeof ALL_TABS[number]["key"];
@@ -690,13 +712,105 @@ function ByCustomerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
   );
 }
 
+// ── Outstanding Deposit Tracker ───────────────────────────────────────────────
+// A payment requested by a merchandiser stays outstanding until it is paid —
+// calculated at tranche level, so only unpaid requested tranche value counts.
+
+const OUTSTANDING_GROUPS = [
+  { key: "week",         label: "Weekly (request date)" },
+  { key: "merchandiser", label: "Merchandiser" },
+  { key: "customer",     label: "Customer" },
+  { key: "vertical",     label: "Vertical" },
+] as const;
+
+function OutstandingTrackerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: string }) {
+  const [groupBy, setGroupBy] = useState<string>("week");
+  const { data = [], isLoading } = useOutstandingTracker(true, groupBy, dateFrom, dateTo);
+
+  // Currency columns are driven by the data — USD/CNY/EUR first, then any
+  // other currency present, so nothing is artificially hidden.
+  const currencies = useMemo(() => {
+    const preferred = ["USD", "CNY", "EUR"];
+    const present = new Set<string>();
+    data.forEach((row) => Object.keys(row.outstanding).forEach((c) => present.add(c)));
+    return [
+      ...preferred.filter((c) => present.has(c)),
+      ...[...present].filter((c) => !preferred.includes(c)).sort(),
+    ];
+  }, [data]);
+  const cols = 3 + Math.max(currencies.length, 1);
+
+  const groupHeading = OUTSTANDING_GROUPS.find((g) => g.key === groupBy)?.label ?? "Group";
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">Group by:</span>
+        <select
+          value={groupBy}
+          onChange={(e) => setGroupBy(e.target.value)}
+          className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          {OUTSTANDING_GROUPS.map((g) => (
+            <option key={g.key} value={g.key}>{g.label}</option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground">
+          Unpaid requested tranche value only — paid tranches are excluded, so partial
+          payments are reflected. Weekly ranges run Monday–Sunday on the request-created date.
+        </p>
+      </div>
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{groupHeading}</TableHead>
+                <TableHead className="text-right">Requests</TableHead>
+                <TableHead className="text-right">Unpaid Tranches</TableHead>
+                {currencies.length === 0 ? (
+                  <TableHead className="text-right">Outstanding</TableHead>
+                ) : (
+                  currencies.map((c) => (
+                    <TableHead key={c} className="text-right">Outstanding {c}</TableHead>
+                  ))
+                )}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? <TableSkeleton rows={8} cols={cols} />
+                : data.length === 0 ? <EmptyTable cols={cols} />
+                : data.map((row) => (
+                  <TableRow key={row.group}>
+                    <TableCell className="font-medium text-sm whitespace-nowrap">{row.group}</TableCell>
+                    <TableCell className="text-right tabular-nums">{row.request_count}</TableCell>
+                    <TableCell className="text-right tabular-nums">{row.tranche_count}</TableCell>
+                    {currencies.length === 0 ? (
+                      <TableCell className="text-right tabular-nums">—</TableCell>
+                    ) : (
+                      currencies.map((c) => (
+                        <TableCell key={c} className="text-right tabular-nums">
+                          {row.outstanding[c] != null ? fmtCurrency(row.outstanding[c], c) : "—"}
+                        </TableCell>
+                      ))
+                    )}
+                  </TableRow>
+                ))}
+            </TableBody>
+          </Table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // ── Overview tab (original analytics content) ─────────────────────────────────
 
 const GLOSSARY = [
   { term: "Grace ETD", def: "The estimated shipment date plus a configurable grace period (default 7 days). Requests past this date are considered overdue." },
   { term: "ETD Overdue (days)", def: "How many days past the Grace ETD the shipment is. Zero means on time." },
   { term: "Pmt→Ship (days)", def: "Days between the payment being processed and the actual ship date. Lower is better." },
-  { term: "Pmt→Request (days)", def: "Days between the deposit request being submitted and the payment being processed." },
+  { term: "Pmt→Request (days)", def: "Days between the advance payment request being submitted and the payment being processed." },
   { term: "Cost of Fund", def: "The financial cost of the shipment delay, calculated as deposit amount × annual rate × (delay days ÷ 365), where delay days run from the Grace ETD to the actual shipment date (or today while unshipped). Zero if shipped within grace. The rate is configurable by admins." },
   { term: "Default Status", def: "A risk classification: 'critical' = significantly overdue, 'delayed' = moderately overdue, 'on_time' = within grace period." },
 ];
@@ -1190,6 +1304,7 @@ export default function AnalyticsPage() {
         {activeTab === "by_merchandiser" && <ByMerchandiserTab dateFrom={globalFrom} dateTo={globalTo} />}
         {activeTab === "by_vertical" && <ByVerticalTab dateFrom={globalFrom} dateTo={globalTo} />}
         {activeTab === "by_customer" && <ByCustomerTab dateFrom={globalFrom} dateTo={globalTo} />}
+        {activeTab === "outstanding_tracker" && <OutstandingTrackerTab dateFrom={globalFrom} dateTo={globalTo} />}
 
         {/* Fallback: user landed on a tab they can't access */}
         {activeTab !== "overview" && !isSuperAdmin && !permsLoading && permissions &&

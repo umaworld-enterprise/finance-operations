@@ -87,7 +87,7 @@ export default function MerchandiserDashboard() {
 
   return (
     <RoleGuard allowedRoles={["merchandiser", "super_admin"]}>
-      <TopNav title="My Requests" subtitle="Track and manage your advance deposit requests" />
+      <TopNav title="My Requests" subtitle="Track and manage your Supplier Advance Payment Requests" />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard label="Total Requests"   value={allData?.total ?? "—"}       icon={ClipboardList} />

@@ -138,7 +138,7 @@ export default function FormLinksPage() {
             <CardHeader className="flex flex-row items-center justify-between pb-4">
               <div>
                 <CardTitle className="text-base">Active Links</CardTitle>
-                <CardDescription>Anyone with a link can submit a deposit request — no login required.</CardDescription>
+                <CardDescription>Anyone with a link can submit a Supplier Advance Payment Request — no login required.</CardDescription>
               </div>
               <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                 <DialogTrigger asChild>

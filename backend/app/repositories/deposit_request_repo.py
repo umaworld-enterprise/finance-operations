@@ -28,6 +28,7 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
                 selectinload(DepositRequest.vertical),
                 selectinload(DepositRequest.creator),
                 selectinload(DepositRequest.payment),
+                selectinload(DepositRequest.tranches),
             )
         )
 
@@ -154,8 +155,8 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         return result.scalar_one_or_none()
 
     async def get_with_core_relations(self, id: UUID) -> DepositRequest | None:
-        """Fetch with only the 4 relations DepositRequestResponse serializes
-        (supplier, customer, vertical, creator) — 5 round trips instead of 10.
+        """Fetch with only the relations DepositRequestResponse serializes
+        (supplier, customer, vertical, creator, tranches).
         Use for mutation responses; use get_with_relations for detail views."""
         result = await self._session.execute(
             select(DepositRequest)
@@ -168,6 +169,7 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
                 selectinload(DepositRequest.customer),
                 selectinload(DepositRequest.vertical),
                 selectinload(DepositRequest.creator),
+                selectinload(DepositRequest.tranches),
             )
         )
         return result.scalar_one_or_none()
@@ -201,22 +203,36 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         return list(result.scalars().all())
 
     async def generate_request_number(self) -> str:
-        """Generate next sequential request number: ADT-YYYY-NNNNN."""
+        """Generate next sequential request number: Dep-YYYY-0001.
+
+        The sequence restarts every calendar year. Historical ADT-YYYY-NNNNN
+        numbers remain valid and untouched — they simply never match the new
+        prefix, so both formats coexist.
+        """
         from datetime import datetime, timezone
         from sqlalchemy import text
 
         year = datetime.now(timezone.utc).year
-        prefix = f"ADT-{year}-"
+        prefix = f"Dep-{year}-"
         # Serialise concurrent submits for the rest of this transaction —
         # otherwise two requests read the same MAX and the second INSERT
-        # violates the request_number UNIQUE constraint.
-        await self._session.execute(text("SELECT pg_advisory_xact_lock(874512)"))
-        # Use MAX to avoid collisions when gaps exist in the sequence (e.g. seeded data).
+        # violates the request_number UNIQUE constraint. (Advisory locks are
+        # PostgreSQL-only; the unit-test SQLite database serialises writes on
+        # its own.)
+        if self._session.bind is not None and self._session.bind.dialect.name == "postgresql":
+            await self._session.execute(text("SELECT pg_advisory_xact_lock(874512)"))
+        # Highest existing number for the year — avoids collisions when gaps
+        # exist (e.g. seeded data). Length-first ordering keeps the comparison
+        # numeric once the padded sequence grows past 4 digits.
         result = await self._session.execute(
-            select(func.max(DepositRequest.request_number)).where(
-                DepositRequest.request_number.like(f"{prefix}%")
+            select(DepositRequest.request_number)
+            .where(DepositRequest.request_number.like(f"{prefix}%"))
+            .order_by(
+                func.length(DepositRequest.request_number).desc(),
+                DepositRequest.request_number.desc(),
             )
+            .limit(1)
         )
         max_num = result.scalar_one_or_none()
         last_seq = int(max_num.split("-")[-1]) if max_num else 0
-        return f"{prefix}{last_seq + 1:05d}"
+        return f"{prefix}{last_seq + 1:04d}"

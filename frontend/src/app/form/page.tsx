@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useForm, Controller } from "react-hook-form";
-import { Combobox } from "@/components/ui/Combobox";
+import { useForm, useFieldArray } from "react-hook-form";
 import Image from "next/image";
-import { CheckCircle2, Loader2, AlertCircle } from "lucide-react";
+import { CheckCircle2, Loader2, AlertCircle, Plus, Trash2 } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 
@@ -29,6 +28,8 @@ type FormConfig = Record<string, FieldConfig>;
 
 // ── All possible fields in render order ───────────────────────────────────────
 
+// payment_terms / deposit_percentage / deposit_amount were retired in favour
+// of Advance Payment Tranches (always shown — every request needs at least one).
 const FIELD_ORDER = [
   "supplier_id",
   "customer_id",
@@ -36,16 +37,10 @@ const FIELD_ORDER = [
   "sunshine_invoice_number",
   "supplier_invoice_number",
   "currency",
-  "payment_terms",
   "total_supplier_invoice_amount",
-  "deposit_percentage",
-  "deposit_amount",
   "estimated_etd",
   "remarks",
 ] as const;
-
-
-type FieldKey = typeof FIELD_ORDER[number];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -63,6 +58,22 @@ function label(cfg: FormConfig, key: string, fallback: string): string {
 
 function currencyLabel(c: string) {
   return c === "CNY" ? "CNY (RMB)" : c;
+}
+
+// 1 → "I", 2 → "II", … for tranche labels.
+function roman(n: number): string {
+  const map: [number, string][] = [
+    [1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"],
+    [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"],
+  ];
+  let out = "";
+  for (const [v, s] of map) {
+    while (n >= v) {
+      out += s;
+      n -= v;
+    }
+  }
+  return out;
 }
 
 function Field({
@@ -91,20 +102,23 @@ const inputCls = "w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 
 
 // ── Form values type ──────────────────────────────────────────────────────────
 
+type TrancheRow = {
+  amount: string;
+  tentative_payment_date: string;
+};
+
 type FormValues = {
   submitter_email: string;
   supplier_id: string;
   customer_id: string;
   vertical_id: string;
   currency: string;
-  payment_terms: string;
   sunshine_invoice_number: string;
   supplier_invoice_number: string;
   total_supplier_invoice_amount: string;
-  deposit_percentage: string;
-  deposit_amount: string;
   estimated_etd?: string;
   remarks: string;
+  tranches: TrancheRow[];
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -112,7 +126,6 @@ type FormValues = {
 export default function PublicFormPage() {
   const [masters, setMasters] = useState<Masters | null>(null);
   const [config, setConfig] = useState<FormConfig>({});
-  const [paymentTermOptions, setPaymentTermOptions] = useState<string[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [submitted, setSubmitted] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -128,10 +141,22 @@ export default function PublicFormPage() {
     control,
     formState: { errors },
     setError,
-    clearErrors,
-  } = useForm<FormValues>({ mode: "onBlur" });
+  } = useForm<FormValues>({
+    mode: "onBlur",
+    defaultValues: { tranches: [{ amount: "", tentative_payment_date: "" }] },
+  });
+  const { fields: trancheFields, append: appendTranche, remove: removeTranche } = useFieldArray({
+    control,
+    name: "tranches",
+  });
 
   const selectedSupplierId = watch("supplier_id");
+  const watchedTranches = watch("tranches");
+  const totalInvoiceAmount = Number(watch("total_supplier_invoice_amount")) || 0;
+  const trancheTotal = (watchedTranches ?? []).reduce(
+    (sum, t) => sum + (Number(t?.amount) || 0),
+    0,
+  );
 
   // Find selected supplier to check for fixed deposit amount and flag status
   const selectedSupplier = masters?.suppliers.find((s) => s.id === selectedSupplierId);
@@ -143,15 +168,14 @@ export default function PublicFormPage() {
     overrideFlagRef.current = false;
   }, [selectedSupplierId]);
 
-  // Auto-fill deposit: fixed amount per supplier, or percentage-based
+  // Fixed-deposit suppliers: prefill Tranche I with the fixed advance amount.
   useEffect(() => {
     if (hasFixedDeposit && selectedSupplier?.fixed_deposit_amount != null) {
-      setValue("deposit_amount", String(selectedSupplier.fixed_deposit_amount));
-      setValue("deposit_percentage", "");
+      setValue("tranches.0.amount", String(selectedSupplier.fixed_deposit_amount));
     }
   }, [hasFixedDeposit, selectedSupplier?.fixed_deposit_amount, setValue]);
 
-  // Load masters and config in parallel; payment terms come back inside /public/masters
+  // Load masters and config in parallel
   useEffect(() => {
     Promise.all([
       fetch(`${API}/public/masters`).then((r) => r.json()),
@@ -160,9 +184,6 @@ export default function PublicFormPage() {
       .then(([m, c]) => {
         setMasters(m);
         setConfig(c ?? {});
-        if (Array.isArray(m?.payment_terms)) {
-          setPaymentTermOptions(m.payment_terms);
-        }
       })
       .catch(() => setLoadError(true));
   }, []);
@@ -186,6 +207,26 @@ export default function PublicFormPage() {
       setError("submitter_email", { message: "Enter a valid email address" });
       hasError = true;
     }
+
+    // Advance Payment Tranches — always required (at least one).
+    values.tranches.forEach((t, i) => {
+      if (!t.amount || Number(t.amount) <= 0) {
+        setError(`tranches.${i}.amount`, { message: "Enter a positive amount" });
+        hasError = true;
+      }
+      if (!t.tentative_payment_date) {
+        setError(`tranches.${i}.tentative_payment_date`, { message: "Date is required" });
+        hasError = true;
+      }
+    });
+    const total = values.tranches.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+    const invoiceTotal = Number(values.total_supplier_invoice_amount) || 0;
+    if (invoiceTotal > 0 && total > invoiceTotal) {
+      setError("tranches.0.amount", {
+        message: "Total of tranche amounts cannot exceed the total supplier proforma invoice amount",
+      });
+      hasError = true;
+    }
     if (hasError) return;
 
     setServerError(null);
@@ -199,13 +240,20 @@ export default function PublicFormPage() {
       // Include estimated_etd when provided
       if (values.estimated_etd?.trim()) body.estimated_etd = values.estimated_etd;
 
+      // Advance Payment Tranches — the deposit amount is derived server-side
+      // as their sum; the % of invoice is always system-calculated.
+      body.tranches = values.tranches.map((t) => ({
+        amount: parseFloat(t.amount),
+        tentative_payment_date: t.tentative_payment_date,
+      }));
+
       // Include remaining config-driven visible fields
       for (const key of FIELD_ORDER) {
         if (key === "estimated_etd") continue; // already handled above
         if (!isVisible(config, key)) continue;
         const v = values[key];
-        if (["total_supplier_invoice_amount", "deposit_percentage", "deposit_amount"].includes(key)) {
-          body[key] = parseFloat(v) || 0;
+        if (key === "total_supplier_invoice_amount") {
+          body[key] = parseFloat(v ?? "") || 0;
         } else {
           body[key] = v || null;
         }
@@ -249,7 +297,7 @@ export default function PublicFormPage() {
           <CheckCircle2 className="h-14 w-14 text-gray-900 mx-auto mb-5" />
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Request Submitted</h1>
           <p className="text-gray-600 text-sm mb-6">
-            Your deposit request has been received and will be reviewed by the accounts team.
+            Your Supplier Advance Payment Request has been received and will be reviewed by the accounts team.
           </p>
           <div className="bg-gray-50 rounded-xl border border-gray-200 px-6 py-4 mb-6">
             <p className="text-xs text-gray-500 mb-1">Request Number</p>
@@ -297,7 +345,7 @@ export default function PublicFormPage() {
           <div className="bg-white border border-gray-200 p-3 rounded-xl mb-3 shadow-sm">
             <Image src="/logo.png" alt="Sunshine" width={36} height={36} className="h-9 w-9 object-contain" />
           </div>
-          <h1 className="text-xl font-bold text-gray-900">Sunshine — Advance Deposit Request</h1>
+          <h1 className="text-xl font-bold text-gray-900">Sunshine — Supplier Advance Payment Request</h1>
           <p className="text-sm text-gray-500 mt-1 text-center">
             Fill in all required fields and submit. The finance team will review your request.
           </p>
@@ -378,13 +426,11 @@ export default function PublicFormPage() {
             </div>
           )}
 
-          {/* Financials */}
-          {(show("currency") || show("total_supplier_invoice_amount") || show("deposit_percentage") || show("deposit_amount")) && (
-            <hr className="border-gray-100" />
-          )}
+          {/* Financials — the tranche section always renders */}
+          <hr className="border-gray-100" />
 
           {show("currency") && (
-            <Field label={lbl("currency", "Currency of Advance Deposit")} required={req("currency")} error={errors.currency?.message}>
+            <Field label={lbl("currency", "Currency of Advance Payment")} required={req("currency")} error={errors.currency?.message}>
               <select {...register("currency")} className={inputCls} defaultValue="">
                 <option value="" disabled>Choose currency…</option>
                 {masters.currencies.map((c) => (
@@ -400,86 +446,105 @@ export default function PublicFormPage() {
             </Field>
           )}
 
-          {/* Payment Terms — 3-field group: Deposit %, Balance % (auto), Balance Due */}
-          {(show("payment_terms") || (show("deposit_percentage") && !hasFixedDeposit)) && (
-            <div className="space-y-1.5">
+          {/* Advance Payment Tranches — one or more tranches, each with an
+              amount and a tentative payment date. % of invoice is calculated. */}
+          <div className="space-y-3">
+            <div>
               <label className="block text-sm font-medium text-gray-700">
-                Payment Terms{(req("deposit_percentage") || req("payment_terms")) && <span className="text-red-500 ml-0.5">*</span>}
+                Advance Payment Tranches<span className="text-red-500 ml-0.5">*</span>
               </label>
-              <div className="grid grid-cols-3 gap-3">
-                {/* Deposit (%) */}
-                <div className="space-y-1">
-                  <label className="block text-xs text-gray-500">Deposit (%)</label>
-                  <input
-                    {...register("deposit_percentage")}
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    placeholder="e.g. 30"
-                    className={inputCls}
-                  />
-                  {errors.deposit_percentage && (
-                    <p className="text-xs text-red-600 flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" />{errors.deposit_percentage.message}
-                    </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Split the advance into one or more tranches. The percentage of the
+                proforma invoice is calculated automatically.
+              </p>
+            </div>
+
+            {trancheFields.map((f, i) => (
+              <div key={f.id} className="rounded-xl border border-gray-200 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-900">Tranche {roman(i + 1)}</span>
+                  {trancheFields.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeTranche(i)}
+                      aria-label={`Remove Tranche ${roman(i + 1)}`}
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-gray-50 transition-colors"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   )}
                 </div>
-                {/* Balance (%) — auto-calculated */}
-                <div className="space-y-1">
-                  <label className="block text-xs text-gray-500">Balance (%)</label>
-                  <input
-                    type="number"
-                    value={100 - (Number(watch("deposit_percentage")) || 0)}
-                    readOnly
-                    className={inputCls + " opacity-70 cursor-not-allowed"}
-                    tabIndex={-1}
-                  />
-                </div>
-                {/* Balance Due */}
-                <div className="space-y-1">
-                  <label className="block text-xs text-gray-500">Balance Due{req("payment_terms") && <span className="text-red-500 ml-0.5">*</span>}</label>
-                  <Controller
-                    name="payment_terms"
-                    control={control}
-                    render={({ field }) => (
-                      <Combobox
-                        value={field.value ?? ""}
-                        onChange={field.onChange}
-                        options={paymentTermOptions}
-                        placeholder="Select…"
-                        allowFreeText={false}
-                        aria-invalid={!!errors.payment_terms}
-                      />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-xs text-gray-500">Amount</label>
+                    <input
+                      {...register(`tranches.${i}.amount`)}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="0.00"
+                      className={inputCls}
+                    />
+                    {errors.tranches?.[i]?.amount && (
+                      <p className="text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />{errors.tranches[i]?.amount?.message}
+                      </p>
                     )}
-                  />
-                  {errors.payment_terms && (
-                    <p className="text-xs text-red-600 flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" />{errors.payment_terms.message}
-                    </p>
-                  )}
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs text-gray-500">% of invoice (auto)</label>
+                    <input
+                      type="text"
+                      value={
+                        totalInvoiceAmount > 0 && Number(watchedTranches?.[i]?.amount) > 0
+                          ? `${((Number(watchedTranches[i].amount) / totalInvoiceAmount) * 100).toFixed(2)}%`
+                          : "—"
+                      }
+                      readOnly
+                      tabIndex={-1}
+                      className={inputCls + " opacity-70 cursor-not-allowed"}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs text-gray-500">Tentative payment date</label>
+                    <input
+                      {...register(`tranches.${i}.tentative_payment_date`)}
+                      type="date"
+                      className={inputCls}
+                    />
+                    {errors.tranches?.[i]?.tentative_payment_date && (
+                      <p className="text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />{errors.tranches[i]?.tentative_payment_date?.message}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            ))}
 
-          {show("deposit_amount") && (
-            <Field label={lbl("deposit_amount", "Deposit Amount")} required={req("deposit_amount")} error={errors.deposit_amount?.message}>
-              <input
-                {...register("deposit_amount")}
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder={hasFixedDeposit ? "Fixed" : "Enter amount"}
-                readOnly={hasFixedDeposit}
-                className={inputCls + (hasFixedDeposit ? " opacity-70" : "")}
-              />
-            </Field>
-          )}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => appendTranche({ amount: "", tentative_payment_date: "" })}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-xl px-3 py-2 hover:bg-gray-50 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" /> Add Tranche {roman(trancheFields.length + 1)}
+              </button>
+              <p className="text-xs text-gray-500">
+                Total advance:{" "}
+                <span className="font-medium text-gray-900">
+                  {trancheTotal.toFixed(2)} {watch("currency") || ""}
+                </span>
+                {totalInvoiceAmount > 0 && (
+                  <> ({((trancheTotal / totalInvoiceAmount) * 100).toFixed(2)}% of invoice)</>
+                )}
+              </p>
+            </div>
+          </div>
 
           {hasFixedDeposit && (
             <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              This supplier has a fixed deposit amount of {selectedSupplier?.fixed_deposit_amount} {watch("currency") || ""} — percentage field is not applicable.
+              This supplier has a fixed advance amount of {selectedSupplier?.fixed_deposit_amount} {watch("currency") || ""} — Tranche I has been pre-filled with it.
             </p>
           )}
 

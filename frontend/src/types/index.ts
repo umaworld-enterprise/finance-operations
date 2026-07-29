@@ -91,6 +91,76 @@ export interface AppUser {
 
 export type FontSize = "default" | "large" | "xlarge";
 
+// ── Advance Payment Tranches ───────────────────────────────────────────────────
+
+export type TrancheStatus = "unpaid" | "paid";
+
+export interface PaymentTranche {
+  id: string;
+  deposit_request_id: string;
+  tranche_number: number;
+  label: string;
+  amount: number;
+  tentative_payment_date: string | null;
+  /** amount / total supplier proforma invoice amount — system-calculated, read-only. */
+  percentage_of_invoice: number | null;
+  status: TrancheStatus;
+  paid_at: string | null;
+  paid_by: string | null;
+  tt_copy_url: string | null;
+  tt_copy_file_id: string | null;
+  tt_copy_filename: string | null;
+  is_legacy: boolean;
+  created_at: string;
+  updated_at: string;
+  adjusted_out_total: number | null;
+  available_paid_balance: number | null;
+  adjusted_in_total: number | null;
+  request_number: string | null;
+  request_currency: string | null;
+  supplier_invoice_number: string | null;
+  sunshine_invoice_number: string | null;
+}
+
+export type AdjustmentStatus = "completed" | "pending_approval" | "rejected";
+
+export interface InvoiceAdjustment {
+  id: string;
+  source_tranche_id: string;
+  destination_tranche_id: string;
+  amount: number;
+  reason: string | null;
+  status: AdjustmentStatus;
+  performed_by: string;
+  created_at: string;
+  performed_by_name: string | null;
+  source_request_id: string | null;
+  source_request_number: string | null;
+  source_tranche_label: string | null;
+  destination_request_id: string | null;
+  destination_request_number: string | null;
+  destination_tranche_label: string | null;
+  supplier_name: string | null;
+}
+
+export interface SupplierTrancheOptions {
+  paid_sources: PaymentTranche[];
+  unpaid_destinations: PaymentTranche[];
+}
+
+export interface RequestAuditEntry {
+  id: string;
+  entity_name: string;
+  entity_id: string;
+  field_name: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  action: string;
+  changed_by_name: string | null;
+  changed_by_email: string | null;
+  changed_at: string;
+}
+
 // ── Deposit Request ────────────────────────────────────────────────────────────
 
 export interface DepositRequest {
@@ -117,6 +187,7 @@ export interface DepositRequest {
   creator: AppUser | null;
   created_at: string;
   updated_at: string;
+  tranches: PaymentTranche[];
 }
 
 export interface DepositRequestDetail extends DepositRequest {

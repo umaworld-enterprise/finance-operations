@@ -25,6 +25,7 @@ from app.models.enums import CurrencyCode
 from app.models.integrations import DefaultedSupplier
 from app.models.masters import Customer, PaymentTermsMaster, Supplier, SystemConfig, Vertical
 from app.schemas.deposit_request import DepositRequestCreate
+from app.schemas.tranche import TrancheCreate
 from app.services.deposit_request_service import DepositRequestService
 
 router = APIRouter(prefix="/public", tags=["public-form"])
@@ -125,7 +126,10 @@ class PublicSubmissionRequest(BaseModel):
     # Core (always required in DB)
     supplier_id: UUID
     customer_id: UUID
-    deposit_amount: Decimal = Field(gt=0)
+    # Either explicit tranches (the current form) or a plain deposit_amount
+    # (legacy callers) — DepositRequestCreate enforces one of the two.
+    deposit_amount: Decimal | None = Field(None, gt=0)
+    tranches: list[TrancheCreate] | None = None
     total_supplier_invoice_amount: Decimal = Field(gt=0)
     # Configurable — may be hidden/optional
     vertical_id: UUID | None = None
@@ -175,14 +179,15 @@ async def submit_public_form(
     def field_required(key: str) -> bool:
         return cfg.get(key, {}).get("required", False)
 
-    # Validate configurable required fields
+    # Validate configurable required fields. deposit_percentage is NOT checked
+    # any more — the field was retired in favour of Advance Payment Tranches
+    # (the percentage is system-calculated), so a stale "required" entry in the
+    # stored form config must not block submissions.
     errors: list[str] = []
     if field_required("vertical_id") and body.vertical_id is None:
         errors.append("Vertical / Category is required")
     if field_required("currency") and body.currency is None:
         errors.append("Currency is required")
-    if field_required("deposit_percentage") and body.deposit_percentage is None:
-        errors.append("Deposit percentage is required")
     if errors:
         raise BusinessRuleError("; ".join(errors))
 
@@ -208,6 +213,7 @@ async def submit_public_form(
             payment_terms=body.payment_terms,
             remarks=body.remarks,
             override_flagged_supplier=body.override_flagged_supplier,
+            tranches=body.tranches,
         )
     except ValidationError as exc:
         messages = "; ".join(
@@ -226,5 +232,5 @@ async def submit_public_form(
 
     return PublicSubmissionResponse(
         request_number=request.request_number,
-        message=f"Your deposit request {request.request_number} has been submitted successfully. The accounts team will review it shortly.",
+        message=f"Your Supplier Advance Payment Request {request.request_number} has been submitted successfully. The accounts team will review it shortly.",
     )

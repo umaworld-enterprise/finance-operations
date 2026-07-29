@@ -21,6 +21,7 @@ from app.models.enums import (
     SubmissionSource,
     UserRole,
 )
+from app.models.tranche import PaymentTranche
 from app.models.workflow import AccountsAction, MerchandiserAction, StatusHistory
 from app.repositories.deposit_request_repo import DepositRequestRepository
 from app.repositories.supplier_repo import SupplierRepository
@@ -65,8 +66,9 @@ class DepositRequestService:
         # 2. Generate request number
         request_number = await self._repo.generate_request_number()
 
-        # 3. Persist — exclude the override flag field (not a DB column)
-        create_data = data.model_dump(exclude={"override_flagged_supplier"})
+        # 3. Persist — exclude fields that are not DB columns on the request
+        create_data = data.model_dump(exclude={"override_flagged_supplier", "tranches"})
+        self._apply_derived_percentage(data, create_data)
         request = await self._repo.create(
             request_number=request_number,
             submission_source=source,
@@ -74,6 +76,7 @@ class DepositRequestService:
             current_status=initial_status,
             **create_data,
         )
+        self._add_tranches(request, data)
 
         # 4. Write initial status history
         self._session.add(
@@ -125,14 +128,17 @@ class DepositRequestService:
 
         request_number = await self._repo.generate_request_number()
 
+        create_data = data.model_dump(exclude={"override_flagged_supplier", "tranches"})
+        self._apply_derived_percentage(data, create_data)
         request = await self._repo.create(
             request_number=request_number,
             submission_source=SubmissionSource.PUBLIC_FORM,
             created_by=created_by,
             submitter_email=submitter_email,
             current_status=initial_status,
-            **data.model_dump(exclude={"override_flagged_supplier"}),
+            **create_data,
         )
+        self._add_tranches(request, data)
 
         self._session.add(
             StatusHistory(
@@ -144,6 +150,46 @@ class DepositRequestService:
         )
         loaded = await self._repo.get_with_core_relations(request.id)
         return loaded  # type: ignore[return-value]
+
+    @staticmethod
+    def _apply_derived_percentage(data: DepositRequestCreate, create_data: dict) -> None:
+        """When tranches drive the deposit amount, the request-level deposit
+        percentage is system-calculated (sum of tranches / invoice total)."""
+        if data.tranches and data.total_supplier_invoice_amount:
+            create_data["deposit_percentage"] = round(
+                Decimal(str(create_data["deposit_amount"]))
+                / Decimal(str(data.total_supplier_invoice_amount))
+                * 100,
+                2,
+            )
+
+    def _add_tranches(self, request: DepositRequest, data: DepositRequestCreate) -> None:
+        """Create the request's Advance Payment Tranches.
+
+        Submissions without explicit tranches (public form, legacy API
+        callers) get a single compatibility tranche covering the full deposit
+        amount, flagged is_legacy since it carries no tentative payment date.
+        """
+        if data.tranches:
+            for i, t in enumerate(data.tranches, start=1):
+                self._session.add(
+                    PaymentTranche(
+                        deposit_request_id=request.id,
+                        tranche_number=i,
+                        amount=t.amount,
+                        tentative_payment_date=t.tentative_payment_date,
+                    )
+                )
+        else:
+            self._session.add(
+                PaymentTranche(
+                    deposit_request_id=request.id,
+                    tranche_number=1,
+                    amount=request.deposit_amount,
+                    tentative_payment_date=None,
+                    is_legacy=True,
+                )
+            )
 
     async def update_remarks(
         self,

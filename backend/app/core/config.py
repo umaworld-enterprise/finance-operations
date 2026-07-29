@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AnyHttpUrl, field_validator, model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,11 +21,12 @@ class Settings(BaseSettings):
     app_debug: bool = False
     secret_key: str
 
-    # Supabase
-    supabase_url: AnyHttpUrl
-    supabase_anon_key: str
-    supabase_service_role_key: str
-    supabase_jwt_secret: str
+    # Google OAuth (sign-in) — the app verifies Google identities and issues
+    # its own JWTs signed with secret_key. Empty values disable login (dev
+    # mode bypasses auth entirely).
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    access_token_expire_minutes: int = 720  # 12h sessions
 
     # Database
     database_url: str
