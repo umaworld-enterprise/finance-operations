@@ -216,6 +216,18 @@ Four fields: Payment Date, Bank, Payment Reference Number, Payment Status.
    `get_outstanding_tracker` merchandiser-scope leak if that section is ever
    granted to merchandisers at runtime.
 
+## Post-note addition (CIO request, 30 Jul 2026)
+
+**Onboarding Department: free text → dropdown.**
+`frontend/src/app/onboarding/page.tsx` — the Department input is now a
+`Select` over a fixed `DEPARTMENTS` constant (Merchandising, Accounts,
+Finance, Management, IT, Other) with a disabled placeholder, still required.
+Deliberately UI-only (client decision): the backend keeps `department` as a
+free `String(100)` (`ProfileUpdate.department: str`, no migration), so
+legacy free-typed values already in `users.department` stay valid and
+extending the list is a frontend-only edit. Onboarding is the only entry
+point for this field — Settings and admin pages never write it.
+
 ## Incidental fixes made along the way
 
 - Baseline `npx tsc --noEmit` had 20 pre-existing errors (nullable-currency

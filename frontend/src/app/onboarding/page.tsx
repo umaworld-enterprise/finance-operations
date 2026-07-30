@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import type { AppUser } from "@/types";
 
@@ -20,6 +21,18 @@ const ROLE_HOME: Record<string, string> = {
   super_admin: "/admin",
   head_of_merchandiser: "/hom",
 };
+
+// Fixed department list (no master table) — the backend stores a free string,
+// so extending this list is a frontend-only change and legacy free-typed
+// values in the DB stay valid.
+const DEPARTMENTS = [
+  "Merchandising",
+  "Accounts",
+  "Finance",
+  "Management",
+  "IT",
+  "Other",
+] as const;
 
 interface FormValues {
   full_name: string;
@@ -108,11 +121,16 @@ export default function OnboardingPage() {
 
           <div className="space-y-1">
             <Label htmlFor="department">Department</Label>
-            <Input
+            <Select
               id="department"
+              defaultValue=""
               {...register("department", { required: "Department is required" })}
-              placeholder="e.g. Merchandising, Accounts, Finance"
-            />
+            >
+              <option value="" disabled>Select department</option>
+              {DEPARTMENTS.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </Select>
             {errors.department && (
               <p className="text-xs text-destructive">{errors.department.message}</p>
             )}
