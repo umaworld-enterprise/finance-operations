@@ -48,6 +48,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # TEMPORARY DEBUG — remove once OIDC assume-role works. Decodes the
+      # OIDC token's claims (sub/aud/...) so they can be compared against the
+      # IAM trust policy. Prints only the claims, never the signed token.
+      - name: Debug OIDC claims
+        run: |
+          RESP=$(curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com")
+          PAYLOAD=$(echo "$RESP" | jq -r '.value' | cut -d. -f2 | tr '_-' '/+')
+          case $(( ${#PAYLOAD} % 4 )) in 2) PAYLOAD="$PAYLOAD==";; 3) PAYLOAD="$PAYLOAD=";; esac
+          echo "$PAYLOAD" | base64 -d | jq '{iss, aud, sub, repository, environment, ref}'
+
       - name: Configure AWS credentials (OIDC — no stored keys)
         uses: aws-actions/configure-aws-credentials@v4
         with:
