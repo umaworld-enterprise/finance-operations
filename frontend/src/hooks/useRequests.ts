@@ -255,13 +255,8 @@ export function useUpdateTranche(requestId: string) {
   });
 }
 
-export function usePayTranche(requestId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (trancheId: string) => requestService.payTranche(requestId, trancheId),
-    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
-  });
-}
+// usePayTranche was removed with POST /tranches/{id}/pay (change note C6) —
+// uploading the TT copy is the only way to mark a tranche paid.
 
 export function useUploadTrancheTtCopy(requestId: string) {
   const qc = useQueryClient();
@@ -326,7 +321,7 @@ export function useHomQueue() {
 export function useHomApprove() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, remarks }: { id: string; remarks?: string }) =>
+    mutationFn: ({ id, remarks }: { id: string; remarks: string }) =>
       requestService.homApprove(id, remarks),
     onMutate: async ({ id }) => {
       await qc.cancelQueries({ queryKey: [...REQUESTS_KEY, id] });
@@ -351,7 +346,7 @@ export function useHomApprove() {
 export function useHomReject() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, remarks }: { id: string; remarks?: string }) =>
+    mutationFn: ({ id, remarks }: { id: string; remarks: string }) =>
       requestService.homReject(id, remarks),
     onMutate: async ({ id }) => {
       await qc.cancelQueries({ queryKey: [...REQUESTS_KEY, id] });

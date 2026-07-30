@@ -26,10 +26,10 @@ import type { DepositRequest, AnalyticsSnapshot, RequestStatus } from "@/types";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
-function fmtAmt(val: number | null | undefined, cur = "USD") {
+function fmtAmt(val: number | null | undefined, cur: string | null = "USD") {
   if (!val) return "—";
   const sym: Record<string, string> = { USD: "$", CNY: "¥", EUR: "€", GBP: "£" };
-  return (sym[cur] ?? "") + val.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return (sym[cur ?? ""] ?? "") + val.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 function fmtPct(part: number, total: number) {

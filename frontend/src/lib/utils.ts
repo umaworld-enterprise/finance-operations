@@ -6,7 +6,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatCurrency(amount: number, currency = "USD"): string {
+export function formatCurrency(amount: number, currency: string | null = "USD"): string {
+  if (!currency) {
+    // Legacy rows without a currency, or a form where none is selected yet —
+    // show a plain formatted number rather than pretending it's USD.
+    return new Intl.NumberFormat("en-US", { minimumFractionDigits: 2 }).format(amount);
+  }
   try {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -18,6 +23,20 @@ export function formatCurrency(amount: number, currency = "USD"): string {
     // formatted number with the code appended.
     return `${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2 }).format(amount)} ${currency}`.trim();
   }
+}
+
+// Local-timezone today as YYYY-MM-DD for <input type="date"> values.
+// new Date().toISOString() shifts to UTC and returns yesterday for negative
+// offsets — do not use it here.
+export function todayLocalISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// User-facing label for a currency code (RMB is the name finance uses for CNY).
+export function currencyDisplayLabel(c: string | null | undefined): string {
+  if (!c) return "—";
+  return c === "CNY" ? "CNY (RMB)" : c;
 }
 
 export function formatDate(dateStr: string | null | undefined): string {
@@ -40,14 +59,11 @@ export function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
-// List tables show the Sunshine Invoice # as the client-facing identifier once
-// accounts enters it; until then the ADT request number stands in. The ADT
-// number remains the permanent identifier on detail pages, logs and exports.
-export function requestDisplayNumber(req: {
-  sunshine_invoice_number: string | null;
-  request_number: string;
-}): string {
-  return req.sunshine_invoice_number || req.request_number;
+// The ADT request number (Dep-YYYY-NNNN) is the one identifier used everywhere
+// a "Request #" is shown. The Sunshine invoice number is client-facing and is
+// surfaced in its own "Invoice #" column on list views instead.
+export function requestDisplayNumber(req: { request_number: string }): string {
+  return req.request_number;
 }
 
 // Client-side counterpart of the server `search` param — used by the

@@ -11,42 +11,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useRequest, useHomApprove, useHomReject, useFieldVisibility } from "@/hooks/useRequests";
+import { DecisionDialog } from "@/components/hom/DecisionDialog";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { ArrowLeft, Lock, FileQuestion, Check, X } from "lucide-react";
 import Link from "next/link";
-
-function RejectDialog({
-  open,
-  onClose,
-  onConfirm,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onConfirm: (remarks: string) => void;
-}) {
-  const [remarks, setRemarks] = useState("");
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-card rounded-xl border border-border shadow-lg p-6 w-full max-w-md space-y-4">
-        <h3 className="font-semibold text-foreground">Reject Request</h3>
-        <textarea
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-          rows={3}
-          placeholder="Reason for rejection (optional)"
-          value={remarks}
-          onChange={(e) => setRemarks(e.target.value)}
-        />
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button variant="destructive" size="sm" onClick={() => { onConfirm(remarks); onClose(); }}>
-            Confirm Reject
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function HomRequestDetail() {
   const { id } = useParams<{ id: string }>();
@@ -54,15 +22,16 @@ export default function HomRequestDetail() {
   const { data: fv = {} } = useFieldVisibility();
   const homApprove = useHomApprove();
   const homReject = useHomReject();
+  const [approveOpen, setApproveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
 
   const canApprove = req?.current_status === "pending_hom_approval";
   const canReject  = req?.current_status === "pending_hom_approval";
   const actionBusy = homApprove.isPending || homReject.isPending || isFetching;
 
-  const handleApprove = async () => {
+  const handleApprove = async (remarks: string) => {
     try {
-      await homApprove.mutateAsync({ id });
+      await homApprove.mutateAsync({ id, remarks });
       toast.success("Request approved — moved to payment queue.");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to approve.");
@@ -240,7 +209,7 @@ export default function HomRequestDetail() {
               <div className="flex flex-col sm:flex-row gap-3">
                 {canApprove && (
                   <Button
-                    onClick={handleApprove}
+                    onClick={() => setApproveOpen(true)}
                     disabled={actionBusy}
                     className="w-full sm:w-auto gap-1.5"
                   >
@@ -263,8 +232,24 @@ export default function HomRequestDetail() {
         )}
       </main>
 
-      <RejectDialog
+      <DecisionDialog
+        open={approveOpen}
+        title="Approve Request"
+        description="Approving moves this request to the accounts payment queue. A reason is mandatory."
+        placeholder="Reason for approval"
+        confirmLabel="Confirm Approve"
+        busy={actionBusy}
+        onClose={() => setApproveOpen(false)}
+        onConfirm={handleApprove}
+      />
+      <DecisionDialog
         open={rejectOpen}
+        title="Reject Request"
+        description="Rejecting is final for this request. A reason is mandatory — the merchandiser will be notified."
+        placeholder="Reason for rejection"
+        confirmLabel="Confirm Reject"
+        destructive
+        busy={actionBusy}
         onClose={() => setRejectOpen(false)}
         onConfirm={handleReject}
       />

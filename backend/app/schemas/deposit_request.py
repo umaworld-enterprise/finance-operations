@@ -26,7 +26,6 @@ class DepositRequestCreate(BaseModel):
     deposit_amount: Decimal | None = Field(None, gt=0)
     deposit_percentage: Decimal | None = None
     total_supplier_invoice_amount: Decimal = Field(gt=0)
-    estimated_shipment_date: date | None = None
     estimated_etd: date | None = None
     payment_terms: str | None = None
     remarks: str | None = None
@@ -68,7 +67,6 @@ class DepositRequestUpdate(BaseModel):
     deposit_amount: Decimal | None = Field(None, gt=0)
     deposit_percentage: Decimal | None = Field(None, gt=0, le=100)
     total_supplier_invoice_amount: Decimal | None = Field(None, gt=0)
-    estimated_shipment_date: date | None = None
     estimated_etd: date | None = None
     payment_terms: str | None = None
     remarks: str | None = None
@@ -76,6 +74,13 @@ class DepositRequestUpdate(BaseModel):
 
 class StatusChangeRequest(BaseModel):
     remarks: str | None = None
+
+
+class HomDecisionRequest(BaseModel):
+    """HoM approve/reject body — unlike the shared StatusChangeRequest
+    (hold/resume/cancel/reopen/remarks), the reason is mandatory here."""
+
+    remarks: str = Field(min_length=1, description="Reason is mandatory for HoM approval and rejection.")
 
 
 class StatusHistoryResponse(OrmBase):
@@ -111,7 +116,6 @@ class DepositRequestResponse(OrmBase):
     deposit_amount: Decimal
     deposit_percentage: Decimal | None = None
     total_supplier_invoice_amount: Decimal
-    estimated_shipment_date: date | None = None
     estimated_etd: date | None
     payment_terms: str | None = None
     remarks: str | None

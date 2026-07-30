@@ -94,34 +94,44 @@ class PaymentService:
         if not payment:
             raise ConflictError("Payment details must be entered before processing.")
 
+        # Completeness gate — the four mandatory Payment Details fields must be
+        # recorded before the request can be processed. Partial rows created by
+        # set_ship_date / attach_tt_copy are legitimate, but they cannot be
+        # processed until Accounts completes them.
+        missing = [
+            label
+            for field, label in (
+                ("payment_date", "Payment Date"),
+                ("bank", "Bank"),
+                ("payment_reference_number", "Payment Reference Number"),
+                ("payment_status", "Payment Status"),
+            )
+            if getattr(payment, field) in (None, "")
+        ]
+        if missing:
+            raise ConflictError(
+                "Payment details are incomplete — fill in "
+                f"{', '.join(missing)} before processing."
+            )
+
+        # A tranche may only become PAID through its TT copy upload, so
+        # request-level processing must never bulk-pay tranches (it used to).
+        # Refuse while any tranche is still unpaid.
+        from app.repositories.tranche_repo import TrancheRepository
+
+        unpaid_count = await TrancheRepository(self._session).count_unpaid_for_request(
+            request_id
+        )
+        if unpaid_count:
+            raise ConflictError(
+                f"This request still has {unpaid_count} unpaid tranche(s). "
+                "Upload each tranche's TT copy to mark it paid — request-level "
+                "processing cannot mark tranches paid."
+            )
+
         # Capture BEFORE update() mutates the instance in place — otherwise
         # the history and audit rows record old_status == new_status.
         old_status = request.current_status
-
-        # Legacy request-level processing (kept for API compatibility) must
-        # not leave unpaid tranches behind on a processed request — mark them
-        # all paid so tranche-level state stays consistent.
-        from datetime import datetime, timezone
-
-        from app.models.enums import TrancheStatus
-        from app.repositories.tranche_repo import TrancheRepository
-
-        tranche_repo = TrancheRepository(self._session)
-        for tranche in await tranche_repo.list_for_request(request_id):
-            if tranche.status == TrancheStatus.UNPAID:
-                await tranche_repo.update(
-                    tranche,
-                    status=TrancheStatus.PAID,
-                    paid_at=datetime.now(timezone.utc),
-                    paid_by=user_id,
-                )
-                await self._audit.record_update(
-                    "payment_tranches", tranche.id, user_id,
-                    field_name="status",
-                    old_value=TrancheStatus.UNPAID.value,
-                    new_value=TrancheStatus.PAID.value,
-                    ip_address=ip_address, user_agent=user_agent,
-                )
 
         # Lock the request and update status
         await self._request_repo.update(

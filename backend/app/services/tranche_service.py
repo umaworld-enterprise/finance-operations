@@ -150,6 +150,13 @@ class TrancheService:
 
         if tranche.status == TrancheStatus.PAID:
             raise ConflictError(f"{tranche.label} is already paid.")
+        # Compliance gate: the bank's TT copy is the proof of payment, so a
+        # tranche can never become PAID without one. attach_tt_copy satisfies
+        # this by writing the tt_copy_* fields before paying.
+        if not tranche.tt_copy_url:
+            raise ConflictError(
+                f"{tranche.label} cannot be marked paid until its TT copy is uploaded."
+            )
         if request.current_status != RequestStatus.PENDING_PAYMENT:
             raise ConflictError(
                 "Tranches can only be paid while the request is pending payment "
@@ -235,14 +242,11 @@ class TrancheService:
                 "Contact a Super Admin if it must be replaced."
             )
 
-        auto_paid = False
-        if tranche.status == TrancheStatus.UNPAID:
-            tranche = await self.pay_tranche(
-                request_id, tranche_id, user_id, role,
-                ip_address=ip_address, user_agent=user_agent,
-            )
-            auto_paid = True
-
+        # Write the TT copy BEFORE paying: pay_tranche refuses tranches without
+        # one, and this ordering is what lets the auto-pay path satisfy that
+        # gate. If pay_tranche still rejects (held request, etc.) the whole
+        # transaction rolls back, so no TT copy is left on an unpaid tranche.
+        was_unpaid = tranche.status == TrancheStatus.UNPAID
         tranche = await self._repo.update(
             tranche,
             tt_copy_url=tt_copy_url,
@@ -255,6 +259,15 @@ class TrancheService:
             old_value=None, new_value=tt_copy_filename,
             ip_address=ip_address, user_agent=user_agent,
         )
+
+        auto_paid = False
+        if was_unpaid:
+            tranche = await self.pay_tranche(
+                request_id, tranche_id, user_id, role,
+                ip_address=ip_address, user_agent=user_agent,
+            )
+            auto_paid = True
+
         return tranche, auto_paid
 
     # ── Internals ─────────────────────────────────────────────────────────────

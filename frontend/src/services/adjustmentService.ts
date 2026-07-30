@@ -25,6 +25,23 @@ const adjustmentService = {
     );
     return data;
   },
+
+  // ── Accounts queue (merchandiser-raised adjustment requests) ─────────────
+
+  pending: async (): Promise<InvoiceAdjustment[]> => {
+    const { data } = await api.get<InvoiceAdjustment[]>("/adjustments/pending");
+    return data;
+  },
+
+  approve: async (id: string, reason: string): Promise<InvoiceAdjustment> => {
+    const { data } = await api.post<InvoiceAdjustment>(`/adjustments/${id}/approve`, { reason });
+    return data;
+  },
+
+  reject: async (id: string, reason: string): Promise<InvoiceAdjustment> => {
+    const { data } = await api.post<InvoiceAdjustment>(`/adjustments/${id}/reject`, { reason });
+    return data;
+  },
 };
 
 export default adjustmentService;

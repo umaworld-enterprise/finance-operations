@@ -137,7 +137,6 @@ class PublicSubmissionRequest(BaseModel):
     sunshine_invoice_number: str | None = None
     supplier_invoice_number: str | None = None
     deposit_percentage: Decimal | None = None
-    estimated_shipment_date: date | None = None
     estimated_etd: date | None = None
     payment_terms: str | None = None
     remarks: str | None = None
@@ -208,7 +207,6 @@ async def submit_public_form(
             total_supplier_invoice_amount=body.total_supplier_invoice_amount,
             deposit_percentage=body.deposit_percentage,
             deposit_amount=body.deposit_amount,
-            estimated_shipment_date=body.estimated_shipment_date,
             estimated_etd=body.estimated_etd,
             payment_terms=body.payment_terms,
             remarks=body.remarks,

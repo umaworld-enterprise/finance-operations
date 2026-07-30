@@ -13,6 +13,8 @@ import Link from "next/link";
 import type { RequestStatus } from "@/types";
 
 const STATUS_BORDER: Record<RequestStatus, string> = {
+  pending_hom_approval: "border-l-purple-500",
+  rejected_by_hom: "border-l-red-500",
   pending_payment: "border-l-amber-500",
   hold_by_merchandiser: "border-l-orange-500",
   hold_by_accounts: "border-l-orange-500",

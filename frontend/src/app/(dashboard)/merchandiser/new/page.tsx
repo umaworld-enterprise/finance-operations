@@ -15,7 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
 import { useVerticals, useCustomers, useSuppliers, useSupplierDefaultStatus } from "@/hooks/useMasters";
 import { useCreateRequest } from "@/hooks/useRequests";
-import { formatCurrency } from "@/lib/utils";
+import { currencyDisplayLabel, formatCurrency, todayLocalISO } from "@/lib/utils";
 
 
 const trancheSchema = z.object({
@@ -84,7 +84,7 @@ export default function NewRequestPage() {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { tranches: [{ amount: undefined as unknown as number, tentative_payment_date: "" }] },
+    defaultValues: { tranches: [{ amount: undefined as unknown as number, tentative_payment_date: todayLocalISO() }] },
   });
   const { fields, append, remove } = useFieldArray({ control, name: "tranches" });
 
@@ -117,8 +117,12 @@ export default function NewRequestPage() {
   const onSubmit = async (data: FormValues) => {
     if (isBlocked) return;
     try {
-      await createRequest.mutateAsync({ ...data, override_flagged_supplier: overrideFlaggedSupplier });
-      toast.success("Request submitted successfully.");
+      const created = await createRequest.mutateAsync({ ...data, override_flagged_supplier: overrideFlaggedSupplier });
+      toast.success(
+        created.current_status === "pending_hom_approval"
+          ? "Request sent to the Head of Merchandiser for approval."
+          : "Request submitted.",
+      );
       router.push("/merchandiser");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to submit request.");
@@ -143,7 +147,7 @@ export default function NewRequestPage() {
             )}
             {overrideFlaggedSupplier && (
               <div className="rounded-lg bg-amber-50 border border-amber-300 text-amber-800 p-3 text-sm">
-                This request will be routed to the Head of Merchandising for approval before going to Accounts.
+                This request will be routed to the Head of Merchandiser for approval before going to Accounts.
               </div>
             )}
 
@@ -204,7 +208,7 @@ export default function NewRequestPage() {
                   >
                     <option value="">Select currency</option>
                     {CURRENCIES.map((c) => (
-                      <option key={c} value={c}>{c}</option>
+                      <option key={c} value={c}>{currencyDisplayLabel(c)}</option>
                     ))}
                   </Field>
 
@@ -245,14 +249,21 @@ export default function NewRequestPage() {
 
                 {/* Advance Payment Tranches — one or more tranches, each with an
                     amount and a tentative payment date. The % of invoice is
-                    system-calculated and read-only. */}
-                <div className="space-y-3">
+                    system-calculated and read-only. Disabled until a currency is
+                    selected so tranche amounts are always entered in a known
+                    deposit currency. */}
+                <fieldset disabled={!currency} className="space-y-3 disabled:opacity-60">
                   <div>
                     <label className="text-sm font-medium text-foreground">Advance Payment Tranches</label>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       Split the advance into one or more tranches. The percentage of the
                       proforma invoice is calculated automatically.
                     </p>
+                    {!currency && (
+                      <p className="text-xs text-amber-700 mt-1">
+                        Select a currency above to enter tranche amounts.
+                      </p>
+                    )}
                   </div>
 
                   {fields.map((f, i) => (
@@ -272,7 +283,9 @@ export default function NewRequestPage() {
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="space-y-1.5">
-                          <p className="text-xs text-muted-foreground">Amount</p>
+                          <p className="text-xs text-muted-foreground">
+                            {currency ? `Amount (${currencyDisplayLabel(currency)})` : "Amount"}
+                          </p>
                           <Field
                             error={errors.tranches?.[i]?.amount?.message}
                             type="number"
@@ -281,7 +294,7 @@ export default function NewRequestPage() {
                             placeholder="0.00"
                             tooltip={
                               i === 0 && hasFixedDeposit
-                                ? `This supplier has a fixed advance amount of ${formatCurrency(selectedSupplier!.fixed_deposit_amount!, currency || "USD")}.`
+                                ? `This supplier has a fixed advance amount of ${formatCurrency(selectedSupplier!.fixed_deposit_amount!, currency)}.`
                                 : "The advance amount for this tranche."
                             }
                             {...register(`tranches.${i}.amount`)}
@@ -302,8 +315,11 @@ export default function NewRequestPage() {
                           />
                         </div>
                         <div className="space-y-1.5">
-                          <p className="text-xs text-muted-foreground">Tentative payment date</p>
+                          <p className="text-xs text-muted-foreground">
+                            Tentative payment date<span className="text-foreground ml-0.5" aria-hidden="true">*</span>
+                          </p>
                           <Field
+                            required
                             error={errors.tranches?.[i]?.tentative_payment_date?.message}
                             type="date"
                             {...register(`tranches.${i}.tentative_payment_date`)}
@@ -325,22 +341,22 @@ export default function NewRequestPage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => append({ amount: undefined as unknown as number, tentative_payment_date: "" })}
+                      onClick={() => append({ amount: undefined as unknown as number, tentative_payment_date: todayLocalISO() })}
                     >
                       <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Tranche {roman(fields.length + 1)}
                     </Button>
                     <p className="text-xs text-muted-foreground">
-                      Total advance: <span className="font-medium text-foreground">{formatCurrency(trancheTotal, currency || "USD")}</span>
+                      Total advance: <span className="font-medium text-foreground">{formatCurrency(trancheTotal, currency)}</span>
                       {totalInvoiceAmount > 0 && (
                         <> ({((trancheTotal / totalInvoiceAmount) * 100).toFixed(2)}% of invoice)</>
                       )}
                     </p>
                   </div>
-                </div>
+                </fieldset>
 
                 {hasFixedDeposit && (
                   <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                    This supplier has a fixed advance amount of {formatCurrency(selectedSupplier!.fixed_deposit_amount!, currency || "USD")} — Tranche I has been pre-filled with it.
+                    This supplier has a fixed advance amount of {formatCurrency(selectedSupplier!.fixed_deposit_amount!, currency)} — Tranche I has been pre-filled with it.
                   </p>
                 )}
 

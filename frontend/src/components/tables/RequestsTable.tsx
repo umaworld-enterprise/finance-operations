@@ -44,11 +44,11 @@ export function RequestsTable({
         <TableHeader>
           <TableRow>
             <TableHead>Request #</TableHead>
+            <TableHead className="hidden sm:table-cell">Invoice #</TableHead>
             <TableHead>Supplier</TableHead>
             <TableHead>Customer</TableHead>
             <TableHead className="hidden md:table-cell">Vertical</TableHead>
             <TableHead className="text-right">Deposit</TableHead>
-            <TableHead className="hidden md:table-cell">Est. Shipment</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="hidden lg:table-cell">Submitted</TableHead>
             <TableHead />
@@ -62,16 +62,16 @@ export function RequestsTable({
                   {requestDisplayNumber(req)}
                 </span>
               </TableCell>
+              <TableCell className="hidden sm:table-cell font-mono text-xs text-muted-foreground">
+                {req.sunshine_invoice_number || "—"}
+              </TableCell>
               <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
               <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
               <TableCell className="hidden md:table-cell text-muted-foreground text-xs">
-                {req.vertical.name}
+                {req.vertical?.name ?? "—"}
               </TableCell>
               <TableCell className="text-right font-semibold text-foreground">
                 {formatCurrency(req.deposit_amount, req.currency)}
-              </TableCell>
-              <TableCell className="hidden md:table-cell text-muted-foreground">
-                {formatDate(req.estimated_shipment_date)}
               </TableCell>
               <TableCell>
                 <StatusBadge status={req.current_status} />

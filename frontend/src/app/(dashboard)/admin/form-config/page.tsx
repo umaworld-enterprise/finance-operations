@@ -33,14 +33,14 @@ const FIELD_META: { key: string; defaultLabel: string; group: string; core?: boo
   { key: "total_supplier_invoice_amount",  defaultLabel: "Total Supplier Proforma Invoice Amount",   group: "Financials", core: true },
   // deposit_percentage / deposit_amount were retired — the public form now
   // collects Advance Payment Tranches (always shown, % system-calculated).
-  { key: "estimated_shipment_date",        defaultLabel: "Estimated Shipment Date",                  group: "Logistics" },
+  // The estimated-shipment-date field was removed entirely (14 Jul 2026 change note, C5).
   { key: "remarks",                        defaultLabel: "Remarks",                                  group: "Extras" },
 ];
 
 const DEFAULT_CONFIG: FormFields = Object.fromEntries(
   FIELD_META.map(({ key, defaultLabel }) => [
     key,
-    { visible: true, required: ["supplier_id","customer_id","vertical_id","currency","total_supplier_invoice_amount","estimated_shipment_date"].includes(key), label: defaultLabel },
+    { visible: true, required: ["supplier_id","customer_id","vertical_id","currency","total_supplier_invoice_amount"].includes(key), label: defaultLabel },
   ])
 );
 

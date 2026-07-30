@@ -88,6 +88,14 @@ class AdjustmentCreate(BaseModel):
         return _assert_two_decimal_places(v)
 
 
+class AdjustmentDecision(BaseModel):
+    """Approve/reject body for a pending adjustment — the reason is mandatory
+    for both decisions (14 Jul 2026 change note, B3) and is recorded in the
+    audit trail and the merchandiser's notification."""
+
+    reason: str = Field(min_length=1)
+
+
 class AdjustmentResponse(OrmBase):
     id: UUID
     source_tranche_id: UUID

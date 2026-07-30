@@ -31,7 +31,7 @@ export function SupplierDefaultAlert({ status, onContinue, onWithdraw }: Props) 
       {hasSoftOverride ? (
         <>
           <p className="text-sm text-muted-foreground">
-            You may still submit this request, but it will require approval from the Head of Merchandising before proceeding to Accounts.
+            You may still submit this request, but it will require approval from the Head of Merchandiser before proceeding to Accounts.
           </p>
           <div className="flex gap-2 pt-1">
             <Button type="button" variant="outline" size="sm" onClick={onWithdraw}>

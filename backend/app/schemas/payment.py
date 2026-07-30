@@ -3,13 +3,17 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.enums import PaymentStatus
 from app.schemas.common import OrmBase
 
 
-class PaymentCreate(BaseModel):
+class PaymentUpdate(BaseModel):
+    """Partial PATCH body — deliberately permissive so existing rows (incl.
+    partial ones created by set_ship_date / attach_tt_copy) can be updated
+    field by field. Completeness is enforced at process time."""
+
     payment_date: date | None = None
     bank: str | None = None
     payment_reference_number: str | None = None
@@ -19,8 +23,14 @@ class PaymentCreate(BaseModel):
     accounts_remarks: str | None = None
 
 
-class PaymentUpdate(PaymentCreate):
-    pass
+class PaymentCreate(PaymentUpdate):
+    """POST body — Payment Date, Bank, Payment Reference Number and Payment
+    Status are mandatory (14 Jul 2026 change note, C7)."""
+
+    payment_date: date
+    bank: str = Field(min_length=1)
+    payment_reference_number: str = Field(min_length=1)
+    payment_status: PaymentStatus
 
 
 class ShipDateUpdate(BaseModel):

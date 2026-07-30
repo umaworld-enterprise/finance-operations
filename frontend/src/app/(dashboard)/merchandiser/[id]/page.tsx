@@ -164,7 +164,6 @@ export default function MerchandiserRequestDetail() {
               {fv.exchange_rate !== false && req.exchange_rate != null && field("Exchange Rate", req.exchange_rate)}
               {field("Sunshine Invoice #", req.sunshine_invoice_number)}
               {field("Supplier Invoice #", req.supplier_invoice_number)}
-              {field("Est. Shipment Date", formatDate(req.estimated_shipment_date))}
               {field("Estimated ETD", req.estimated_etd ? formatDate(req.estimated_etd) : null)}
               {req.payment_terms && field("Payment Terms", req.payment_terms)}
               {field("Submission Source", req.submission_source)}

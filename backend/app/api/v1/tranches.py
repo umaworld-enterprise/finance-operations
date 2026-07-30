@@ -99,27 +99,9 @@ async def update_tranche(
     return _tranche_response(tranche, req.total_supplier_invoice_amount)
 
 
-@router.post("/{tranche_id}/pay", response_model=TrancheResponse)
-async def pay_tranche(
-    request_id: UUID,
-    tranche_id: UUID,
-    current_user: User,
-    request: Request,
-    db: DB,
-    background_tasks: BackgroundTasks,
-) -> TrancheResponse:
-    """Accounts marks a specific unpaid tranche as paid. Paying the last
-    tranche completes and locks the request."""
-    svc = TrancheService(db)
-    tranche = await svc.pay_tranche(
-        request_id, tranche_id, current_user.id, current_user.role,
-        ip_address=_ip(request),
-        user_agent=request.headers.get("user-agent"),
-    )
-    req = await DepositRequestRepository(db).get_for_validation(request_id)
-    background_tasks.add_task(seed_snapshot_for_request, request_id)
-    background_tasks.add_task(notify_tranche_event, request_id, tranche_id, "paid")
-    return _tranche_response(tranche, req.total_supplier_invoice_amount)
+# NOTE: the standalone POST /{tranche_id}/pay endpoint was removed by the
+# 14 Jul 2026 change note (C6): a tranche may only become PAID through its TT
+# copy upload below. pay_tranche remains service-internal for attach_tt_copy.
 
 
 @router.post("/{tranche_id}/tt-copy", response_model=TrancheResponse)
