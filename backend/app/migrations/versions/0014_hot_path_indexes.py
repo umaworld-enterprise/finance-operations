@@ -6,13 +6,13 @@
 - deposit_requests.submitter_email: used in the merchandiser list OR-clause.
 
 Revision ID: 0014
-Revises: 0013
+Revises: 0013a
 Create Date: 2026-07-06
 """
 from alembic import op
 
 revision = "0014"
-down_revision = "0013"
+down_revision = "0013a"
 branch_labels = None
 depends_on = None
 
