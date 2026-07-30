@@ -67,12 +67,14 @@ class AdjustmentRepository(BaseRepository[InvoiceAdjustment]):
     async def adjusted_out_total(self, source_tranche_id: UUID) -> Decimal:
         """Total value already reallocated away from a paid tranche.
 
-        Both completed and pending-approval adjustments reserve balance so a
-        future approval workflow cannot over-allocate."""
+        Only COMPLETED adjustments consume balance — PENDING_APPROVAL requests
+        must not reserve value until approved (change note B3). Approval
+        re-validates the balance under a row lock, so two pending requests
+        against the same tranche cannot both complete beyond it."""
         result = await self._session.execute(
             select(func.coalesce(func.sum(InvoiceAdjustment.amount), 0)).where(
                 InvoiceAdjustment.source_tranche_id == source_tranche_id,
-                InvoiceAdjustment.status != AdjustmentStatus.REJECTED,
+                InvoiceAdjustment.status == AdjustmentStatus.COMPLETED,
             )
         )
         return Decimal(str(result.scalar_one()))

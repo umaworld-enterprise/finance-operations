@@ -21,10 +21,12 @@ from app.schemas.deposit_request import (
     DepositRequestDetailResponse,
     DepositRequestResponse,
     DepositRequestUpdate,
+    HomDecisionRequest,
     StatusChangeRequest,
 )
 from app.schemas.common import MessageResponse, PaginatedResponse
 from app.services.deposit_request_service import DepositRequestService
+from app.services.notification_service import notify_hom_decision
 
 router = APIRouter(prefix="/requests", tags=["deposit-requests"])
 
@@ -313,12 +315,14 @@ async def update_remarks(
 @router.post("/{request_id}/hom-approve", response_model=DepositRequestResponse)
 async def hom_approve(
     request_id: UUID,
-    body: StatusChangeRequest,
+    body: HomDecisionRequest,
     current_user: User,
     request: Request,
     db: DB,
+    background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
-    """HoM approves a pending request — moves it to pending_payment for Accounts."""
+    """HoM approves a pending request — moves it to pending_payment for Accounts.
+    The reason is mandatory; the raising merchandiser is notified."""
     _ALLOWED = {UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN}
     if current_user.role not in _ALLOWED:
         raise AuthorizationError("Only Head of Merchandiser or Super Admin can approve.")
@@ -329,18 +333,21 @@ async def hom_approve(
         ip_address=_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
+    background_tasks.add_task(notify_hom_decision, request_id, "approved", body.remarks)
     return DepositRequestResponse.model_validate(req)
 
 
 @router.post("/{request_id}/hom-reject", response_model=DepositRequestResponse)
 async def hom_reject(
     request_id: UUID,
-    body: StatusChangeRequest,
+    body: HomDecisionRequest,
     current_user: User,
     request: Request,
     db: DB,
+    background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
-    """HoM rejects a pending request — moves it to rejected_by_hom (terminal)."""
+    """HoM rejects a pending request — moves it to rejected_by_hom (terminal).
+    The reason is mandatory; the raising merchandiser is notified."""
     _ALLOWED = {UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN}
     if current_user.role not in _ALLOWED:
         raise AuthorizationError("Only Head of Merchandiser or Super Admin can reject.")
@@ -351,4 +358,5 @@ async def hom_reject(
         ip_address=_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
+    background_tasks.add_task(notify_hom_decision, request_id, "rejected", body.remarks)
     return DepositRequestResponse.model_validate(req)

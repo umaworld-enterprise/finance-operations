@@ -13,6 +13,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { NpaPanel } from "@/components/analytics/NpaPanel";
+import { DecisionDialog } from "@/components/hom/DecisionDialog";
 import { useHomQueue, useHomApprove, useHomReject } from "@/hooks/useRequests";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
@@ -21,39 +22,6 @@ import { toast } from "sonner";
 import { Check, X, ClipboardList, UserCog, ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 import type { DepositRequest } from "@/types";
-
-function RejectDialog({
-  open,
-  onClose,
-  onConfirm,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onConfirm: (remarks: string) => void;
-}) {
-  const [remarks, setRemarks] = useState("");
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-card rounded-xl border border-border shadow-lg p-6 w-full max-w-md space-y-4">
-        <h3 className="font-semibold text-foreground">Reject Request</h3>
-        <textarea
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-          rows={3}
-          placeholder="Reason for rejection (optional)"
-          value={remarks}
-          onChange={(e) => setRemarks(e.target.value)}
-        />
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button variant="destructive" size="sm" onClick={() => { onConfirm(remarks); onClose(); }}>
-            Confirm Reject
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function HomQueueRow({ req, onApprove, onReject, disabled }: {
   req: DepositRequest;
@@ -70,6 +38,9 @@ function HomQueueRow({ req, onApprove, onReject, disabled }: {
         >
           {requestDisplayNumber(req)}
         </Link>
+      </TableCell>
+      <TableCell className="font-mono text-xs text-muted-foreground">
+        {req.sunshine_invoice_number || "—"}
       </TableCell>
       <TableCell>
         <div>
@@ -124,6 +95,7 @@ export default function HomDashboard() {
   const homApprove = useHomApprove();
   const homReject = useHomReject();
 
+  const [approveTarget, setApproveTarget] = useState<string | null>(null);
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -148,9 +120,10 @@ export default function HomDashboard() {
     setPage(1);
   }
 
-  const handleApprove = async (id: string) => {
+  const handleApprove = async (remarks: string) => {
+    if (!approveTarget) return;
     try {
-      await homApprove.mutateAsync({ id });
+      await homApprove.mutateAsync({ id: approveTarget, remarks });
       toast.success("Request approved — moved to payment queue.");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to approve request.";
@@ -196,7 +169,7 @@ export default function HomDashboard() {
             )}
             {isLoading ? (
               <Table>
-                <TableBody><TableSkeleton rows={3} cols={7} /></TableBody>
+                <TableBody><TableSkeleton rows={3} cols={8} /></TableBody>
               </Table>
             ) : queue.length === 0 ? (
               <div className="p-6">
@@ -220,6 +193,7 @@ export default function HomDashboard() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Request #</TableHead>
+                      <TableHead>Invoice #</TableHead>
                       <TableHead>Supplier</TableHead>
                       <TableHead>Merchandiser</TableHead>
                       <TableHead className="text-right">Amount</TableHead>
@@ -233,7 +207,7 @@ export default function HomDashboard() {
                       <HomQueueRow
                         key={req.id}
                         req={req}
-                        onApprove={handleApprove}
+                        onApprove={(id) => setApproveTarget(id)}
                         onReject={(id) => setRejectTarget(id)}
                         disabled={homApprove.isPending || homReject.isPending}
                       />
@@ -264,8 +238,22 @@ export default function HomDashboard() {
 
       </main>
 
-      <RejectDialog
+      <DecisionDialog
+        open={approveTarget !== null}
+        title="Approve Request"
+        description="Approving moves this request to the accounts payment queue. A reason is mandatory."
+        placeholder="Reason for approval"
+        confirmLabel="Confirm Approve"
+        onClose={() => setApproveTarget(null)}
+        onConfirm={handleApprove}
+      />
+      <DecisionDialog
         open={rejectTarget !== null}
+        title="Reject Request"
+        description="Rejecting is final for this request. A reason is mandatory — the merchandiser will be notified."
+        placeholder="Reason for rejection"
+        confirmLabel="Confirm Reject"
+        destructive
         onClose={() => setRejectTarget(null)}
         onConfirm={handleReject}
       />

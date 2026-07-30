@@ -38,8 +38,9 @@ class DepositRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     deposit_percentage: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     total_supplier_invoice_amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
 
-    # Dates
-    estimated_shipment_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Dates. The estimated-shipment-date column was removed from the model
+    # (14 Jul 2026 change note, C5); the DB column is dropped in a follow-up
+    # migration.
     estimated_etd: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Payment terms

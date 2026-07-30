@@ -29,7 +29,7 @@ const MonthlyTrendChart  = dynamic(() => import("@/components/charts/MonthlyTren
 import { useAnalyticsSummary, useAnalyticsSnapshots } from "@/hooks/useAnalytics";
 import { useRequests } from "@/hooks/useRequests";
 import { useVerticals, useCustomers, useUsers } from "@/hooks/useMasters";
-import { formatCurrency, formatDate, cn } from "@/lib/utils";
+import { currencyDisplayLabel, formatCurrency, formatDate, cn } from "@/lib/utils";
 import { analyticsService, type AnalyticsFilters } from "@/services/analyticsService";
 import type { MonthlyTrendPoint } from "@/components/charts/MonthlyTrendChart";
 import { api } from "@/lib/api";
@@ -772,7 +772,7 @@ function OutstandingTrackerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo
                   <TableHead className="text-right">Outstanding</TableHead>
                 ) : (
                   currencies.map((c) => (
-                    <TableHead key={c} className="text-right">Outstanding {c}</TableHead>
+                    <TableHead key={c} className="text-right">Outstanding {currencyDisplayLabel(c)}</TableHead>
                   ))
                 )}
               </TableRow>

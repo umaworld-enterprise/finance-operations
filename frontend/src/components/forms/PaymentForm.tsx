@@ -20,14 +20,17 @@ const PAYMENT_STATUS_OPTIONS = [
   { value: "hold", label: "Hold" },
 ] as const;
 
+// Payment Date, Bank, Payment Reference Number and Payment Status are
+// mandatory (14 Jul 2026 change note, C7). Remarks stay optional.
 const schema = z.object({
-  payment_date: z.string().optional(),
-  bank: z.string().optional(),
-  payment_reference_number: z.string().optional(),
-  payment_status: z.preprocess(
-    (v) => (v === "" ? undefined : v),
-    z.enum(["processed", "rejected", "hold"]).optional()
-  ),
+  payment_date: z.string().min(1, "Payment date is required"),
+  bank: z.string().min(1, "Bank is required"),
+  payment_reference_number: z.string().min(1, "Payment reference number is required"),
+  // The select's placeholder submits "" — the enum rejects it with a clear
+  // message, forcing an explicit pick.
+  payment_status: z.enum(["processed", "rejected", "hold"], {
+    errorMap: () => ({ message: "Payment status is required" }),
+  }),
   accounts_remarks: z.string().optional(),
 });
 
@@ -101,14 +104,17 @@ export function PaymentForm({ requestId, isLocked, existing, onProcessed, readOn
   const {
     register,
     handleSubmit,
-    formState: { isSubmitting },
+    formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
+    // values keeps the form in step with refetched data. Validation runs on
+    // submit only (default mode), so legacy rows with NULL columns do not
+    // trip errors on every render — they surface when Save is attempted.
     values: {
       payment_date: existing?.payment_date ?? "",
       bank: existing?.bank ?? "",
       payment_reference_number: existing?.payment_reference_number ?? "",
-      payment_status: (existing?.payment_status as "processed" | "rejected" | "hold" | undefined) ?? undefined,
+      payment_status: (existing?.payment_status ?? "") as FormValues["payment_status"],
       accounts_remarks: existing?.accounts_remarks ?? "",
     },
   });
@@ -138,31 +144,40 @@ export function PaymentForm({ requestId, isLocked, existing, onProcessed, readOn
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field
           label="Payment Date"
+          required
           tooltip="The date the payment was made to the supplier."
+          error={errors.payment_date?.message}
           type="date"
           disabled={disabled}
           {...register("payment_date")}
         />
         <Field
           label="Bank"
+          required
+          error={errors.bank?.message}
           type="text"
           disabled={disabled}
           {...register("bank")}
         />
         <Field
           label="Payment Reference Number"
+          required
           tooltip="The bank transaction reference or cheque number for this payment."
+          error={errors.payment_reference_number?.message}
           type="text"
           disabled={disabled}
           {...register("payment_reference_number")}
         />
         <Field
           label="Payment Status"
+          required
+          error={errors.payment_status?.message}
           variant="select"
           disabled={disabled}
           {...register("payment_status")}
         >
-          <option value="">— Select status —</option>
+          {/* Placeholder is not selectable — an explicit status must be picked. */}
+          <option value="" disabled>— Select status —</option>
           {PAYMENT_STATUS_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}

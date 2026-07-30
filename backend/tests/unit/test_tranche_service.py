@@ -47,6 +47,14 @@ async def _setup(db_session, *, tranche_amounts=("1000.00",)):
     return merch, accounts, request, tranches
 
 
+async def _with_tt(db_session, *tranches):
+    """pay_tranche requires a TT copy (change note C6) — attach one directly
+    so tests can exercise the payment paths beyond that gate."""
+    for t in tranches:
+        t.tt_copy_url = f"https://drive.test/tt-{t.id}.pdf"
+    await db_session.flush()
+
+
 async def _audit_rows(db_session, entity_name, entity_id):
     result = await db_session.execute(
         select(AuditLog).where(
@@ -99,6 +107,7 @@ async def test_accounts_role_cannot_edit_tranche(db_session):
 
 async def test_paid_tranche_is_immutable(db_session):
     merch, accounts, request, (tranche,) = await _setup(db_session)
+    await _with_tt(db_session, tranche)
     svc = TrancheService(db_session)
     await svc.pay_tranche(request.id, tranche.id, accounts.id, UserRole.ACCOUNTS_TEAM)
     with pytest.raises(ConflictError):
@@ -138,6 +147,7 @@ async def test_pay_partial_tranche_keeps_request_open(db_session):
     _, accounts, request, (t1, t2) = await _setup(
         db_session, tranche_amounts=("600.00", "400.00")
     )
+    await _with_tt(db_session, t1)
     svc = TrancheService(db_session)
     paid = await svc.pay_tranche(request.id, t1.id, accounts.id, UserRole.ACCOUNTS_TEAM)
     assert paid.status == TrancheStatus.PAID
@@ -152,6 +162,7 @@ async def test_paying_final_tranche_completes_and_locks_request(db_session):
     _, accounts, request, (t1, t2) = await _setup(
         db_session, tranche_amounts=("600.00", "400.00")
     )
+    await _with_tt(db_session, t1, t2)
     svc = TrancheService(db_session)
     await svc.pay_tranche(request.id, t1.id, accounts.id, UserRole.ACCOUNTS_TEAM)
     await svc.pay_tranche(request.id, t2.id, accounts.id, UserRole.ACCOUNTS_TEAM)
@@ -165,6 +176,7 @@ async def test_double_payment_rejected(db_session):
     _, accounts, request, (t1, t2) = await _setup(
         db_session, tranche_amounts=("600.00", "400.00")
     )
+    await _with_tt(db_session, t1)
     svc = TrancheService(db_session)
     await svc.pay_tranche(request.id, t1.id, accounts.id, UserRole.ACCOUNTS_TEAM)
     with pytest.raises(ConflictError, match="already paid"):
@@ -180,11 +192,22 @@ async def test_merchandiser_cannot_pay_tranche(db_session):
 
 async def test_cannot_pay_tranche_on_held_request(db_session):
     _, accounts, request, (tranche,) = await _setup(db_session)
+    await _with_tt(db_session, tranche)
     request.current_status = RequestStatus.HOLD_BY_ACCOUNTS
     await db_session.flush()
     svc = TrancheService(db_session)
     with pytest.raises(ConflictError, match="pending payment"):
         await svc.pay_tranche(request.id, tranche.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+
+
+async def test_pay_tranche_without_tt_copy_rejected(db_session):
+    """C6: a tranche must never become PAID without its TT copy."""
+    _, accounts, request, (tranche,) = await _setup(db_session)
+    svc = TrancheService(db_session)
+    with pytest.raises(ConflictError, match="TT copy"):
+        await svc.pay_tranche(request.id, tranche.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    assert tranche.status == TrancheStatus.UNPAID
+    assert request.current_status == RequestStatus.PENDING_PAYMENT
 
 
 # ── TT copy upload behaviour ──────────────────────────────────────────────────

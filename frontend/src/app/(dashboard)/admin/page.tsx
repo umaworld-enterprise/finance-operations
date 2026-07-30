@@ -32,12 +32,12 @@ import type { DepositRequest } from "@/types";
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 type PageSizeOption = typeof PAGE_SIZE_OPTIONS[number];
 
-const TAB_PARAMS = {
-  all:       {} as Record<string, string | string[]>,
+const TAB_PARAMS: Record<"all" | "pending" | "processed" | "cancelled", Record<string, string | string[]>> = {
+  all:       {},
   pending:   { status: "pending_payment" },
   processed: { status: "payment_processed" },
   cancelled: { status: ["cancelled_by_merchandiser", "cancelled_by_accounts"] },
-} as const;
+};
 type Tab = keyof typeof TAB_PARAMS;
 
 const QUICK_LINKS = [
@@ -57,6 +57,7 @@ function RequestRow({ req }: { req: DepositRequest }) {
       <TableCell>
         <span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span>
       </TableCell>
+      <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
       <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
       <TableCell className="hidden md:table-cell text-muted-foreground">{req.customer.name}</TableCell>
       <TableCell className="text-right font-semibold text-foreground">
@@ -128,6 +129,7 @@ export default function AdminDashboard() {
     <TableHeader>
       <TableRow>
         <TableHead>Request #</TableHead>
+        <TableHead>Invoice #</TableHead>
         <TableHead>Supplier</TableHead>
         <TableHead className="hidden md:table-cell">Customer</TableHead>
         <TableHead className="text-right">Deposit</TableHead>
@@ -256,7 +258,7 @@ export default function AdminDashboard() {
               {isLoading ? (
                 <Table>
                   {TABLE_HEADER}
-                  <TableBody><TableSkeleton rows={pageSize > 25 ? 10 : 5} cols={7} /></TableBody>
+                  <TableBody><TableSkeleton rows={pageSize > 25 ? 10 : 5} cols={8} /></TableBody>
                 </Table>
               ) : items.length === 0 ? (
                 <EmptyState icon={ClipboardList} title="No requests" description="No requests match this filter." />

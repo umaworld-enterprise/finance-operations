@@ -68,7 +68,7 @@ deposit_requests (alias: dr)
   currency text (USD/EUR/CNY/GBP/AED/INR/OTHER),
   deposit_amount numeric, deposit_percentage numeric,
   total_supplier_invoice_amount numeric,
-  estimated_shipment_date date, estimated_etd date,
+  estimated_etd date,
   current_status text (see lifecycle above),
   submission_source text (in_app / google_form),
   is_locked bool, is_deleted bool, created_at timestamptz, updated_at timestamptz

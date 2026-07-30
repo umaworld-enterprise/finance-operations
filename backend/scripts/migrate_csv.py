@@ -284,7 +284,8 @@ def main():
             deposit_pct      = clean_amount(row[13])
             vertical_name    = row[14].strip()
             total_amount     = clean_amount(row[15])
-            est_ship_raw     = row[16].strip()
+            # row[16] (estimated shipment date) is no longer imported — the
+            # column was removed by the 14 Jul 2026 change note (C5).
             est_etd_raw      = row[17].strip()
             remarks          = row[18].strip() or None
             status_raw       = row[23].strip()
@@ -331,7 +332,7 @@ def main():
                     currency, exchange_rate,
                     deposit_amount, deposit_percentage,
                     total_supplier_invoice_amount,
-                    estimated_shipment_date, estimated_etd,
+                    estimated_etd,
                     remarks, submitter_email,
                     current_status, submission_source,
                     is_locked, is_deleted,
@@ -343,7 +344,7 @@ def main():
                     %s::currency_code, %s,
                     %s, %s,
                     %s,
-                    %s, %s,
+                    %s,
                     %s, %s,
                     %s::request_status, %s::submission_source,
                     FALSE, FALSE,
@@ -356,7 +357,7 @@ def main():
                 currency, exchange_rate,
                 deposit_amount, deposit_pct,
                 total_amount,
-                parse_num_date(est_ship_raw), parse_mon_date(est_etd_raw),
+                parse_mon_date(est_etd_raw),
                 remarks, submitter_email,
                 status_db, "google_sheet_sync",
                 created_by_id, created_at, created_at,

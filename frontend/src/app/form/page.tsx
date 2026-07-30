@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import Image from "next/image";
 import { CheckCircle2, Loader2, AlertCircle, Plus, Trash2 } from "lucide-react";
+import { currencyDisplayLabel, todayLocalISO } from "@/lib/utils";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 
@@ -54,10 +55,6 @@ function isRequired(cfg: FormConfig, key: string): boolean {
 
 function label(cfg: FormConfig, key: string, fallback: string): string {
   return cfg[key]?.label || fallback;
-}
-
-function currencyLabel(c: string) {
-  return c === "CNY" ? "CNY (RMB)" : c;
 }
 
 // 1 → "I", 2 → "II", … for tranche labels.
@@ -143,7 +140,7 @@ export default function PublicFormPage() {
     setError,
   } = useForm<FormValues>({
     mode: "onBlur",
-    defaultValues: { tranches: [{ amount: "", tentative_payment_date: "" }] },
+    defaultValues: { tranches: [{ amount: "", tentative_payment_date: todayLocalISO() }] },
   });
   const { fields: trancheFields, append: appendTranche, remove: removeTranche } = useFieldArray({
     control,
@@ -434,7 +431,7 @@ export default function PublicFormPage() {
               <select {...register("currency")} className={inputCls} defaultValue="">
                 <option value="" disabled>Choose currency…</option>
                 {masters.currencies.map((c) => (
-                  <option key={c} value={c}>{currencyLabel(c)}</option>
+                  <option key={c} value={c}>{currencyDisplayLabel(c)}</option>
                 ))}
               </select>
             </Field>
@@ -476,7 +473,9 @@ export default function PublicFormPage() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="space-y-1">
-                    <label className="block text-xs text-gray-500">Amount</label>
+                    <label className="block text-xs text-gray-500">
+                      {watch("currency") ? `Amount (${currencyDisplayLabel(watch("currency"))})` : "Amount"}
+                    </label>
                     <input
                       {...register(`tranches.${i}.amount`)}
                       type="number"
@@ -506,7 +505,9 @@ export default function PublicFormPage() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="block text-xs text-gray-500">Tentative payment date</label>
+                    <label className="block text-xs text-gray-500">
+                      Tentative payment date<span className="text-red-500 ml-0.5">*</span>
+                    </label>
                     <input
                       {...register(`tranches.${i}.tentative_payment_date`)}
                       type="date"
@@ -525,7 +526,7 @@ export default function PublicFormPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <button
                 type="button"
-                onClick={() => appendTranche({ amount: "", tentative_payment_date: "" })}
+                onClick={() => appendTranche({ amount: "", tentative_payment_date: todayLocalISO() })}
                 className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-xl px-3 py-2 hover:bg-gray-50 transition-colors"
               >
                 <Plus className="h-3.5 w-3.5" /> Add Tranche {roman(trancheFields.length + 1)}
@@ -533,7 +534,7 @@ export default function PublicFormPage() {
               <p className="text-xs text-gray-500">
                 Total advance:{" "}
                 <span className="font-medium text-gray-900">
-                  {trancheTotal.toFixed(2)} {watch("currency") || ""}
+                  {trancheTotal.toFixed(2)} {watch("currency") ? currencyDisplayLabel(watch("currency")) : ""}
                 </span>
                 {totalInvoiceAmount > 0 && (
                   <> ({((trancheTotal / totalInvoiceAmount) * 100).toFixed(2)}% of invoice)</>
@@ -544,7 +545,7 @@ export default function PublicFormPage() {
 
           {hasFixedDeposit && (
             <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              This supplier has a fixed advance amount of {selectedSupplier?.fixed_deposit_amount} {watch("currency") || ""} — Tranche I has been pre-filled with it.
+              This supplier has a fixed advance amount of {selectedSupplier?.fixed_deposit_amount} {watch("currency") ? currencyDisplayLabel(watch("currency")) : ""} — Tranche I has been pre-filled with it.
             </p>
           )}
 

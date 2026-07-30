@@ -24,7 +24,7 @@ import { useRequestsPaginated, usePendingQueue } from "@/hooks/useRequests";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
-import { formatCurrency, formatDate, cn, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
+import { currencyDisplayLabel, formatCurrency, formatDate, cn, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
 import { differenceInDays } from "date-fns";
 import { Clock, CheckCircle, AlertTriangle, ClipboardList, ArrowRight } from "lucide-react";
 import Link from "next/link";
@@ -85,6 +85,7 @@ function PendingTable({ rows, loading }: { rows: DepositRequest[]; loading: bool
               <span className="font-mono text-xs font-bold text-foreground">{requestDisplayNumber(req)}</span>
               {agingBadge(req.created_at)}
             </div>
+            <div className="text-xs text-muted-foreground font-mono">Invoice # {req.sunshine_invoice_number || "—"}</div>
             <div className="text-sm font-semibold text-foreground">{req.supplier.name}</div>
             <div className="text-xs text-muted-foreground">{req.customer.name}</div>
             <div className="flex items-center justify-between">
@@ -105,11 +106,11 @@ function PendingTable({ rows, loading }: { rows: DepositRequest[]; loading: bool
           <TableHeader>
             <TableRow>
               <TableHead>Request #</TableHead>
+              <TableHead>Invoice #</TableHead>
               <TableHead>Supplier</TableHead>
               <TableHead>Customer</TableHead>
               <TableHead className="text-right">Deposit</TableHead>
               <TableHead>Currency</TableHead>
-              <TableHead className="hidden lg:table-cell">Est. Shipment</TableHead>
               <TableHead>Waiting</TableHead>
               <TableHead />
             </TableRow>
@@ -122,11 +123,11 @@ function PendingTable({ rows, loading }: { rows: DepositRequest[]; loading: bool
             ) : rows.map((req) => (
               <TableRow key={req.id}>
                 <TableCell><span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span></TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
                 <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
-                <TableCell className="text-muted-foreground text-xs font-medium">{req.currency}</TableCell>
-                <TableCell className="hidden lg:table-cell text-muted-foreground">{formatDate(req.estimated_shipment_date)}</TableCell>
+                <TableCell className="text-muted-foreground text-xs font-medium">{currencyDisplayLabel(req.currency)}</TableCell>
                 <TableCell>{agingBadge(req.created_at)}</TableCell>
                 <TableCell>
                   <Button size="sm" asChild>
@@ -160,6 +161,7 @@ function HoldTable({ rows }: { rows: DepositRequest[] }) {
               <span className="font-mono text-xs font-bold text-foreground">{requestDisplayNumber(req)}</span>
               <StatusBadge status={req.current_status} showFull />
             </div>
+            <div className="text-xs text-muted-foreground font-mono">Invoice # {req.sunshine_invoice_number || "—"}</div>
             <div className="text-sm font-semibold text-foreground">{req.supplier.name}</div>
             <div className="text-xs text-muted-foreground">{req.customer.name}</div>
             <div className="flex items-center justify-between">
@@ -178,6 +180,7 @@ function HoldTable({ rows }: { rows: DepositRequest[] }) {
           <TableHeader>
             <TableRow>
               <TableHead>Request #</TableHead>
+              <TableHead>Invoice #</TableHead>
               <TableHead>Supplier</TableHead>
               <TableHead>Customer</TableHead>
               <TableHead className="text-right">Deposit</TableHead>
@@ -188,10 +191,11 @@ function HoldTable({ rows }: { rows: DepositRequest[] }) {
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <tr><td colSpan={7}><EmptyState icon={AlertTriangle} title="No requests on hold" /></td></tr>
+              <tr><td colSpan={8}><EmptyState icon={AlertTriangle} title="No requests on hold" /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id}>
                 <TableCell><span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span></TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
                 <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
@@ -242,6 +246,7 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
           <TableHeader>
             <TableRow>
               <TableHead>Request #</TableHead>
+              <TableHead>Invoice #</TableHead>
               <TableHead>Supplier</TableHead>
               <TableHead>Customer</TableHead>
               <TableHead className="text-right">Deposit</TableHead>
@@ -252,10 +257,11 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <tr><td colSpan={7}><EmptyState icon={ClipboardList} title="No requests yet" /></td></tr>
+              <tr><td colSpan={8}><EmptyState icon={ClipboardList} title="No requests yet" /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id}>
                 <TableCell><span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span></TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
                 <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
@@ -403,12 +409,12 @@ export default function AccountsDashboard() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Request #</TableHead><TableHead>Supplier</TableHead>
-                      <TableHead>Customer</TableHead><TableHead>Deposit</TableHead>
-                      <TableHead>Status</TableHead><TableHead />
+                      <TableHead>Request #</TableHead><TableHead>Invoice #</TableHead>
+                      <TableHead>Supplier</TableHead><TableHead>Customer</TableHead>
+                      <TableHead>Deposit</TableHead><TableHead>Status</TableHead><TableHead />
                     </TableRow>
                   </TableHeader>
-                  <TableBody><TableSkeleton rows={5} cols={6} /></TableBody>
+                  <TableBody><TableSkeleton rows={5} cols={7} /></TableBody>
                 </Table>
               </Card>
             ) : (
@@ -431,12 +437,12 @@ export default function AccountsDashboard() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Request #</TableHead><TableHead>Supplier</TableHead>
-                      <TableHead>Customer</TableHead><TableHead>Deposit</TableHead>
-                      <TableHead>Status</TableHead><TableHead />
+                      <TableHead>Request #</TableHead><TableHead>Invoice #</TableHead>
+                      <TableHead>Supplier</TableHead><TableHead>Customer</TableHead>
+                      <TableHead>Deposit</TableHead><TableHead>Status</TableHead><TableHead />
                     </TableRow>
                   </TableHeader>
-                  <TableBody><TableSkeleton rows={5} cols={6} /></TableBody>
+                  <TableBody><TableSkeleton rows={5} cols={7} /></TableBody>
                 </Table>
               </Card>
             ) : (

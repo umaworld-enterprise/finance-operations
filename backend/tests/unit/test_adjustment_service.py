@@ -1,14 +1,23 @@
 """Adjust Invoices: same-supplier validation, available balance, traceability,
-immutability of the source paid tranche, and audit entries."""
+immutability of the source paid tranche, audit entries, and the shipped-request
+exclusion (change note B1)."""
 
+import uuid
+from datetime import date
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
 
-from app.core.exceptions import AuthorizationError, ValidationError
+from app.core.exceptions import (
+    AuthorizationError,
+    BusinessRuleError,
+    ConflictError,
+    ValidationError,
+)
 from app.models.audit import AuditLog
-from app.models.enums import TrancheStatus, UserRole
+from app.models.enums import AdjustmentStatus, TrancheStatus, UserRole
+from app.models.payment import PaymentDetails
 from app.schemas.tranche import AdjustmentCreate
 from app.services.adjustment_service import AdjustmentService
 from tests.factories import (
@@ -126,12 +135,15 @@ async def test_balance_cannot_be_exceeded_across_adjustments(db_session):
     assert adj.amount == Decimal("300.00")
 
 
-async def test_merchandiser_cannot_adjust(db_session):
+async def test_non_requester_roles_cannot_adjust(db_session):
     _, _, _, _, _, paid, unpaid = await _setup(db_session)
-    merch = await make_user(db_session, UserRole.MERCHANDISER)
+    hom = await make_user(db_session, UserRole.HEAD_OF_MERCHANDISER)
     svc = AdjustmentService(db_session)
     with pytest.raises(AuthorizationError):
-        await svc.create(_payload(paid, unpaid), merch.id, UserRole.MERCHANDISER)
+        await svc.create(_payload(paid, unpaid), hom.id, UserRole.HEAD_OF_MERCHANDISER)
+    finance = await make_user(db_session, UserRole.FINANCE_ADMIN)
+    with pytest.raises(AuthorizationError):
+        await svc.create(_payload(paid, unpaid), finance.id, UserRole.FINANCE_ADMIN)
 
 
 async def test_traceable_from_both_requests(db_session):
@@ -159,3 +171,249 @@ async def test_supplier_options_report_remaining_balance(db_session):
     assert sources[0].adjusted_out_total == Decimal("600.00")
     assert len(destinations) == 1
     assert destinations[0].adjusted_in_total == Decimal("600.00")
+
+
+# ── B1: shipped requests are excluded from Adjust Invoice ─────────────────────
+
+
+async def _add_payment_details(db_session, request, *, ship_date=None):
+    db_session.add(
+        PaymentDetails(
+            id=uuid.uuid4(),
+            deposit_request_id=request.id,
+            ship_date=ship_date,
+        )
+    )
+    await db_session.flush()
+
+
+async def test_shipped_request_appears_in_neither_option_list(db_session):
+    accounts, supplier, customer, req_a, req_b, paid, unpaid = await _setup(db_session)
+    # req_a also gets an unpaid tranche so it would normally feed BOTH lists.
+    await make_tranche(db_session, req_a, number=2, amount=Decimal("200.00"))
+    await _add_payment_details(db_session, req_a, ship_date=date(2026, 7, 20))
+
+    svc = AdjustmentService(db_session)
+    sources, destinations = await svc.supplier_tranche_options(supplier.id)
+
+    listed_ids = {t.id for t in sources} | {t.id for t in destinations}
+    assert paid.id not in listed_ids
+    assert all(t.request_number != req_a.request_number for t in sources + destinations)
+    # req_b (unshipped) is unaffected.
+    assert {t.id for t in destinations} == {unpaid.id}
+
+
+async def test_unshipped_payment_details_row_does_not_exclude(db_session):
+    """A partial payment_details row with NULL ship_date must not filter the
+    request out (the outer join keeps rows without payment_details too)."""
+    accounts, supplier, _, req_a, _, paid, unpaid = await _setup(db_session)
+    await _add_payment_details(db_session, req_a, ship_date=None)
+
+    svc = AdjustmentService(db_session)
+    sources, destinations = await svc.supplier_tranche_options(supplier.id)
+    assert {t.id for t in sources} == {paid.id}
+    assert {t.id for t in destinations} == {unpaid.id}
+
+
+async def test_create_rejects_shipped_source_request(db_session):
+    accounts, _, _, req_a, _, paid, unpaid = await _setup(db_session)
+    await _add_payment_details(db_session, req_a, ship_date=date(2026, 7, 20))
+    svc = AdjustmentService(db_session)
+    with pytest.raises(BusinessRuleError, match=req_a.request_number):
+        await svc.create(_payload(paid, unpaid, "50.00"), accounts.id, UserRole.ACCOUNTS_TEAM)
+
+
+async def test_create_rejects_shipped_destination_request(db_session):
+    accounts, _, _, _, req_b, paid, unpaid = await _setup(db_session)
+    await _add_payment_details(db_session, req_b, ship_date=date(2026, 7, 21))
+    svc = AdjustmentService(db_session)
+    with pytest.raises(BusinessRuleError, match=req_b.request_number):
+        await svc.create(_payload(paid, unpaid, "50.00"), accounts.id, UserRole.ACCOUNTS_TEAM)
+
+
+# ── B3: merchandiser-raised requests + Accounts approval queue ────────────────
+
+
+async def _merch(db_session):
+    return await make_user(db_session, UserRole.MERCHANDISER)
+
+
+async def test_merchandiser_create_requires_reason(db_session):
+    _, _, _, _, _, paid, unpaid = await _setup(db_session)
+    merch = await _merch(db_session)
+    svc = AdjustmentService(db_session)
+    with pytest.raises(ValidationError, match="reason is mandatory"):
+        await svc.create(_payload(paid, unpaid, "50.00"), merch.id, UserRole.MERCHANDISER)
+    with pytest.raises(ValidationError, match="reason is mandatory"):
+        await svc.create(
+            _payload(paid, unpaid, "50.00", reason="   "), merch.id, UserRole.MERCHANDISER
+        )
+
+
+async def test_merchandiser_create_is_pending_approval(db_session):
+    _, _, _, _, _, paid, unpaid = await _setup(db_session)
+    merch = await _merch(db_session)
+    svc = AdjustmentService(db_session)
+    adj = await svc.create(
+        _payload(paid, unpaid, "300.00", reason="Order cancelled"),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert adj.status == AdjustmentStatus.PENDING_APPROVAL
+    assert adj.performed_by == merch.id
+
+
+async def test_pending_does_not_consume_balance(db_session):
+    accounts, supplier, _, _, _, paid, unpaid = await _setup(db_session)
+    merch = await _merch(db_session)
+    svc = AdjustmentService(db_session)
+    await svc.create(
+        _payload(paid, unpaid, "700.00", reason="r"), merch.id, UserRole.MERCHANDISER
+    )
+    # Option lists still report the FULL paid balance available.
+    sources, _ = await svc.supplier_tranche_options(supplier.id)
+    assert sources[0].available_paid_balance == Decimal("1000.00")
+    # Accounts can still complete an adjustment using the full balance.
+    adj = await svc.create(
+        _payload(paid, unpaid, "1000.00"), accounts.id, UserRole.ACCOUNTS_TEAM
+    )
+    assert adj.status == AdjustmentStatus.COMPLETED
+
+
+async def test_double_spend_across_two_pending_requests(db_session):
+    """Two pending requests may together exceed the balance — approval is the
+    enforcement point, so the second approval must fail."""
+    accounts, _, _, _, _, paid, unpaid = await _setup(db_session)
+    merch = await _merch(db_session)
+    svc = AdjustmentService(db_session)
+    first = await svc.create(
+        _payload(paid, unpaid, "700.00", reason="r1"), merch.id, UserRole.MERCHANDISER
+    )
+    second = await svc.create(
+        _payload(paid, unpaid, "700.00", reason="r2"), merch.id, UserRole.MERCHANDISER
+    )
+    approved = await svc.approve(first.id, accounts.id, UserRole.ACCOUNTS_TEAM, "ok")
+    assert approved.status == AdjustmentStatus.COMPLETED
+    # 700 of 1000 now consumed — the second 700 no longer fits.
+    with pytest.raises(ValidationError, match="available paid balance"):
+        await svc.approve(second.id, accounts.id, UserRole.ACCOUNTS_TEAM, "ok")
+
+
+async def test_approve_writes_audit_on_adjustment_and_both_requests(db_session):
+    accounts, _, _, req_a, req_b, paid, unpaid = await _setup(db_session)
+    merch = await _merch(db_session)
+    svc = AdjustmentService(db_session)
+    adj = await svc.create(
+        _payload(paid, unpaid, "200.00", reason="r"), merch.id, UserRole.MERCHANDISER
+    )
+    await svc.approve(adj.id, accounts.id, UserRole.ACCOUNTS_TEAM, "verified with bank")
+
+    status_rows = await db_session.execute(
+        select(AuditLog).where(
+            AuditLog.entity_name == "invoice_adjustments",
+            AuditLog.entity_id == adj.id,
+            AuditLog.field_name == "status",
+        )
+    )
+    row = status_rows.scalars().one()
+    assert "verified with bank" in row.new_value
+    for req in (req_a, req_b):
+        rows = await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.entity_name == "deposit_requests",
+                AuditLog.entity_id == req.id,
+                AuditLog.field_name == "invoice_adjustment_approved",
+            )
+        )
+        assert rows.scalars().first() is not None
+
+
+async def test_reject_sets_rejected_and_never_consumes_balance(db_session):
+    accounts, supplier, _, _, _, paid, unpaid = await _setup(db_session)
+    merch = await _merch(db_session)
+    svc = AdjustmentService(db_session)
+    adj = await svc.create(
+        _payload(paid, unpaid, "700.00", reason="r"), merch.id, UserRole.MERCHANDISER
+    )
+    rejected = await svc.reject(adj.id, accounts.id, UserRole.ACCOUNTS_TEAM, "not justified")
+    assert rejected.status == AdjustmentStatus.REJECTED
+    sources, _ = await svc.supplier_tranche_options(supplier.id)
+    assert sources[0].available_paid_balance == Decimal("1000.00")
+    # A decided adjustment cannot be decided again.
+    with pytest.raises(ConflictError, match="pending"):
+        await svc.approve(adj.id, accounts.id, UserRole.ACCOUNTS_TEAM, "changed my mind")
+
+
+async def test_approve_reasserts_ship_date_exclusion(db_session):
+    """State may change between raise and decision — a request that shipped in
+    the meantime blocks approval."""
+    accounts, _, _, req_a, _, paid, unpaid = await _setup(db_session)
+    merch = await _merch(db_session)
+    svc = AdjustmentService(db_session)
+    adj = await svc.create(
+        _payload(paid, unpaid, "100.00", reason="r"), merch.id, UserRole.MERCHANDISER
+    )
+    await _add_payment_details(db_session, req_a, ship_date=date(2026, 7, 25))
+    with pytest.raises(BusinessRuleError, match=req_a.request_number):
+        await svc.approve(adj.id, accounts.id, UserRole.ACCOUNTS_TEAM, "ok")
+
+
+async def test_approve_rejects_destination_paid_meanwhile(db_session):
+    accounts, _, _, _, _, paid, unpaid = await _setup(db_session)
+    merch = await _merch(db_session)
+    svc = AdjustmentService(db_session)
+    adj = await svc.create(
+        _payload(paid, unpaid, "100.00", reason="r"), merch.id, UserRole.MERCHANDISER
+    )
+    unpaid.status = TrancheStatus.PAID
+    await db_session.flush()
+    with pytest.raises(ValidationError, match="already paid"):
+        await svc.approve(adj.id, accounts.id, UserRole.ACCOUNTS_TEAM, "ok")
+
+
+async def test_only_deciders_can_approve_or_reject(db_session):
+    accounts, _, _, _, _, paid, unpaid = await _setup(db_session)
+    merch = await _merch(db_session)
+    svc = AdjustmentService(db_session)
+    adj = await svc.create(
+        _payload(paid, unpaid, "100.00", reason="r"), merch.id, UserRole.MERCHANDISER
+    )
+    with pytest.raises(AuthorizationError):
+        await svc.approve(adj.id, merch.id, UserRole.MERCHANDISER, "self-approve")
+    with pytest.raises(AuthorizationError):
+        await svc.reject(adj.id, merch.id, UserRole.MERCHANDISER, "self-reject")
+
+
+async def test_pending_queue_lists_oldest_first(db_session):
+    accounts, _, _, _, _, paid, unpaid = await _setup(db_session)
+    merch = await _merch(db_session)
+    svc = AdjustmentService(db_session)
+    a1 = await svc.create(
+        _payload(paid, unpaid, "100.00", reason="r1"), merch.id, UserRole.MERCHANDISER
+    )
+    a2 = await svc.create(
+        _payload(paid, unpaid, "200.00", reason="r2"), merch.id, UserRole.MERCHANDISER
+    )
+    completed = await svc.create(_payload(paid, unpaid, "50.00"), accounts.id, UserRole.ACCOUNTS_TEAM)
+    # CURRENT_TIMESTAMP has second precision on SQLite — same-second inserts
+    # tie. Pin distinct timestamps so ordering is deterministic.
+    from datetime import datetime, timezone
+
+    a1.created_at = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
+    a2.created_at = datetime(2026, 7, 2, 10, 0, tzinfo=timezone.utc)
+    await db_session.flush()
+
+    pending = await svc.list_pending()
+    assert [p.id for p in pending] == [a1.id, a2.id]
+    assert completed.id not in {p.id for p in pending}
+
+
+async def test_merchandiser_history_scoped_to_own(db_session):
+    accounts, _, _, _, _, paid, unpaid = await _setup(db_session)
+    merch = await _merch(db_session)
+    svc = AdjustmentService(db_session)
+    mine = await svc.create(
+        _payload(paid, unpaid, "100.00", reason="r"), merch.id, UserRole.MERCHANDISER
+    )
+    await svc.create(_payload(paid, unpaid, "50.00"), accounts.id, UserRole.ACCOUNTS_TEAM)
+    own = await svc.list_recent(performed_by=merch.id)
+    assert {a.id for a in own} == {mine.id}

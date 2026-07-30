@@ -176,7 +176,6 @@ export interface DepositRequest {
   deposit_amount: number;
   deposit_percentage: number | null;
   total_supplier_invoice_amount: number;
-  estimated_shipment_date: string | null;
   estimated_etd: string | null;
   payment_terms: string | null;
   remarks: string | null;

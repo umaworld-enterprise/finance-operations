@@ -33,7 +33,6 @@ export interface CreateRequestPayload {
   deposit_amount?: number;
   deposit_percentage?: number;
   total_supplier_invoice_amount: number;
-  estimated_shipment_date?: string;
   estimated_etd?: string;
   payment_terms?: string;
   remarks?: string;
@@ -152,11 +151,11 @@ const requestService = {
     return data;
   },
 
-  homApprove: async (id: string, remarks?: string): Promise<void> => {
+  homApprove: async (id: string, remarks: string): Promise<void> => {
     await api.post(`/requests/${id}/hom-approve`, { remarks });
   },
 
-  homReject: async (id: string, remarks?: string): Promise<void> => {
+  homReject: async (id: string, remarks: string): Promise<void> => {
     await api.post(`/requests/${id}/hom-reject`, { remarks });
   },
 
@@ -186,11 +185,6 @@ const requestService = {
       `/requests/${id}/tranches/${trancheId}`,
       payload,
     );
-    return data;
-  },
-
-  payTranche: async (id: string, trancheId: string): Promise<PaymentTranche> => {
-    const { data } = await api.post<PaymentTranche>(`/requests/${id}/tranches/${trancheId}/pay`);
     return data;
   },
 

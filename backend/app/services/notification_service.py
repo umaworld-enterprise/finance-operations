@@ -53,6 +53,11 @@ TYPE_TT_COPY_ATTACHED = "tt_copy_attached"
 TYPE_TRANCHE_PAID = "tranche_paid"
 TYPE_TRANCHE_TT_ATTACHED = "tranche_tt_attached"
 TYPE_TRANCHE_UPDATED = "tranche_updated"
+TYPE_HOM_APPROVED = "hom_approved"
+TYPE_HOM_REJECTED = "hom_rejected"
+TYPE_ADJUSTMENT_REQUESTED = "adjustment_requested"
+TYPE_ADJUSTMENT_RECORDED = "adjustment_recorded"
+TYPE_ADJUSTMENT_DECIDED = "adjustment_decided"
 
 _EMAIL_ROLES = (UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN)
 
@@ -122,6 +127,73 @@ def build_tranche_notification_message(
         "url": f"/merchandiser/{request_id}",
         "attachment_url": tt_copy_url,
     }
+
+
+def build_hom_decision_message(
+    type_: str, request_number: str, request_id: UUID | str, remarks: str
+) -> dict:
+    """Title/body/url for HoM approve/reject notifications.
+
+    Both go to the merchandiser who raised the request and deep-link to the
+    merchandiser view. The reason is always included — it is mandatory.
+    """
+    url = f"/merchandiser/{request_id}"
+    if type_ == TYPE_HOM_REJECTED:
+        return {
+            "title": "Request rejected",
+            "body": f"{request_number} was rejected by the Head of Merchandiser. Reason: {remarks}",
+            "url": url,
+            "attachment_url": None,
+        }
+    return {
+        "title": "Request approved",
+        "body": (
+            f"{request_number} was approved by the Head of Merchandiser "
+            f"and moved to the payment queue. Reason: {remarks}"
+        ),
+        "url": url,
+        "attachment_url": None,
+    }
+
+
+def build_adjustment_notification_message(
+    type_: str,
+    amount: str,
+    source_label: str,
+    source_request_number: str,
+    destination_label: str,
+    destination_request_number: str,
+    reason: str | None = None,
+    decision: str | None = None,
+) -> dict:
+    """Title/body/url for Adjust Invoice notifications (change note B2/B3).
+
+    adjustment_requested / adjustment_recorded go to the Accounts Team;
+    adjustment_decided goes back to the merchandiser who raised the request.
+    All deep-link to the Adjust Invoices module.
+    """
+    move = (
+        f"{amount} from {source_label} of {source_request_number} "
+        f"to {destination_label} of {destination_request_number}"
+    )
+    url = "/adjust-invoices"
+    if type_ == TYPE_ADJUSTMENT_REQUESTED:
+        body = f"A merchandiser requested reallocating {move}."
+        if reason:
+            body += f" Reason: {reason}"
+        return {"title": "Adjustment approval requested", "body": body,
+                "url": url, "attachment_url": None}
+    if type_ == TYPE_ADJUSTMENT_DECIDED:
+        body = f"Your adjustment request ({move}) was {decision}."
+        if reason:
+            body += f" Reason: {reason}"
+        return {"title": f"Adjustment {decision}", "body": body,
+                "url": url, "attachment_url": None}
+    body = f"An invoice adjustment was recorded: {move}."
+    if reason:
+        body += f" Reason: {reason}"
+    return {"title": "Invoice adjustment recorded", "body": body,
+            "url": url, "attachment_url": None}
 
 
 def decide_on_tt_upload(request_is_processed: bool, already_notified: bool) -> str | None:
@@ -416,6 +488,170 @@ async def notify_tranche_updated(request_id: UUID, tranche_id: UUID, changes: st
         logger.error(
             "notify_tranche_updated failed",
             request_id=str(request_id), tranche_id=str(tranche_id), error=str(exc),
+        )
+
+
+async def notify_hom_decision(request_id: UUID, decision: str, remarks: str) -> None:
+    """After a HoM approve/reject — bell + push to the merchandiser who raised
+    the request, including the mandatory reason.
+
+    decision: 'approved' or 'rejected'. Resolves the recipient via
+    _find_target_user (handles both created_by and public-form
+    submitter_email). Own session; failures logged and swallowed
+    (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+
+    try:
+        async with AsyncSessionFactory() as session:
+            request = await _load_request(session, request_id)
+            if request is None:
+                return
+            type_ = TYPE_HOM_REJECTED if decision == "rejected" else TYPE_HOM_APPROVED
+            message = build_hom_decision_message(
+                type_, request.request_number, request.id, remarks
+            )
+            target = await _find_target_user(session, request)
+            if target is None:
+                logger.info(
+                    "No target user for HoM decision notification — skipping",
+                    request_id=str(request_id),
+                )
+                return
+            session.add(
+                Notification(
+                    user_id=target.id,
+                    type=type_,
+                    title=message["title"],
+                    body=message["body"],
+                    url=message["url"],
+                    attachment_url=None,
+                    deposit_request_id=request.id,
+                )
+            )
+            await session.commit()
+            await _push_to_user(session, target.id, message)
+            await session.commit()
+    except Exception as exc:
+        logger.error(
+            "notify_hom_decision failed",
+            request_id=str(request_id), decision=decision, error=str(exc),
+        )
+
+
+async def _load_adjustment_context(session: AsyncSession, adjustment_id: UUID):
+    """(adjustment, message-builder kwargs) or (None, None) if rows vanished."""
+    from app.repositories.tranche_repo import TrancheRepository
+
+    from app.models.tranche import InvoiceAdjustment
+
+    adjustment = await session.get(InvoiceAdjustment, adjustment_id)
+    if adjustment is None:
+        return None, None
+    repo = TrancheRepository(session)
+    source = await repo.get_with_request(adjustment.source_tranche_id)
+    destination = await repo.get_with_request(adjustment.destination_tranche_id)
+    if source is None or destination is None:
+        return None, None
+    kwargs = {
+        "amount": str(adjustment.amount),
+        "source_label": source.label,
+        "source_request_number": source.deposit_request.request_number,
+        "destination_label": destination.label,
+        "destination_request_number": destination.deposit_request.request_number,
+    }
+    return adjustment, kwargs
+
+
+async def notify_adjustment_created(adjustment_id: UUID) -> None:
+    """After an adjustment is raised/recorded — bell + push to every active
+    Accounts Team user (excluding the actor), per change note B2/B3.
+
+    Pending (merchandiser-raised) adjustments send 'adjustment_requested';
+    immediately-completed ones send 'adjustment_recorded'.
+    Own session; failures logged and swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+    from app.models.enums import AdjustmentStatus
+
+    try:
+        async with AsyncSessionFactory() as session:
+            adjustment, kwargs = await _load_adjustment_context(session, adjustment_id)
+            if adjustment is None:
+                return
+            type_ = (
+                TYPE_ADJUSTMENT_REQUESTED
+                if adjustment.status == AdjustmentStatus.PENDING_APPROVAL
+                else TYPE_ADJUSTMENT_RECORDED
+            )
+            message = build_adjustment_notification_message(
+                type_, reason=adjustment.reason, **kwargs
+            )
+            result = await session.execute(
+                select(User).where(
+                    User.role == UserRole.ACCOUNTS_TEAM,
+                    User.is_active == True,  # noqa: E712
+                    User.id != adjustment.performed_by,
+                )
+            )
+            accounts_users = list(result.scalars().all())
+            for user in accounts_users:
+                session.add(
+                    Notification(
+                        user_id=user.id,
+                        type=type_,
+                        title=message["title"],
+                        body=message["body"],
+                        url=message["url"],
+                        attachment_url=None,
+                        deposit_request_id=None,
+                    )
+                )
+            await session.commit()
+            for user in accounts_users:
+                await _push_to_user(session, user.id, message)
+            await session.commit()
+    except Exception as exc:
+        logger.error(
+            "notify_adjustment_created failed",
+            adjustment_id=str(adjustment_id), error=str(exc),
+        )
+
+
+async def notify_adjustment_decided(adjustment_id: UUID, decision: str, reason: str) -> None:
+    """After Accounts approves/rejects — bell + push back to the user who
+    raised the adjustment request, including the mandatory reason.
+
+    Own session; failures logged and swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+
+    try:
+        async with AsyncSessionFactory() as session:
+            adjustment, kwargs = await _load_adjustment_context(session, adjustment_id)
+            if adjustment is None:
+                return
+            message = build_adjustment_notification_message(
+                TYPE_ADJUSTMENT_DECIDED, reason=reason, decision=decision, **kwargs
+            )
+            session.add(
+                Notification(
+                    user_id=adjustment.performed_by,
+                    type=TYPE_ADJUSTMENT_DECIDED,
+                    title=message["title"],
+                    body=message["body"],
+                    url=message["url"],
+                    attachment_url=None,
+                    deposit_request_id=None,
+                )
+            )
+            await session.commit()
+            await _push_to_user(session, adjustment.performed_by, message)
+            await session.commit()
+    except Exception as exc:
+        logger.error(
+            "notify_adjustment_decided failed",
+            adjustment_id=str(adjustment_id), decision=decision, error=str(exc),
         )
 
 

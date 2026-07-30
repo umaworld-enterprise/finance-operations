@@ -64,21 +64,6 @@ export default function AccountsPaymentPage() {
 
   const snap = req?.analytics_snapshot;
 
-  const { mutateAsync: updateShipmentDate, isPending: savingShipment } = useUpdateRequest(id);
-  const [shipmentDate, setShipmentDate] = useState("");
-  useEffect(() => {
-    setShipmentDate(req?.estimated_shipment_date ? String(req.estimated_shipment_date) : "");
-  }, [req?.estimated_shipment_date]);
-
-  const doSaveShipmentDate = async () => {
-    try {
-      await updateShipmentDate({ estimated_shipment_date: shipmentDate || undefined });
-      toast.success("Shipment date saved.");
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to save.");
-    }
-  };
-
   const canHold   = req?.current_status === "pending_payment"      && !req.is_locked && !isFinance;
   // "reopened" must also offer Resume — otherwise a reopened request is
   // stranded with no path back to the payment queue.
@@ -202,34 +187,6 @@ export default function AccountsPaymentPage() {
               <div className="mt-4 pt-4 border-t border-border">
                 <p className="text-xs font-medium text-muted-foreground mb-1">Merchandiser Remarks</p>
                 <p className="text-sm text-foreground bg-muted/50 rounded-lg px-3 py-2">{req.remarks}</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-5 md:p-6 space-y-3">
-            <div>
-              <h2 className="font-semibold text-foreground text-sm">Estimated Shipment Date</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Set by the accounts team. Visible to merchandisers once saved.
-              </p>
-            </div>
-            {req.is_locked || isFinance ? (
-              <p className="text-sm font-medium text-foreground">
-                {req.estimated_shipment_date ? formatDate(req.estimated_shipment_date) : "—"}
-              </p>
-            ) : (
-              <div className="flex items-center gap-3">
-                <input
-                  type="date"
-                  value={shipmentDate}
-                  onChange={(e) => setShipmentDate(e.target.value)}
-                  className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-                <Button size="sm" onClick={doSaveShipmentDate} disabled={savingShipment}>
-                  {savingShipment ? "Saving…" : "Save"}
-                </Button>
               </div>
             )}
           </CardContent>
