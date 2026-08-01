@@ -47,13 +47,14 @@ function TranchePaymentDetailsForm({
   const [paymentDate, setPaymentDate] = useState(tranche.payment_date ?? "");
   const [bank, setBank] = useState(tranche.bank ?? "");
   const [reference, setReference] = useState(tranche.payment_reference_number ?? "");
+  const [remarks, setRemarks] = useState(tranche.accounts_remarks ?? "");
 
   const inputCls =
     "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring";
 
   const save = async () => {
-    if (!paymentDate || !bank.trim()) {
-      toast.error("Payment date and bank are required.");
+    if (!paymentDate || !bank.trim() || !remarks.trim()) {
+      toast.error("Payment date, bank and accounts remarks are required.");
       return;
     }
     try {
@@ -63,6 +64,7 @@ function TranchePaymentDetailsForm({
           payment_date: paymentDate,
           bank: bank.trim(),
           payment_reference_number: reference.trim() || undefined,
+          accounts_remarks: remarks.trim(),
         },
       });
       toast.success(`Payment details saved for ${tranche.label}.`);
@@ -72,27 +74,43 @@ function TranchePaymentDetailsForm({
   };
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-      <div>
-        <p className="text-xs text-muted-foreground mb-1">
-          Payment date<span className="text-foreground ml-0.5" aria-hidden="true">*</span>
-        </p>
-        <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className={inputCls} />
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">
+            Payment date<span className="text-foreground ml-0.5" aria-hidden="true">*</span>
+          </p>
+          <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className={inputCls} />
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">
+            Bank<span className="text-foreground ml-0.5" aria-hidden="true">*</span>
+          </p>
+          <input type="text" value={bank} onChange={(e) => setBank(e.target.value)} className={inputCls} />
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">Payment ref. # (optional)</p>
+          <input type="text" value={reference} onChange={(e) => setReference(e.target.value)} className={inputCls} />
+        </div>
       </div>
-      <div>
-        <p className="text-xs text-muted-foreground mb-1">
-          Bank<span className="text-foreground ml-0.5" aria-hidden="true">*</span>
-        </p>
-        <input type="text" value={bank} onChange={(e) => setBank(e.target.value)} className={inputCls} />
-      </div>
-      <div>
-        <p className="text-xs text-muted-foreground mb-1">Payment ref. # (optional)</p>
-        <input type="text" value={reference} onChange={(e) => setReference(e.target.value)} className={inputCls} />
-      </div>
-      <div className="flex items-end">
-        <Button size="sm" variant="secondary" onClick={save} disabled={updateDetails.isPending}>
-          {updateDetails.isPending ? "Saving…" : "Save Details"}
-        </Button>
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex-1">
+          <p className="text-xs text-muted-foreground mb-1">
+            Accounts remarks<span className="text-foreground ml-0.5" aria-hidden="true">*</span>
+          </p>
+          <input
+            type="text"
+            value={remarks}
+            onChange={(e) => setRemarks(e.target.value)}
+            placeholder="Internal note for this tranche payment"
+            className={inputCls}
+          />
+        </div>
+        <div className="flex items-end">
+          <Button size="sm" variant="secondary" onClick={save} disabled={updateDetails.isPending}>
+            {updateDetails.isPending ? "Saving…" : "Save Details"}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -385,6 +403,9 @@ export function TrancheList({
 
                   {!t.tt_copy_url && (
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      {/* Hidden native input — only the button opens the file
+                          picker (the bare input made the whole row clickable
+                          and showed its own "Choose file" text). */}
                       <input
                         ref={(el) => { fileInputs.current[t.id] = el; }}
                         type="file"
@@ -392,8 +413,18 @@ export function TrancheList({
                         onChange={(e) =>
                           setSelectedFiles((prev) => ({ ...prev, [t.id]: e.target.files?.[0] ?? null }))
                         }
-                        className="flex-1 text-sm text-muted-foreground file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-border file:bg-secondary file:text-secondary-foreground file:text-xs file:font-medium file:cursor-pointer hover:file:bg-muted"
+                        className="hidden"
                       />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => fileInputs.current[t.id]?.click()}
+                      >
+                        Choose File
+                      </Button>
+                      <span className="flex-1 text-xs text-muted-foreground truncate self-center">
+                        {selectedFiles[t.id]?.name ?? "No file selected"}
+                      </span>
                       <Button
                         size="sm"
                         variant="secondary"
@@ -409,7 +440,7 @@ export function TrancheList({
                     <div className="flex items-center gap-3 flex-wrap">
                       <ReadinessItem done={!!t.tt_copy_url} label="TT copy uploaded" />
                       <ReadinessItem
-                        done={!!t.payment_date && !!t.bank}
+                        done={!!t.payment_date && !!t.bank && !!t.accounts_remarks}
                         label="Payment details recorded"
                       />
                     </div>
@@ -417,7 +448,8 @@ export function TrancheList({
                       size="sm"
                       onClick={() => setPayConfirmId(t.id)}
                       disabled={
-                        !t.tt_copy_url || !t.payment_date || !t.bank || payTranche.isPending
+                        !t.tt_copy_url || !t.payment_date || !t.bank ||
+                        !t.accounts_remarks || payTranche.isPending
                       }
                     >
                       Mark {t.label} Paid
@@ -439,8 +471,18 @@ export function TrancheList({
                     onChange={(e) =>
                       setSelectedFiles((prev) => ({ ...prev, [t.id]: e.target.files?.[0] ?? null }))
                     }
-                    className="flex-1 text-sm text-muted-foreground file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-border file:bg-secondary file:text-secondary-foreground file:text-xs file:font-medium file:cursor-pointer hover:file:bg-muted"
+                    className="hidden"
                   />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => fileInputs.current[t.id]?.click()}
+                  >
+                    Choose File
+                  </Button>
+                  <span className="flex-1 text-xs text-muted-foreground truncate self-center">
+                    {selectedFiles[t.id]?.name ?? "No file selected"}
+                  </span>
                   <Button
                     size="sm"
                     variant="secondary"

@@ -624,11 +624,15 @@ class AnalyticsService:
         def group_key(r) -> tuple:
             if group_by == "week":
                 # ISO week of the request-created date: Monday–Sunday,
-                # boundaries explicit in the label.
+                # boundaries explicit in the label (DD/MM/YYYY "to" — Aug 2026
+                # client request).
                 created = r.created_at.date() if hasattr(r.created_at, "date") else r.created_at
                 week_start = created - timedelta(days=created.weekday())
                 week_end = week_start + timedelta(days=6)
-                return (week_start.isoformat(), f"{week_start.isoformat()} – {week_end.isoformat()}")
+                return (
+                    week_start.isoformat(),
+                    f"{week_start.strftime('%d/%m/%Y')} to {week_end.strftime('%d/%m/%Y')}",
+                )
             if group_by == "merchandiser":
                 name = r.merchandiser_name or r.submitter_email or "Unassigned"
                 return (name.lower(), name)
@@ -719,7 +723,7 @@ class AnalyticsService:
                 week_start = r.estimated_etd - timedelta(days=r.estimated_etd.weekday())
                 week_end = week_start + timedelta(days=6)
                 key: str | None = week_start.isoformat()
-                label = f"{week_start.isoformat()} – {week_end.isoformat()}"
+                label = f"{week_start.strftime('%d/%m/%Y')} to {week_end.strftime('%d/%m/%Y')}"
             else:
                 key, label = None, "No ETD recorded"
             g = groups.setdefault(

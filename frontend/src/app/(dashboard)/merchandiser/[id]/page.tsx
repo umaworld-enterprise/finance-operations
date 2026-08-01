@@ -13,9 +13,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { TrancheList } from "@/components/tranches/TrancheList";
+import { SupplierDefaultHistory } from "@/components/forms/SupplierDefaultHistory";
 import { RequestAuditTrail } from "@/components/tranches/RequestAuditTrail";
 import { RequestAdjustments } from "@/components/tranches/RequestAdjustments";
-import { useRequest, useRequestAction, useFieldVisibility, useUpdateRemarks, usePayment, useTranchesModifiable } from "@/hooks/useRequests";
+import { useRequest, useRequestAction, useFieldVisibility, useUpdateRemarks, usePayment, useTranchesModifiable, useUpdateRequest } from "@/hooks/useRequests";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { ArrowLeft, Lock, FileQuestion, ExternalLink } from "lucide-react";
@@ -32,6 +33,34 @@ export default function MerchandiserRequestDetail() {
   const [remarks, setRemarks] = useState("");
   const [cancelConfirm, setCancelConfirm] = useState(false);
   const [merchandiserNote, setMerchandiserNote] = useState("");
+
+  // Editable invoice numbers (Aug 2026 follow-up, item 4) — while the request
+  // is still pending and untouched by Accounts. Duplicates rejected server-side.
+  const { mutateAsync: updateRequest, isPending: savingInvoices } = useUpdateRequest(id);
+  const [sunshineDraft, setSunshineDraft] = useState("");
+  const [supplierInvDraft, setSupplierInvDraft] = useState("");
+  useEffect(() => {
+    setSunshineDraft(req?.sunshine_invoice_number ?? "");
+    setSupplierInvDraft(req?.supplier_invoice_number ?? "");
+  }, [req?.sunshine_invoice_number, req?.supplier_invoice_number]);
+
+  const invoiceChanges: { sunshine_invoice_number?: string; supplier_invoice_number?: string } = {};
+  if (sunshineDraft.trim() && sunshineDraft.trim() !== (req?.sunshine_invoice_number ?? "")) {
+    invoiceChanges.sunshine_invoice_number = sunshineDraft.trim();
+  }
+  if (supplierInvDraft.trim() && supplierInvDraft.trim() !== (req?.supplier_invoice_number ?? "")) {
+    invoiceChanges.supplier_invoice_number = supplierInvDraft.trim();
+  }
+
+  const doSaveInvoiceNumbers = async () => {
+    if (Object.keys(invoiceChanges).length === 0) return;
+    try {
+      await updateRequest(invoiceChanges);
+      toast.success("Invoice numbers updated — the change is recorded in the audit log.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to update invoice numbers.");
+    }
+  };
 
   const snap = req?.analytics_snapshot;
 
@@ -187,6 +216,52 @@ export default function MerchandiserRequestDetail() {
           </CardContent>
         </Card>
 
+        {/* Invoice numbers — editable while pending and untouched by Accounts
+            (Aug 2026 follow-up, item 4). */}
+        {modifiable?.modifiable && (
+          <Card>
+            <CardContent className="p-5 md:p-6 space-y-3">
+              <div>
+                <h2 className="font-semibold text-foreground text-sm">Invoice Numbers</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Editable while the request is pending and the Accounts team has not
+                  started processing. A number already used by another live request
+                  is rejected.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="edit-sunshine-invoice">Sunshine Invoice #</Label>
+                  <input
+                    id="edit-sunshine-invoice"
+                    type="text"
+                    value={sunshineDraft}
+                    onChange={(e) => setSunshineDraft(e.target.value)}
+                    className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-supplier-invoice">Supplier Proforma Invoice #</Label>
+                  <input
+                    id="edit-supplier-invoice"
+                    type="text"
+                    value={supplierInvDraft}
+                    onChange={(e) => setSupplierInvDraft(e.target.value)}
+                    className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              </div>
+              <Button
+                size="sm"
+                onClick={doSaveInvoiceNumbers}
+                disabled={savingInvoices || Object.keys(invoiceChanges).length === 0}
+              >
+                {savingInvoices ? "Saving…" : "Save Invoice Numbers"}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Advance Payment Tranches — unpaid tranches stay editable by the
             request owner; paid tranches are locked. */}
         <Card>
@@ -230,6 +305,9 @@ export default function MerchandiserRequestDetail() {
             </CardContent>
           </Card>
         )}
+
+        {/* Supplier default track record */}
+        <SupplierDefaultHistory supplierId={req.supplier.id} supplierName={req.supplier.name} />
 
         {fv.status_history !== false && req.status_history && req.status_history.length > 0 && (
           <Card>

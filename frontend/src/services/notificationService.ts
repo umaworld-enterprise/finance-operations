@@ -1,5 +1,5 @@
 import { api } from "@/lib/api";
-import type { NotificationList, PaymentDetails } from "@/types";
+import type { NotificationList } from "@/types";
 
 const notificationService = {
   list: async (page = 1, pageSize = 20): Promise<NotificationList> => {
@@ -21,17 +21,8 @@ const notificationService = {
     await api.post("/notifications/push/unsubscribe", { endpoint });
   },
 
-  uploadTtCopy: async (requestId: string, file: File): Promise<PaymentDetails> => {
-    const form = new FormData();
-    form.append("file", file);
-    const { data } = await api.post<PaymentDetails>(
-      `/requests/${requestId}/payment/tt-copy`,
-      form,
-      // Override the client's JSON default so axios sets the multipart boundary.
-      { headers: { "Content-Type": "multipart/form-data" } },
-    );
-    return data;
-  },
+  // uploadTtCopy (request-level) was removed with the Payment Details form
+  // (Aug 2026 follow-up) — TT copies are uploaded per tranche.
 };
 
 export default notificationService;

@@ -105,6 +105,16 @@ export function useSupplierDefaultStatus(supplierId: string | null) {
   });
 }
 
+export function useSupplierDefaultHistory(supplierId: string | null) {
+  return useQuery({
+    queryKey: ["supplier-default-history", supplierId],
+    queryFn: () => masterService.getSupplierDefaultHistory(supplierId!),
+    enabled: !!supplierId,
+    staleTime: STALE,
+    gcTime: GC,
+  });
+}
+
 export function useDefaultedSuppliers() {
   return useQuery({
     queryKey: ["defaulted-suppliers"],

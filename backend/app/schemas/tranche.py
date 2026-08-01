@@ -42,13 +42,15 @@ class TranchePaymentDetailsUpdate(BaseModel):
     """Accounts-entered payment details on a single UNPAID tranche.
 
     All fields are individually optional so details can be saved in stages —
-    but marking the tranche paid requires payment_date and bank (plus the TT
-    copy). The reference number is optional throughout (Aug 2026, item 3.2).
+    but marking the tranche paid requires payment_date, bank and
+    accounts_remarks (plus the TT copy). The reference number is optional
+    throughout (Aug 2026, item 3.2).
     """
 
     payment_date: date | None = None
     bank: str | None = None
     payment_reference_number: str | None = None
+    accounts_remarks: str | None = None
 
 
 class TrancheResponse(OrmBase):
@@ -70,6 +72,7 @@ class TrancheResponse(OrmBase):
     payment_date: date | None = None
     bank: str | None = None
     payment_reference_number: str | None = None
+    accounts_remarks: str | None = None
     is_legacy: bool
     created_at: datetime
     updated_at: datetime

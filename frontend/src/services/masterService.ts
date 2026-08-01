@@ -73,6 +73,15 @@ const masterService = {
     return data;
   },
 
+  // Full default history (active + resolved flags) for one supplier — shown
+  // on request detail pages so approvers see the track record (Aug 2026).
+  getSupplierDefaultHistory: async (supplierId: string): Promise<DefaultedSupplier[]> => {
+    const { data } = await api.get<DefaultedSupplier[]>(
+      `/masters/suppliers/${supplierId}/default-history`,
+    );
+    return data;
+  },
+
   flagSupplier: async (payload: FlagSupplierPayload): Promise<void> => {
     await api.post("/masters/suppliers/defaulted", payload);
   },

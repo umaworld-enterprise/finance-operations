@@ -54,7 +54,7 @@ async def test_weekly_tracker_buckets_by_etd_week_soonest_first(db_session):
     groups = await AnalyticsService(db_session).get_weekly_deposit_tracker()
 
     assert [g["week_start"] for g in groups] == ["2026-08-03", "2026-08-10", None]
-    assert groups[0]["week"] == "2026-08-03 – 2026-08-09"
+    assert groups[0]["week"] == "03/08/2026 to 09/08/2026"
     assert groups[0]["rows"][0]["request_number"] == week1.request_number
     assert groups[0]["outstanding"] == {"USD": 500.0}
     assert groups[1]["rows"][0]["request_number"] == week2.request_number

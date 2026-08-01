@@ -78,6 +78,9 @@ class PaymentTranche(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     payment_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     bank: Mapped[str | None] = mapped_column(String(200), nullable=True)
     payment_reference_number: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Required (like payment_date/bank) before the tranche can be marked paid
+    # — migration 0023. Nullable: legacy tranches predate the field.
+    accounts_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     # True for tranches synthesised from pre-tranche records (migration 0018
     # backfill or API compat mode) — these may lack a tentative date.
     is_legacy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

@@ -3,7 +3,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import requestService, {
   type CreateRequestPayload,
-  type PaymentPayload,
   type UpdateRequestPayload,
 } from "@/services/requestService";
 import type { DepositRequest, RequestStatus } from "@/types";
@@ -163,18 +162,10 @@ export function usePayment(requestId: string) {
   });
 }
 
-// Accepts { requestId, data } so it can be called from PaymentForm without the requestId baked into the hook
-export function useSavePayment() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ requestId, data }: { requestId: string; data: PaymentPayload }) =>
-      requestService.savePayment(requestId, data),
-    onSuccess: (_, { requestId }) => {
-      qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId] });
-      qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId, "payment"] });
-    },
-  });
-}
+// useSavePayment / useProcessPayment were removed with the request-level
+// Payment Details form (Aug 2026 follow-up) — payment details are captured
+// per tranche, and the backend derives request-level payment_date/status
+// when the final tranche is paid.
 
 // Ship date has its own endpoint because it stays writable after the record is
 // locked (it stops Cost of Fund accrual). Invalidate the request too — the
@@ -191,31 +182,6 @@ export function useSaveShipDate() {
   });
 }
 
-// Accepts requestId as the mutation variable so the correct row is updated and cache invalidated
-export function useProcessPayment() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (requestId: string) => requestService.processPayment(requestId),
-    onMutate: async (requestId) => {
-      await qc.cancelQueries({ queryKey: [...REQUESTS_KEY, requestId] });
-      const previous = qc.getQueryData<DepositRequest>([...REQUESTS_KEY, requestId]);
-      qc.setQueryData<DepositRequest>([...REQUESTS_KEY, requestId], (old) =>
-        old ? { ...old, current_status: "payment_processed", is_locked: true } : old
-      );
-      return { previous };
-    },
-    onError: (_err, requestId, context) => {
-      if (context?.previous !== undefined) {
-        qc.setQueryData([...REQUESTS_KEY, requestId], context.previous);
-      }
-    },
-    onSettled: (_data, _err, requestId) => {
-      invalidateRequestLists(qc);
-      qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId] });
-      qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId, "payment"] });
-    },
-  });
-}
 
 export function useUpdateRemarks(id: string) {
   const qc = useQueryClient();
@@ -298,7 +264,12 @@ export function useUpdateTranchePaymentDetails(requestId: string) {
       data,
     }: {
       trancheId: string;
-      data: { payment_date?: string; bank?: string; payment_reference_number?: string };
+      data: {
+        payment_date?: string;
+        bank?: string;
+        payment_reference_number?: string;
+        accounts_remarks?: string;
+      };
     }) => requestService.updateTranchePaymentDetails(requestId, trancheId, data),
     onSuccess: () => invalidateRequestAndTranches(qc, requestId),
   });
