@@ -2,10 +2,18 @@
 
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, ExternalLink, Lock, Pencil } from "lucide-react";
+import { CheckCircle2, Circle, ExternalLink, Lock, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useUpdateTranche, useUploadTrancheTtCopy } from "@/hooks/useRequests";
-import { currencyDisplayLabel, formatCurrency, formatDate } from "@/lib/utils";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import {
+  useAddTranche,
+  useDeleteTranche,
+  usePayTranche,
+  useUpdateTranche,
+  useUpdateTranchePaymentDetails,
+  useUploadTrancheTtCopy,
+} from "@/hooks/useRequests";
+import { currencyDisplayLabel, formatCurrency, formatDate, todayLocalISO } from "@/lib/utils";
 import type { PaymentTranche } from "@/types";
 
 interface Props {
@@ -13,11 +21,90 @@ interface Props {
   tranches: PaymentTranche[];
   currency: string | null;
   /**
-   * merchandiser — owner may edit amount / tentative date of UNPAID tranches;
+   * merchandiser — owner may edit/add/delete UNPAID tranches while the
+   *   request is pending and untouched by Accounts (canModify);
    * accounts — may mark an unpaid tranche paid and upload its TT copy;
    * readonly — display only.
    */
   mode: "merchandiser" | "accounts" | "readonly";
+  /** merchandiser mode: whether tranche changes are still allowed. */
+  canModify?: boolean;
+  /** merchandiser mode: why changes are blocked (shown when canModify is false). */
+  modifyBlockedReason?: string | null;
+}
+
+// Accounts: per-tranche payment details entry (payment date + bank required
+// before Mark Paid; reference number optional). Own component so each tranche
+// keeps its own draft state.
+function TranchePaymentDetailsForm({
+  requestId,
+  tranche,
+}: {
+  requestId: string;
+  tranche: PaymentTranche;
+}) {
+  const updateDetails = useUpdateTranchePaymentDetails(requestId);
+  const [paymentDate, setPaymentDate] = useState(tranche.payment_date ?? "");
+  const [bank, setBank] = useState(tranche.bank ?? "");
+  const [reference, setReference] = useState(tranche.payment_reference_number ?? "");
+
+  const inputCls =
+    "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring";
+
+  const save = async () => {
+    if (!paymentDate || !bank.trim()) {
+      toast.error("Payment date and bank are required.");
+      return;
+    }
+    try {
+      await updateDetails.mutateAsync({
+        trancheId: tranche.id,
+        data: {
+          payment_date: paymentDate,
+          bank: bank.trim(),
+          payment_reference_number: reference.trim() || undefined,
+        },
+      });
+      toast.success(`Payment details saved for ${tranche.label}.`);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to save payment details.");
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+      <div>
+        <p className="text-xs text-muted-foreground mb-1">
+          Payment date<span className="text-foreground ml-0.5" aria-hidden="true">*</span>
+        </p>
+        <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className={inputCls} />
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground mb-1">
+          Bank<span className="text-foreground ml-0.5" aria-hidden="true">*</span>
+        </p>
+        <input type="text" value={bank} onChange={(e) => setBank(e.target.value)} className={inputCls} />
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground mb-1">Payment ref. # (optional)</p>
+        <input type="text" value={reference} onChange={(e) => setReference(e.target.value)} className={inputCls} />
+      </div>
+      <div className="flex items-end">
+        <Button size="sm" variant="secondary" onClick={save} disabled={updateDetails.isPending}>
+          {updateDetails.isPending ? "Saving…" : "Save Details"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ReadinessItem({ done, label }: { done: boolean; label: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs ${done ? "text-emerald-700" : "text-muted-foreground"}`}>
+      {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
+      {label}
+    </span>
+  );
 }
 
 function TrancheStatusPill({ status }: { status: PaymentTranche["status"] }) {
@@ -32,14 +119,30 @@ function TrancheStatusPill({ status }: { status: PaymentTranche["status"] }) {
   );
 }
 
-export function TrancheList({ requestId, tranches, currency, mode }: Props) {
+export function TrancheList({
+  requestId,
+  tranches,
+  currency,
+  mode,
+  canModify = true,
+  modifyBlockedReason = null,
+}: Props) {
   const updateTranche = useUpdateTranche(requestId);
   const uploadTt = useUploadTrancheTtCopy(requestId);
+  const addTranche = useAddTranche(requestId);
+  const deleteTranche = useDeleteTranche(requestId);
+  const payTranche = usePayTranche(requestId);
+  const [payConfirmId, setPayConfirmId] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState("");
   const [editDate, setEditDate] = useState("");
   const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addAmount, setAddAmount] = useState("");
+  const [addDate, setAddDate] = useState(todayLocalISO());
+
+  const merchandiserCanModify = mode === "merchandiser" && canModify;
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File | null>>({});
 
@@ -71,6 +174,48 @@ export function TrancheList({ requestId, tranches, currency, mode }: Props) {
     }
   };
 
+  const doAdd = async () => {
+    const amount = Number(addAmount);
+    if (!amount || amount <= 0) {
+      toast.error("Tranche amount must be a positive number.");
+      return;
+    }
+    if (!addDate) {
+      toast.error("A tentative payment date is required.");
+      return;
+    }
+    try {
+      await addTranche.mutateAsync({ amount, tentative_payment_date: addDate });
+      toast.success("Tranche added — the Accounts team has been notified.");
+      setAddOpen(false);
+      setAddAmount("");
+      setAddDate(todayLocalISO());
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to add tranche.");
+    }
+  };
+
+  const doDelete = async (t: PaymentTranche) => {
+    try {
+      await deleteTranche.mutateAsync(t.id);
+      toast.success(`${t.label} deleted — the Accounts team has been notified.`);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete tranche.");
+    }
+  };
+
+  const doPay = async (trancheId: string) => {
+    const t = tranches.find((x) => x.id === trancheId);
+    try {
+      await payTranche.mutateAsync(trancheId);
+      toast.success(`${t?.label ?? "Tranche"} marked as paid — the merchandiser has been notified.`);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to mark the tranche paid.");
+    } finally {
+      setPayConfirmId(null);
+    }
+  };
+
   const doUpload = async (t: PaymentTranche) => {
     const file = selectedFiles[t.id];
     if (!file) return;
@@ -85,9 +230,8 @@ export function TrancheList({ requestId, tranches, currency, mode }: Props) {
       const input = fileInputs.current[t.id];
       if (input) input.value = "";
       toast.success(
-        t.status === "unpaid"
-          ? `TT copy uploaded — ${t.label} is now marked paid and the merchandiser has been notified.`
-          : `TT copy uploaded for ${t.label} — the merchandiser has been notified.`,
+        `TT copy uploaded for ${t.label} — the merchandiser has been notified.` +
+          (t.status === "unpaid" ? " Click Mark Paid once payment details are also recorded." : ""),
       );
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "TT copy upload failed.");
@@ -211,38 +355,72 @@ export function TrancheList({ requestId, tranches, currency, mode }: Props) {
                 </a>
               )}
 
-              {/* Merchandiser: edit unpaid tranches on own request */}
-              {mode === "merchandiser" && t.status === "unpaid" && !isEditing && (
-                <Button size="sm" variant="outline" onClick={() => startEdit(t)}>
-                  <Pencil className="h-3.5 w-3.5 mr-1.5" /> Edit amount / date
-                </Button>
-              )}
-
-              {/* Accounts: uploading the TT copy is the ONLY way to mark a
-                  tranche paid — the bank's TT copy is the proof of payment. */}
-              {mode === "accounts" && t.status === "unpaid" && (
-                <div className="space-y-1 pt-1">
-                  <p className="text-xs text-muted-foreground">
-                    Upload the bank&apos;s TT copy to mark this tranche paid — a tranche
-                    cannot be marked paid without it.
-                  </p>
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                    <input
-                      ref={(el) => { fileInputs.current[t.id] = el; }}
-                      type="file"
-                      accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
-                      onChange={(e) =>
-                        setSelectedFiles((prev) => ({ ...prev, [t.id]: e.target.files?.[0] ?? null }))
-                      }
-                      className="flex-1 text-sm text-muted-foreground file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-border file:bg-secondary file:text-secondary-foreground file:text-xs file:font-medium file:cursor-pointer hover:file:bg-muted"
-                    />
+              {/* Merchandiser: edit/delete unpaid tranches while the request
+                  is pending and untouched by Accounts */}
+              {merchandiserCanModify && t.status === "unpaid" && !isEditing && (
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => startEdit(t)}>
+                    <Pencil className="h-3.5 w-3.5 mr-1.5" /> Edit amount / date
+                  </Button>
+                  {tranches.length > 1 && (
                     <Button
                       size="sm"
-                      variant="secondary"
-                      onClick={() => doUpload(t)}
-                      disabled={!selectedFiles[t.id] || uploadingId === t.id}
+                      variant="outline"
+                      onClick={() => doDelete(t)}
+                      disabled={deleteTranche.isPending}
+                      className="text-destructive hover:text-destructive"
                     >
-                      {uploadingId === t.id ? "Uploading…" : "Upload TT Copy & Mark Paid"}
+                      <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {/* Accounts: TT copy + payment details are both mandatory, then
+                  an EXPLICIT Mark Paid click changes the status (Aug 2026,
+                  item 3.1 — uploads never auto-pay). */}
+              {mode === "accounts" && t.status === "unpaid" && (
+                <div className="space-y-3 pt-2 mt-1 border-t border-border">
+                  <TranchePaymentDetailsForm requestId={requestId} tranche={t} />
+
+                  {!t.tt_copy_url && (
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <input
+                        ref={(el) => { fileInputs.current[t.id] = el; }}
+                        type="file"
+                        accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+                        onChange={(e) =>
+                          setSelectedFiles((prev) => ({ ...prev, [t.id]: e.target.files?.[0] ?? null }))
+                        }
+                        className="flex-1 text-sm text-muted-foreground file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-border file:bg-secondary file:text-secondary-foreground file:text-xs file:font-medium file:cursor-pointer hover:file:bg-muted"
+                      />
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => doUpload(t)}
+                        disabled={!selectedFiles[t.id] || uploadingId === t.id}
+                      >
+                        {uploadingId === t.id ? "Uploading…" : "Upload TT Copy"}
+                      </Button>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <ReadinessItem done={!!t.tt_copy_url} label="TT copy uploaded" />
+                      <ReadinessItem
+                        done={!!t.payment_date && !!t.bank}
+                        label="Payment details recorded"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => setPayConfirmId(t.id)}
+                      disabled={
+                        !t.tt_copy_url || !t.payment_date || !t.bank || payTranche.isPending
+                      }
+                    >
+                      Mark {t.label} Paid
                     </Button>
                   </div>
                 </div>
@@ -278,6 +456,70 @@ export function TrancheList({ requestId, tranches, currency, mode }: Props) {
           );
         })}
       </ul>
+
+      {/* Merchandiser: changes frozen once Accounts act on the request */}
+      {mode === "merchandiser" && !canModify && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+          Tranches can no longer be changed
+          {modifyBlockedReason ? ` — ${modifyBlockedReason}.` : "."} Contact the
+          Accounts team if an amount or date is wrong.
+        </p>
+      )}
+
+      {/* Merchandiser: add a tranche while changes are still allowed */}
+      {merchandiserCanModify && (
+        addOpen ? (
+          <div className="rounded-lg border border-dashed border-border p-3 space-y-2">
+            <p className="text-sm font-semibold text-foreground">New Tranche</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">
+                  {currency ? `Amount (${currencyDisplayLabel(currency)})` : "Amount"}
+                </p>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  value={addAmount}
+                  onChange={(e) => setAddAmount(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Tentative payment date</p>
+                <input
+                  type="date"
+                  value={addDate}
+                  onChange={(e) => setAddDate(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div className="flex items-end gap-2">
+                <Button size="sm" onClick={doAdd} disabled={addTranche.isPending}>
+                  {addTranche.isPending ? "Adding…" : "Add"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setAddOpen(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Tranche
+          </Button>
+        )
+      )}
+
+      <ConfirmDialog
+        open={payConfirmId !== null}
+        onOpenChange={(open) => !open && setPayConfirmId(null)}
+        title="Mark this tranche as paid?"
+        description="Its TT copy and payment details are recorded. The merchandiser will be notified and the tranche will be locked against edits. Paying the final unpaid tranche completes the request and locks the record."
+        confirmLabel="Yes, mark paid"
+        onConfirm={() => payConfirmId && doPay(payConfirmId)}
+      />
     </div>
   );
 }

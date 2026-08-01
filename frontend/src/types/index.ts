@@ -110,6 +110,11 @@ export interface PaymentTranche {
   tt_copy_url: string | null;
   tt_copy_file_id: string | null;
   tt_copy_filename: string | null;
+  /** Per-tranche payment details — payment date + bank are required before
+   * the tranche can be marked paid; reference number is optional. */
+  payment_date: string | null;
+  bank: string | null;
+  payment_reference_number: string | null;
   is_legacy: boolean;
   created_at: string;
   updated_at: string;

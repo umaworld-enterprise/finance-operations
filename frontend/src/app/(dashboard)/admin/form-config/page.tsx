@@ -109,6 +109,12 @@ export default function FormConfigPage() {
       <TopNav title="Public Form Configuration" subtitle="Control which fields appear on the public Supplier Advance Payment Request form" />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-5">
 
+        <div className="rounded-lg bg-amber-50 border border-amber-300 text-amber-800 p-3 text-sm">
+          <strong>Deprecated.</strong> The public (login-free) request form was retired in
+          August 2026 — this configuration no longer affects anything. The page is kept
+          for reference only and has been removed from the admin navigation.
+        </div>
+
         <Link
           href="/admin"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"

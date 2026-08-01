@@ -64,6 +64,13 @@ export default function AccountsPaymentPage() {
 
   const snap = req?.analytics_snapshot;
 
+  // HoM decision (Aug 2026, item 3.5): the approval/rejection remark renders
+  // like the merchandiser remarks do. A request that never went through HoM
+  // has no pending_hom_approval transition, so this stays undefined.
+  const homDecision = (req?.status_history ?? [])
+    .filter((h) => h.old_status === "pending_hom_approval")
+    .sort((a, b) => b.changed_at.localeCompare(a.changed_at))[0];
+
   const canHold   = req?.current_status === "pending_payment"      && !req.is_locked && !isFinance;
   // "reopened" must also offer Resume — otherwise a reopened request is
   // stranded with no path back to the payment queue.
@@ -179,7 +186,7 @@ export default function AccountsPaymentPage() {
               {field("Submitted", formatDate(req.created_at))}
               {req.payment_terms && field("Payment Terms", req.payment_terms)}
               {req.sunshine_invoice_number && field("Sunshine Invoice #", req.sunshine_invoice_number)}
-              {req.supplier_invoice_number && field("Supplier Invoice #", req.supplier_invoice_number)}
+              {req.supplier_invoice_number && field("Supplier Proforma Invoice #", req.supplier_invoice_number)}
               {fv.creator_info !== false && field("Submitted By", req.creator ? `${req.creator.full_name} (${req.creator.email})` : req.submitter_email ?? null)}
               {fv.accounts_timestamp !== false && payment && field("Payment Last Updated", formatDate(payment.updated_at))}
             </dl>
@@ -187,6 +194,18 @@ export default function AccountsPaymentPage() {
               <div className="mt-4 pt-4 border-t border-border">
                 <p className="text-xs font-medium text-muted-foreground mb-1">Merchandiser Remarks</p>
                 <p className="text-sm text-foreground bg-muted/50 rounded-lg px-3 py-2">{req.remarks}</p>
+              </div>
+            )}
+            {homDecision && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <p className="text-xs font-medium text-muted-foreground mb-1">
+                  Head of Merchandiser Decision —{" "}
+                  {homDecision.new_status === "rejected_by_hom" ? "Rejected" : "Approved"}{" "}
+                  ({formatDate(homDecision.changed_at)})
+                </p>
+                <p className="text-sm text-foreground bg-muted/50 rounded-lg px-3 py-2">
+                  {homDecision.remarks || "No reason recorded."}
+                </p>
               </div>
             )}
           </CardContent>
@@ -214,7 +233,7 @@ export default function AccountsPaymentPage() {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="supplier-invoice">Supplier Invoice #</Label>
+                  <Label htmlFor="supplier-invoice">Supplier Proforma Invoice #</Label>
                   <input
                     id="supplier-invoice"
                     type="text"
@@ -283,6 +302,26 @@ export default function AccountsPaymentPage() {
         <Card>
           <CardContent className="p-5 md:p-6">
             <h2 className="font-semibold text-foreground mb-4">Payment Details</h2>
+            {/* Cost of Fund surfaced at the point of processing (Aug 2026,
+                item 3.4) — same fv gate as the Analytics Snapshot card. */}
+            {fv.cost_of_fund !== false && snap && (
+              <div className="mb-4 rounded-lg border border-border bg-muted/40 px-4 py-3 flex flex-wrap items-baseline gap-x-6 gap-y-1">
+                <span className="text-sm">
+                  <span className="text-muted-foreground">Cost of Fund:</span>{" "}
+                  <span className="font-semibold text-foreground">
+                    {snap.cost_of_fund_amount != null
+                      ? formatCurrency(Number(snap.cost_of_fund_amount), req.currency ?? undefined)
+                      : "—"}
+                  </span>
+                </span>
+                {snap.grace_etd && (
+                  <span className="text-xs text-muted-foreground">
+                    Accrues past Grace ETD {formatDate(snap.grace_etd)}
+                    {snap.etd_grace_overdue_days ? ` — ${snap.etd_grace_overdue_days}d overdue` : ""}
+                  </span>
+                )}
+              </div>
+            )}
             <PaymentForm requestId={id} isLocked={req.is_locked} existing={payment} readOnly={isFinance} trancheMode />
           </CardContent>
         </Card>

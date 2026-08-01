@@ -667,6 +667,159 @@ class AnalyticsService:
             for _, g in ordered
         ]
 
+    async def get_weekly_deposit_tracker(self) -> list[dict]:
+        """Weekly Deposit Tracker (Aug 2026 batch, item 4.1) — row-level view
+        of requested, UNPAID deposits sorted by Estimated ETD and bucketed
+        into ISO weeks (Monday–Sunday) of the ETD. Requests without an ETD
+        collect in a trailing "No ETD" bucket.
+        """
+        from datetime import timedelta
+
+        from app.models.enums import TrancheStatus
+        from app.models.masters import Supplier
+        from app.models.tranche import PaymentTranche, tranche_label
+
+        _EXCLUDED = (
+            RequestStatus.CANCELLED_BY_MERCHANDISER,
+            RequestStatus.CANCELLED_BY_ACCOUNTS,
+            RequestStatus.REJECTED_BY_HOM,
+        )
+        stmt = (
+            select(
+                PaymentTranche.amount,
+                PaymentTranche.tranche_number,
+                PaymentTranche.tentative_payment_date,
+                DepositRequest.id.label("request_id"),
+                DepositRequest.request_number,
+                DepositRequest.sunshine_invoice_number,
+                DepositRequest.currency,
+                DepositRequest.estimated_etd,
+                Supplier.name.label("supplier_name"),
+            )
+            .join(DepositRequest, PaymentTranche.deposit_request_id == DepositRequest.id)
+            .join(Supplier, Supplier.id == DepositRequest.supplier_id)
+            .where(
+                DepositRequest.is_deleted == False,  # noqa: E712
+                DepositRequest.current_status.notin_(_EXCLUDED),
+                PaymentTranche.status == TrancheStatus.UNPAID,
+            )
+            # Portable NULLS LAST, then soonest ETD first.
+            .order_by(
+                DepositRequest.estimated_etd.is_(None),
+                DepositRequest.estimated_etd,
+                DepositRequest.request_number,
+                PaymentTranche.tranche_number,
+            )
+        )
+        rows = (await self._session.execute(stmt)).fetchall()
+
+        groups: dict[str | None, dict] = {}
+        for r in rows:
+            if r.estimated_etd is not None:
+                week_start = r.estimated_etd - timedelta(days=r.estimated_etd.weekday())
+                week_end = week_start + timedelta(days=6)
+                key: str | None = week_start.isoformat()
+                label = f"{week_start.isoformat()} – {week_end.isoformat()}"
+            else:
+                key, label = None, "No ETD recorded"
+            g = groups.setdefault(
+                key, {"week": label, "week_start": key, "rows": [], "outstanding": {}}
+            )
+            cur = r.currency.value if hasattr(r.currency, "value") else (r.currency or "OTHER")
+            g["rows"].append(
+                {
+                    "request_id": str(r.request_id),
+                    "request_number": r.request_number,
+                    "sunshine_invoice_number": r.sunshine_invoice_number,
+                    "supplier_name": r.supplier_name,
+                    "tranche_label": tranche_label(r.tranche_number),
+                    "currency": cur,
+                    "amount": float(r.amount or 0),
+                    "tentative_payment_date": (
+                        r.tentative_payment_date.isoformat()
+                        if r.tentative_payment_date else None
+                    ),
+                    "estimated_etd": (
+                        r.estimated_etd.isoformat() if r.estimated_etd else None
+                    ),
+                }
+            )
+            g["outstanding"][cur] = g["outstanding"].get(cur, 0.0) + float(r.amount or 0)
+
+        # Soonest ETD week first; the "No ETD" bucket trails.
+        ordered = sorted(groups.values(), key=lambda g: (g["week_start"] is None, g["week_start"] or ""))
+        return ordered
+
+    async def get_shipments_list(self) -> list[dict]:
+        """All shipments (Aug 2026 batch, item 4.2) — every live request with
+        Request #, Sunshine Invoice No., Original ETD, Amount, and Days
+        Delayed computed server-side against TODAY (max(0, today − ETD);
+        null when no ETD), so the number can never drift from the backend
+        clock. Most-delayed first.
+        """
+        from datetime import date as _date
+
+        from app.models.masters import Supplier
+
+        _EXCLUDED = (
+            RequestStatus.CANCELLED_BY_MERCHANDISER,
+            RequestStatus.CANCELLED_BY_ACCOUNTS,
+            RequestStatus.REJECTED_BY_HOM,
+        )
+        stmt = (
+            select(
+                DepositRequest.id.label("request_id"),
+                DepositRequest.request_number,
+                DepositRequest.sunshine_invoice_number,
+                DepositRequest.currency,
+                DepositRequest.deposit_amount,
+                DepositRequest.estimated_etd,
+                DepositRequest.current_status,
+                Supplier.name.label("supplier_name"),
+            )
+            .join(Supplier, Supplier.id == DepositRequest.supplier_id)
+            .where(
+                DepositRequest.is_deleted == False,  # noqa: E712
+                DepositRequest.current_status.notin_(_EXCLUDED),
+            )
+        )
+        rows = (await self._session.execute(stmt)).fetchall()
+        today = _date.today()
+
+        def to_row(r) -> dict:
+            days_delayed = (
+                max(0, (today - r.estimated_etd).days) if r.estimated_etd else None
+            )
+            cur = r.currency.value if hasattr(r.currency, "value") else r.currency
+            status = (
+                r.current_status.value
+                if hasattr(r.current_status, "value")
+                else r.current_status
+            )
+            return {
+                "request_id": str(r.request_id),
+                "request_number": r.request_number,
+                "sunshine_invoice_number": r.sunshine_invoice_number,
+                "supplier_name": r.supplier_name,
+                "currency": cur,
+                "amount": float(r.deposit_amount or 0),
+                "estimated_etd": r.estimated_etd.isoformat() if r.estimated_etd else None,
+                "days_delayed": days_delayed,
+                "current_status": status,
+            }
+
+        out = [to_row(r) for r in rows]
+        # Most delayed first; ETD-less rows trail, newest request first there.
+        out.sort(
+            key=lambda x: (
+                x["days_delayed"] is None,
+                -(x["days_delayed"] or 0),
+                x["estimated_etd"] or "",
+                x["request_number"],
+            )
+        )
+        return out
+
     async def get_monthly_trends(self, year: int, role: UserRole, user_id: UUID) -> list[dict]:
         """Per-month aggregates of overdue days and cost-of-fund for a given calendar year.
 

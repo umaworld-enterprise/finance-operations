@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
@@ -25,12 +26,13 @@ from app.core.exceptions import (
 from app.domain.rules.lock_rules import assert_record_not_locked
 from app.domain.rules.status_transitions import assert_transition_allowed
 from app.models.deposit_request import DepositRequest
-from app.models.enums import RequestStatus, TrancheStatus, UserRole
+from app.models.enums import AdjustmentStatus, RequestStatus, TrancheStatus, UserRole
+from app.models.payment import PaymentDetails
 from app.models.tranche import PaymentTranche
 from app.models.workflow import StatusHistory
 from app.repositories.deposit_request_repo import DepositRequestRepository
-from app.repositories.tranche_repo import TrancheRepository
-from app.schemas.tranche import TrancheUpdate
+from app.repositories.tranche_repo import AdjustmentRepository, TrancheRepository
+from app.schemas.tranche import TranchePaymentDetailsUpdate, TrancheCreate, TrancheUpdate
 from app.services.audit_service import AuditService
 
 # Statuses in which the requested advance is still "live" — tranches remain
@@ -43,6 +45,13 @@ _TERMINAL_STATUSES = {
 }
 
 _ACCOUNTS_ROLES = {UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN}
+
+# Merchandisers may modify/add/delete tranches only while the request is
+# still pending (Aug 2026 batch, item 2.3) — i.e. before Accounts act on it.
+_MERCHANDISER_EDITABLE_STATUSES = {
+    RequestStatus.PENDING_PAYMENT,
+    RequestStatus.PENDING_HOM_APPROVAL,
+}
 
 
 class TrancheService:
@@ -84,6 +93,8 @@ class TrancheService:
         if request.current_status in _TERMINAL_STATUSES:
             raise ConflictError("Tranches cannot be edited on a cancelled or rejected request.")
 
+        await self._assert_merchandiser_may_modify(request, role)
+
         tranche = await self._get_tranche_locked(request_id, tranche_id)
         if tranche.status == TrancheStatus.PAID:
             raise ConflictError(
@@ -122,6 +133,96 @@ class TrancheService:
 
         return tranche
 
+    async def add_tranche(
+        self,
+        request_id: UUID,
+        data: TrancheCreate,
+        user_id: UUID,
+        role: UserRole,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> PaymentTranche:
+        """Merchandiser adds a tranche to their own pending, untouched request."""
+        request = await self._get_request_or_404(request_id)
+        if role not in {UserRole.MERCHANDISER, UserRole.SUPER_ADMIN}:
+            raise AuthorizationError("Only the request's merchandiser can add tranches.")
+        if role == UserRole.MERCHANDISER and request.created_by != user_id:
+            raise AuthorizationError("You can only add tranches on your own requests.")
+        assert_record_not_locked(request.is_locked, role)
+        if request.current_status in _TERMINAL_STATUSES:
+            raise ConflictError("Tranches cannot be added on a cancelled or rejected request.")
+        await self._assert_merchandiser_may_modify(request, role)
+
+        new_total = await self._repo.sum_amounts_for_request(request_id) + Decimal(str(data.amount))
+        if new_total > Decimal(str(request.total_supplier_invoice_amount)):
+            raise ValidationError(
+                "Total of tranche amounts cannot exceed the total supplier "
+                "proforma invoice amount."
+            )
+
+        existing = await self._repo.list_for_request(request_id)
+        next_number = max((t.tranche_number for t in existing), default=0) + 1
+        tranche = await self._repo.create(
+            deposit_request_id=request_id,
+            tranche_number=next_number,
+            amount=data.amount,
+            tentative_payment_date=data.tentative_payment_date,
+        )
+        await self._audit.record_create(
+            "payment_tranches", tranche.id, user_id,
+            new_value=(
+                f"{tranche.label} added: {data.amount}, "
+                f"tentative {data.tentative_payment_date}"
+            ),
+            ip_address=ip_address, user_agent=user_agent,
+        )
+        await self._sync_request_totals(request, user_id, ip_address, user_agent)
+        return tranche
+
+    async def delete_tranche(
+        self,
+        request_id: UUID,
+        tranche_id: UUID,
+        user_id: UUID,
+        role: UserRole,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> str:
+        """Merchandiser deletes an unpaid tranche from their own pending,
+        untouched request. Returns the deleted tranche's label (for the
+        Accounts notification — the row is gone afterwards)."""
+        request = await self._get_request_or_404(request_id)
+        if role not in {UserRole.MERCHANDISER, UserRole.SUPER_ADMIN}:
+            raise AuthorizationError("Only the request's merchandiser can delete tranches.")
+        if role == UserRole.MERCHANDISER and request.created_by != user_id:
+            raise AuthorizationError("You can only delete tranches on your own requests.")
+        assert_record_not_locked(request.is_locked, role)
+        if request.current_status in _TERMINAL_STATUSES:
+            raise ConflictError("Tranches cannot be deleted on a cancelled or rejected request.")
+        await self._assert_merchandiser_may_modify(request, role)
+
+        tranche = await self._get_tranche_locked(request_id, tranche_id)
+        if tranche.status == TrancheStatus.PAID:
+            raise ConflictError(f"{tranche.label} is paid and cannot be deleted.")
+        if len(await self._repo.list_for_request(request_id)) <= 1:
+            raise ValidationError("A request must keep at least one tranche.")
+        # FK safety: invoice adjustments reference tranches on either side.
+        if await AdjustmentRepository(self._session).list_for_tranche_ids([tranche_id]):
+            raise ConflictError(
+                f"{tranche.label} is referenced by invoice adjustments and cannot be deleted."
+            )
+
+        label = tranche.label
+        await self._audit.record_delete(
+            "payment_tranches", tranche_id, user_id,
+            old_value=f"{label}: {tranche.amount}, tentative {tranche.tentative_payment_date}",
+            ip_address=ip_address, user_agent=user_agent,
+        )
+        await self._session.delete(tranche)
+        await self._session.flush()
+        await self._sync_request_totals(request, user_id, ip_address, user_agent)
+        return label
+
     # ── Accounts payments ─────────────────────────────────────────────────────
 
     async def pay_tranche(
@@ -150,12 +251,20 @@ class TrancheService:
 
         if tranche.status == TrancheStatus.PAID:
             raise ConflictError(f"{tranche.label} is already paid.")
-        # Compliance gate: the bank's TT copy is the proof of payment, so a
-        # tranche can never become PAID without one. attach_tt_copy satisfies
-        # this by writing the tt_copy_* fields before paying.
+        # Readiness gate (Aug 2026, item 3.1): a tranche becomes PAID only via
+        # this explicit action, and only once its TT copy AND payment details
+        # (payment date + bank; reference number optional) are recorded.
+        missing = []
         if not tranche.tt_copy_url:
+            missing.append("TT copy")
+        if not tranche.payment_date:
+            missing.append("payment date")
+        if not tranche.bank:
+            missing.append("bank")
+        if missing:
             raise ConflictError(
-                f"{tranche.label} cannot be marked paid until its TT copy is uploaded."
+                f"{tranche.label} cannot be marked paid until its "
+                f"{' and '.join(missing)} {'are' if len(missing) > 1 else 'is'} recorded."
             )
         if request.current_status != RequestStatus.PENDING_PAYMENT:
             raise ConflictError(
@@ -220,15 +329,16 @@ class TrancheService:
         role: UserRole,
         ip_address: str | None = None,
         user_agent: str | None = None,
-    ) -> tuple[PaymentTranche, bool]:
+    ) -> PaymentTranche:
         """Attach the bank's TT copy to a specific tranche.
 
-        Uploading against an UNPAID tranche completes its payment in the same
-        action (the bank has paid — the TT copy is the proof), running the
-        full pay_tranche validation. Returns (tranche, auto_paid).
+        Attach only — NO status change (Aug 2026, item 3.1, reversing the
+        July auto-pay): the tranche becomes PAID exclusively through the
+        explicit pay_tranche action, which requires this TT copy plus the
+        tranche's payment details.
 
-        Duplicate uploads against a paid tranche are rejected; only a Super
-        Admin may replace an existing TT copy.
+        Duplicate uploads against a tranche are rejected; only a Super Admin
+        may replace an existing TT copy.
         """
         if role not in _ACCOUNTS_ROLES:
             raise AuthorizationError("Only Accounts Team can attach the TT copy.")
@@ -242,11 +352,6 @@ class TrancheService:
                 "Contact a Super Admin if it must be replaced."
             )
 
-        # Write the TT copy BEFORE paying: pay_tranche refuses tranches without
-        # one, and this ordering is what lets the auto-pay path satisfy that
-        # gate. If pay_tranche still rejects (held request, etc.) the whole
-        # transaction rolls back, so no TT copy is left on an unpaid tranche.
-        was_unpaid = tranche.status == TrancheStatus.UNPAID
         tranche = await self._repo.update(
             tranche,
             tt_copy_url=tt_copy_url,
@@ -259,18 +364,97 @@ class TrancheService:
             old_value=None, new_value=tt_copy_filename,
             ip_address=ip_address, user_agent=user_agent,
         )
+        return tranche
 
-        auto_paid = False
-        if was_unpaid:
-            tranche = await self.pay_tranche(
-                request_id, tranche_id, user_id, role,
+    async def update_payment_details(
+        self,
+        request_id: UUID,
+        tranche_id: UUID,
+        data: "TranchePaymentDetailsUpdate",
+        user_id: UUID,
+        role: UserRole,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> PaymentTranche:
+        """Accounts record per-tranche payment details (payment date, bank,
+        optional reference number) ahead of marking the tranche paid.
+
+        Unpaid tranches only — a paid tranche is immutable."""
+        if role not in _ACCOUNTS_ROLES:
+            raise AuthorizationError("Only Accounts Team can record tranche payment details.")
+
+        request = await self._get_request_or_404(request_id)
+        if request.current_status in _TERMINAL_STATUSES:
+            raise ConflictError(
+                "Payment details cannot be recorded on a cancelled or rejected request."
+            )
+        tranche = await self._get_tranche_locked(request_id, tranche_id)
+        if tranche.status == TrancheStatus.PAID:
+            raise ConflictError(
+                f"{tranche.label} is already paid — its payment details are locked."
+            )
+
+        changes = data.model_dump(exclude_unset=True)
+        if not changes:
+            raise ValidationError("No changes supplied.")
+
+        for field, new_val in changes.items():
+            old_val = getattr(tranche, field)
+            await self._audit.record_update(
+                "payment_tranches", tranche.id, user_id,
+                field_name=field, old_value=str(old_val), new_value=str(new_val),
                 ip_address=ip_address, user_agent=user_agent,
             )
-            auto_paid = True
-
-        return tranche, auto_paid
+        return await self._repo.update(tranche, **changes)
 
     # ── Internals ─────────────────────────────────────────────────────────────
+
+    async def accounts_touched_reason(self, request_id: UUID) -> str | None:
+        """Human-readable reason if Accounts has written anything against this
+        request, else None (Aug 2026 batch, item 2.3 — 'any accounts write').
+
+        Counts: a paid tranche, an uploaded TT copy, a payment_details row
+        (incl. partial rows from ship-date / TT paths), or a COMPLETED invoice
+        adjustment touching the request's tranches. Pending merchandiser-raised
+        adjustments do not count — Accounts hasn't acted on those.
+        """
+        tranches = await self._repo.list_for_request(request_id)
+        if any(t.status == TrancheStatus.PAID for t in tranches):
+            return "a tranche has already been paid"
+        if any(t.tt_copy_url for t in tranches):
+            return "a TT copy has already been uploaded"
+        if any(t.payment_date or t.bank or t.payment_reference_number for t in tranches):
+            return "payment details have been recorded against a tranche"
+        payment_row = await self._session.scalar(
+            select(PaymentDetails.id).where(
+                PaymentDetails.deposit_request_id == request_id
+            )
+        )
+        if payment_row is not None:
+            return "the Accounts team has started payment processing"
+        adjustments = await AdjustmentRepository(self._session).list_for_tranche_ids(
+            [t.id for t in tranches]
+        )
+        if any(a.status == AdjustmentStatus.COMPLETED for a in adjustments):
+            return "a completed invoice adjustment references this request"
+        return None
+
+    async def _assert_merchandiser_may_modify(
+        self, request: DepositRequest, role: UserRole
+    ) -> None:
+        """Merchandisers may change tranches only while the request is still
+        pending AND untouched by Accounts. Super Admin keeps the broader
+        pre-existing rules (lock / terminal-status / paid-tranche checks)."""
+        if role != UserRole.MERCHANDISER:
+            return
+        if request.current_status not in _MERCHANDISER_EDITABLE_STATUSES:
+            raise ConflictError(
+                "Tranches can only be changed while the request is still pending "
+                f"(current status: {request.current_status.value})."
+            )
+        reason = await self.accounts_touched_reason(request.id)
+        if reason:
+            raise ConflictError(f"Tranches can no longer be changed — {reason}.")
 
     async def _sync_request_totals(
         self,

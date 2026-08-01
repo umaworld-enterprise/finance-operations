@@ -92,6 +92,17 @@ const requestService = {
     return data;
   },
 
+  // Pre-submit duplicate check — the server re-validates on create/update.
+  checkInvoiceNumber: async (
+    field: "sunshine_invoice_number" | "supplier_invoice_number",
+    value: string,
+  ): Promise<{ duplicate: boolean; request_number: string | null }> => {
+    const { data } = await api.get<{ duplicate: boolean; request_number: string | null }>(
+      `/requests/check-invoice?field=${field}&value=${encodeURIComponent(value)}`,
+    );
+    return data;
+  },
+
   update: async (id: string, payload: UpdateRequestPayload): Promise<DepositRequest> => {
     const { data } = await api.patch<DepositRequest>(`/requests/${id}`, payload);
     return data;
@@ -184,6 +195,46 @@ const requestService = {
     const { data } = await api.patch<PaymentTranche>(
       `/requests/${id}/tranches/${trancheId}`,
       payload,
+    );
+    return data;
+  },
+
+  // Merchandiser tranche management — only while the request is pending and
+  // untouched by Accounts (server-enforced; `tranchesModifiable` mirrors it).
+  addTranche: async (id: string, payload: TranchePayload): Promise<PaymentTranche> => {
+    const { data } = await api.post<PaymentTranche>(`/requests/${id}/tranches`, payload);
+    return data;
+  },
+
+  deleteTranche: async (id: string, trancheId: string): Promise<void> => {
+    await api.delete(`/requests/${id}/tranches/${trancheId}`);
+  },
+
+  tranchesModifiable: async (
+    id: string,
+  ): Promise<{ modifiable: boolean; reason: string | null }> => {
+    const { data } = await api.get<{ modifiable: boolean; reason: string | null }>(
+      `/requests/${id}/tranches/modifiable`,
+    );
+    return data;
+  },
+
+  // Accounts: per-tranche payment details + explicit mark-paid (Aug 2026).
+  updateTranchePaymentDetails: async (
+    id: string,
+    trancheId: string,
+    payload: { payment_date?: string; bank?: string; payment_reference_number?: string },
+  ): Promise<PaymentTranche> => {
+    const { data } = await api.patch<PaymentTranche>(
+      `/requests/${id}/tranches/${trancheId}/payment-details`,
+      payload,
+    );
+    return data;
+  },
+
+  payTranche: async (id: string, trancheId: string): Promise<PaymentTranche> => {
+    const { data } = await api.post<PaymentTranche>(
+      `/requests/${id}/tranches/${trancheId}/pay`,
     );
     return data;
   },

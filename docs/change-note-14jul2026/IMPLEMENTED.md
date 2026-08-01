@@ -103,12 +103,21 @@ Accounts decides; reason mandatory on approve AND reject.
 
 ## C. Pages 5–6, points 1–7
 
-### C1 — Flagged-supplier submission message · DONE (Phase 1)
+### C1 — Flagged-supplier submission message · DONE (Phase 1 + follow-up)
 - `merchandiser/new/page.tsx` — create result captured; toast branches on
   `current_status === "pending_hom_approval"` → "Request sent to the Head of
   Merchandiser for approval." else "Request submitted."
 - "Head of Merchandising" → "Head of Merchandiser" in
   `SupplierDefaultAlert.tsx` and the override banner.
+- **Follow-up (client-identified gap, 30 Jul 2026): the PUBLIC form's success
+  screen had the same defect** — it always said "will be reviewed by the
+  accounts team" even for flagged-supplier submissions, and the backend
+  response message at `api/v1/public_form.py` hardcoded the same claim.
+  Fixed at both layers: `PublicSubmissionResponse` now carries
+  `current_status` (nullable, backward-compatible) and a routing-aware
+  message; `form/page.tsx` branches the success card — flagged route shows
+  "Request Sent for Approval" / Head-of-Merchandiser copy, normal route keeps
+  the accounts-team copy.
 
 ### C2 — One request-ID nomenclature · DONE (Phase 1)
 - `lib/utils.ts` — `requestDisplayNumber` returns `request_number` only.

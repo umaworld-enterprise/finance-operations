@@ -3,9 +3,10 @@
 from decimal import Decimal
 from uuid import UUID
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AuthorizationError, NotFoundError
+from app.core.exceptions import AuthorizationError, BusinessRuleError, NotFoundError
 from app.domain.rules.lock_rules import assert_record_not_locked
 from app.domain.rules.status_transitions import assert_transition_allowed
 from app.domain.rules.supplier_validation import (
@@ -29,12 +30,71 @@ from app.schemas.deposit_request import ActivityItemResponse, DepositRequestCrea
 from app.services.audit_service import AuditService
 
 
+# Requests in these statuses no longer block invoice-number reuse — a
+# cancelled/rejected request's number may legitimately be re-raised.
+_DUPLICATE_EXEMPT_STATUSES = {
+    RequestStatus.CANCELLED_BY_MERCHANDISER,
+    RequestStatus.CANCELLED_BY_ACCOUNTS,
+    RequestStatus.REJECTED_BY_HOM,
+}
+
+_INVOICE_FIELDS = {
+    "sunshine_invoice_number": "Sunshine Invoice No.",
+    "supplier_invoice_number": "Supplier Proforma Invoice No.",
+}
+
+
 class DepositRequestService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._repo = DepositRequestRepository(session)
         self._supplier_repo = SupplierRepository(session)
         self._audit = AuditService(session)
+
+    # ── Duplicate invoice validation (Aug 2026 batch, item 1.3) ───────────────
+
+    async def find_invoice_conflict(
+        self, field: str, value: str | None, exclude_request_id: UUID | None = None
+    ) -> DepositRequest | None:
+        """Live request already using this invoice number (case-insensitive,
+        trimmed), or None. Enforced at the service layer, not a DB unique
+        index — legacy data already contains at least one duplicate pair."""
+        if field not in _INVOICE_FIELDS:
+            raise ValueError(f"Not a duplicate-checked field: {field}")
+        if not value or not value.strip():
+            return None
+        column = getattr(DepositRequest, field)
+        stmt = (
+            select(DepositRequest)
+            .where(
+                func.lower(func.trim(column)) == value.strip().lower(),
+                DepositRequest.is_deleted.is_(False),
+                DepositRequest.current_status.notin_(_DUPLICATE_EXEMPT_STATUSES),
+            )
+            .order_by(DepositRequest.created_at)
+            .limit(1)
+        )
+        if exclude_request_id is not None:
+            stmt = stmt.where(DepositRequest.id != exclude_request_id)
+        return (await self._session.execute(stmt)).scalars().first()
+
+    async def _assert_invoice_numbers_unique(
+        self,
+        sunshine_invoice_number: str | None,
+        supplier_invoice_number: str | None,
+        exclude_request_id: UUID | None = None,
+    ) -> None:
+        for field, value in (
+            ("sunshine_invoice_number", sunshine_invoice_number),
+            ("supplier_invoice_number", supplier_invoice_number),
+        ):
+            conflict = await self.find_invoice_conflict(field, value, exclude_request_id)
+            if conflict:
+                raise BusinessRuleError(
+                    f"{_INVOICE_FIELDS[field]} '{value.strip()}' is already used by "
+                    f"request {conflict.request_number}. Duplicate deposit requests "
+                    "are not allowed."
+                )
 
     async def create(
         self,
@@ -61,6 +121,11 @@ class DepositRequestService:
             RequestStatus.PENDING_HOM_APPROVAL
             if (flag and data.override_flagged_supplier)
             else RequestStatus.PENDING_PAYMENT
+        )
+
+        # 1b. No duplicate deposit requests against the same invoice numbers
+        await self._assert_invoice_numbers_unique(
+            data.sunshine_invoice_number, data.supplier_invoice_number
         )
 
         # 2. Generate request number
@@ -124,6 +189,10 @@ class DepositRequestService:
             RequestStatus.PENDING_HOM_APPROVAL
             if (flag and data.override_flagged_supplier)
             else RequestStatus.PENDING_PAYMENT
+        )
+
+        await self._assert_invoice_numbers_unique(
+            data.sunshine_invoice_number, data.supplier_invoice_number
         )
 
         request_number = await self._repo.generate_request_number()
@@ -222,6 +291,16 @@ class DepositRequestService:
             raise AuthorizationError("You can only edit your own requests.")
 
         changes = data.model_dump(exclude_unset=True)
+
+        # Invoice numbers must stay unique across live requests when edited
+        # (super-admin invoice editor, generic PATCH).
+        if "sunshine_invoice_number" in changes or "supplier_invoice_number" in changes:
+            await self._assert_invoice_numbers_unique(
+                changes.get("sunshine_invoice_number"),
+                changes.get("supplier_invoice_number"),
+                exclude_request_id=request.id,
+            )
+
         for field, new_val in changes.items():
             old_val = getattr(request, field, None)
             await self._audit.record_update(

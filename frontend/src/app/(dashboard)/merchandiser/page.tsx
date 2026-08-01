@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TopNav } from "@/components/layout/TopNav";
+import { NewRequestForm } from "@/components/forms/NewRequestForm";
 import { RoleGuard } from "@/components/layout/RoleGuard";
 import { StatCard } from "@/components/ui/StatCard";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
@@ -17,7 +18,7 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   Table, TableHeader, TableBody, TableRow, TableHead,
 } from "@/components/ui/table";
-import { ClipboardList, Clock, CheckCircle, XCircle, Bell, ArrowRight, Plus } from "lucide-react";
+import { ClipboardList, Clock, CheckCircle, XCircle, Bell, ArrowRight, Plus, ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { timeAgo } from "@/lib/utils";
@@ -50,8 +51,17 @@ export default function MerchandiserDashboard() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<RequestSort>("newest");
+  const [formOpen, setFormOpen] = useState(false);
   const debouncedSearch = useDebouncedValue(search.trim());
   const { data: activity = [] } = useMyActivity();
+
+  // /merchandiser/new redirects here with ?new=1 — auto-expand the form so
+  // old bookmarks still land on an open request form.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("new") === "1") {
+      setFormOpen(true);
+    }
+  }, []);
 
   const { data, isLoading, isFetching } = useRequestsPaginated(page, PAGE_SIZE, {
     ...TAB_PARAMS[activeTab],
@@ -89,6 +99,34 @@ export default function MerchandiserDashboard() {
     <RoleGuard allowedRoles={["merchandiser", "super_admin"]}>
       <TopNav title="My Requests" subtitle="Track and manage your Supplier Advance Payment Requests" />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
+
+        {/* New Request — the Supplier Advance Payment Request form lives in
+            the queue as a collapsible section (Aug 2026 batch, item 2.2). */}
+        <Card className="overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setFormOpen((open) => !open)}
+            aria-expanded={formOpen}
+            className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-muted/40 transition-colors"
+          >
+            <span className="flex items-center gap-2 font-semibold text-foreground text-sm">
+              <Plus className="h-4 w-4" />
+              New Supplier Advance Payment Request
+            </span>
+            <ChevronDown
+              className={`h-4 w-4 text-muted-foreground transition-transform ${formOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+          {formOpen && (
+            <div className="border-t border-border p-4 md:p-6 bg-muted/20">
+              <NewRequestForm
+                onSuccess={() => setFormOpen(false)}
+                onCancel={() => setFormOpen(false)}
+              />
+            </div>
+          )}
+        </Card>
+
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard label="Total Requests"   value={allData?.total ?? "—"}       icon={ClipboardList} />
           <StatCard label="Pending Payment"  value={pendingData?.total ?? "—"}   icon={Clock}         subtext="Awaiting accounts" />
@@ -147,10 +185,8 @@ export default function MerchandiserDashboard() {
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-foreground">Request History</h2>
-          <Button asChild className="w-full sm:w-auto">
-            <Link href="/merchandiser/new" className="gap-2">
-              <Plus className="h-4 w-4" /> New Request
-            </Link>
+          <Button onClick={() => setFormOpen(true)} className="w-full sm:w-auto gap-2">
+            <Plus className="h-4 w-4" /> New Request
           </Button>
         </div>
 
@@ -200,7 +236,8 @@ export default function MerchandiserDashboard() {
                       </div>
                       <p className="font-semibold text-foreground text-base">No requests yet</p>
                       <p className="text-sm text-muted-foreground mt-1 max-w-xs">
-                        Submit a request through the public form and it will appear here once linked to your account.
+                        Use the New Request section above to raise your first
+                        Supplier Advance Payment Request.
                       </p>
                     </div>
                   </Card>

@@ -72,6 +72,12 @@ class PaymentTranche(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     tt_copy_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     tt_copy_file_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     tt_copy_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Per-tranche payment details (Aug 2026, migration 0022). Payment date and
+    # bank are required before the tranche can be marked paid; the reference
+    # number is optional. Nullable: legacy tranches predate this data.
+    payment_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    bank: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    payment_reference_number: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # True for tranches synthesised from pre-tranche records (migration 0018
     # backfill or API compat mode) — these may lack a tentative date.
     is_legacy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

@@ -20,12 +20,13 @@ const PAYMENT_STATUS_OPTIONS = [
   { value: "hold", label: "Hold" },
 ] as const;
 
-// Payment Date, Bank, Payment Reference Number and Payment Status are
-// mandatory (14 Jul 2026 change note, C7). Remarks stay optional.
+// Payment Date, Bank and Payment Status are mandatory (14 Jul 2026 change
+// note, C7). The Payment Reference Number became optional again in the
+// Aug 2026 batch (item 3.2). Remarks stay optional.
 const schema = z.object({
   payment_date: z.string().min(1, "Payment date is required"),
   bank: z.string().min(1, "Bank is required"),
-  payment_reference_number: z.string().min(1, "Payment reference number is required"),
+  payment_reference_number: z.string().optional(),
   // The select's placeholder submits "" — the enum rejects it with a clear
   // message, forcing an explicit pick.
   payment_status: z.enum(["processed", "rejected", "hold"], {
@@ -161,8 +162,7 @@ export function PaymentForm({ requestId, isLocked, existing, onProcessed, readOn
         />
         <Field
           label="Payment Reference Number"
-          required
-          tooltip="The bank transaction reference or cheque number for this payment."
+          tooltip="The bank transaction reference or cheque number for this payment. Optional."
           error={errors.payment_reference_number?.message}
           type="text"
           disabled={disabled}

@@ -19,6 +19,40 @@ function toParams(filters?: AnalyticsFilters): Record<string, string> {
   return params;
 }
 
+// Weekly Deposit Tracker — unpaid deposits bucketed by ETD week (Aug 2026).
+export interface WeeklyDepositRow {
+  request_id: string;
+  request_number: string;
+  sunshine_invoice_number: string | null;
+  supplier_name: string;
+  tranche_label: string;
+  currency: string;
+  amount: number;
+  tentative_payment_date: string | null;
+  estimated_etd: string | null;
+}
+
+export interface WeeklyDepositGroup {
+  week: string;
+  week_start: string | null;
+  rows: WeeklyDepositRow[];
+  outstanding: Record<string, number>;
+}
+
+// All-shipments Analytical Snapshot row (Aug 2026).
+export interface ShipmentRow {
+  request_id: string;
+  request_number: string;
+  sunshine_invoice_number: string | null;
+  supplier_name: string;
+  currency: string | null;
+  amount: number;
+  estimated_etd: string | null;
+  /** Server-computed: max(0, today − estimated_etd); null when no ETD. */
+  days_delayed: number | null;
+  current_status: string;
+}
+
 export const analyticsService = {
   getSummary: async (filters?: AnalyticsFilters): Promise<AnalyticsSummary> => {
     const { data } = await api.get<AnalyticsSummary>("/analytics/summary", {
@@ -40,6 +74,16 @@ export const analyticsService = {
 
   getNpa: async (): Promise<NpaResponse> => {
     const { data } = await api.get<NpaResponse>("/analytics/npa");
+    return data;
+  },
+
+  getWeeklyDeposits: async (): Promise<WeeklyDepositGroup[]> => {
+    const { data } = await api.get<WeeklyDepositGroup[]>("/analytics/weekly-deposits");
+    return data;
+  },
+
+  getShipments: async (): Promise<ShipmentRow[]> => {
+    const { data } = await api.get<ShipmentRow[]>("/analytics/shipments");
     return data;
   },
 };

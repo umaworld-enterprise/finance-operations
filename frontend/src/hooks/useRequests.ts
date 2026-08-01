@@ -234,6 +234,7 @@ function invalidateRequestAndTranches(qc: QueryClient, requestId: string) {
   qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId] });
   qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId, "tranches"] });
   qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId, "audit"] });
+  qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId, "tranches-modifiable"] });
 }
 
 export function useTranches(requestId: string) {
@@ -255,8 +256,61 @@ export function useUpdateTranche(requestId: string) {
   });
 }
 
-// usePayTranche was removed with POST /tranches/{id}/pay (change note C6) —
-// uploading the TT copy is the only way to mark a tranche paid.
+// Merchandiser tranche management — allowed only while the request is pending
+// and untouched by Accounts (Aug 2026 batch, item 2.3). Server-enforced;
+// useTranchesModifiable mirrors the rule for the UI.
+
+export function useTranchesModifiable(requestId: string) {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, requestId, "tranches-modifiable"],
+    queryFn: () => requestService.tranchesModifiable(requestId),
+    enabled: !!requestId,
+    staleTime: 0,
+  });
+}
+
+export function useAddTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { amount: number; tentative_payment_date: string }) =>
+      requestService.addTranche(requestId, data),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+export function useDeleteTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (trancheId: string) => requestService.deleteTranche(requestId, trancheId),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+// Accounts: per-tranche payment details + explicit mark-paid (Aug 2026,
+// item 3.1 — the TT upload no longer auto-pays; paying requires the TT copy
+// AND payment details, then an explicit click).
+
+export function useUpdateTranchePaymentDetails(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      trancheId,
+      data,
+    }: {
+      trancheId: string;
+      data: { payment_date?: string; bank?: string; payment_reference_number?: string };
+    }) => requestService.updateTranchePaymentDetails(requestId, trancheId, data),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+export function usePayTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (trancheId: string) => requestService.payTranche(requestId, trancheId),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
 
 export function useUploadTrancheTtCopy(requestId: string) {
   const qc = useQueryClient();

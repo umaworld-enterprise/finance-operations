@@ -58,6 +58,9 @@ TYPE_HOM_REJECTED = "hom_rejected"
 TYPE_ADJUSTMENT_REQUESTED = "adjustment_requested"
 TYPE_ADJUSTMENT_RECORDED = "adjustment_recorded"
 TYPE_ADJUSTMENT_DECIDED = "adjustment_decided"
+TYPE_REQUEST_CREATED = "request_created"
+TYPE_REQUEST_PENDING_HOM = "request_pending_hom"
+TYPE_STATUS_CHANGED = "status_changed"
 
 _EMAIL_ROLES = (UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN)
 
@@ -194,6 +197,37 @@ def build_adjustment_notification_message(
         body += f" Reason: {reason}"
     return {"title": "Invoice adjustment recorded", "body": body,
             "url": url, "attachment_url": None}
+
+
+def build_status_change_message(
+    new_status: str,
+    request_number: str,
+    request_id: UUID | str,
+    actor_is_merchandiser: bool,
+    remarks: str | None = None,
+) -> dict:
+    """Title/body/url for hold / resume / cancel / reopen notifications
+    (Aug 2026 batch, item 1.2 — these transitions previously emitted nothing).
+
+    Merchandiser-side actions notify the Accounts Team (deep-link to the
+    accounts view); accounts-side actions notify the raising merchandiser.
+    """
+    actor = "the merchandiser" if actor_is_merchandiser else "the Accounts team"
+    titles_bodies = {
+        "hold_by_merchandiser": ("Request on hold", f"{request_number} was put on hold by {actor}."),
+        "hold_by_accounts": ("Request on hold", f"{request_number} was put on hold by {actor}."),
+        "pending_payment": ("Request resumed", f"{request_number} was resumed by {actor} and is back in the payment queue."),
+        "cancelled_by_merchandiser": ("Request cancelled", f"{request_number} was cancelled by {actor}."),
+        "cancelled_by_accounts": ("Request cancelled", f"{request_number} was cancelled by {actor}."),
+        "reopened": ("Request reopened", f"{request_number} was reopened by {actor}."),
+    }
+    title, body = titles_bodies.get(
+        new_status, ("Request updated", f"{request_number} status changed to {new_status}.")
+    )
+    if remarks:
+        body += f" Remarks: {remarks}"
+    url = f"/accounts/{request_id}" if actor_is_merchandiser else f"/merchandiser/{request_id}"
+    return {"title": title, "body": body, "url": url, "attachment_url": None}
 
 
 def decide_on_tt_upload(request_is_processed: bool, already_notified: bool) -> str | None:
@@ -335,6 +369,41 @@ async def _deliver(
     # the primary payment_processed notification (not the follow-up).
     if type_ == TYPE_PAYMENT_PROCESSED:
         await _email_admins(session, request.request_number, tt_copy_url)
+
+
+async def _active_users_with_role(session: AsyncSession, role: UserRole) -> list[User]:
+    result = await session.execute(
+        select(User).where(User.role == role, User.is_active == True)  # noqa: E712
+    )
+    return list(result.scalars().all())
+
+
+async def _deliver_to_users(
+    session: AsyncSession,
+    users: list[User],
+    type_: str,
+    message: dict,
+    deposit_request_id: UUID | None,
+) -> None:
+    """Bell rows + pushes for a list of recipients (fan-out helper)."""
+    if not users:
+        return
+    for user in users:
+        session.add(
+            Notification(
+                user_id=user.id,
+                type=type_,
+                title=message["title"],
+                body=message["body"],
+                url=message["url"],
+                attachment_url=message.get("attachment_url"),
+                deposit_request_id=deposit_request_id,
+            )
+        )
+    await session.commit()
+    for user in users:
+        await _push_to_user(session, user.id, message)
+    await session.commit()
 
 
 async def _load_request(session: AsyncSession, request_id: UUID) -> DepositRequest | None:
@@ -536,6 +605,142 @@ async def notify_hom_decision(request_id: UUID, decision: str, remarks: str) -> 
         logger.error(
             "notify_hom_decision failed",
             request_id=str(request_id), decision=decision, error=str(exc),
+        )
+
+
+async def notify_request_created(request_id: UUID) -> None:
+    """After a request is created OR enters the payment queue via HoM approval
+    (Aug 2026 batch, item 1.2 — neither previously notified anyone).
+
+    pending_hom_approval → every active Head of Merchandiser ("approval
+    required"); pending_payment → every active Accounts Team user ("awaiting
+    payment processing"). Own session; failures logged and swallowed.
+    """
+    from app.core.database import AsyncSessionFactory
+
+    try:
+        async with AsyncSessionFactory() as session:
+            request = await _load_request(session, request_id)
+            if request is None:
+                return
+            if request.current_status == RequestStatus.PENDING_HOM_APPROVAL:
+                message = {
+                    "title": "Approval required",
+                    "body": (
+                        f"New request {request.request_number} from a flagged supplier "
+                        "awaits Head of Merchandiser approval."
+                    ),
+                    "url": f"/hom/{request.id}",
+                    "attachment_url": None,
+                }
+                users = await _active_users_with_role(session, UserRole.HEAD_OF_MERCHANDISER)
+                await _deliver_to_users(session, users, TYPE_REQUEST_PENDING_HOM, message, request.id)
+            elif request.current_status == RequestStatus.PENDING_PAYMENT:
+                message = {
+                    "title": "New Supplier Advance Payment Request",
+                    "body": (
+                        f"{request.request_number} is in the payment queue "
+                        "awaiting processing."
+                    ),
+                    "url": f"/accounts/{request.id}",
+                    "attachment_url": None,
+                }
+                users = await _active_users_with_role(session, UserRole.ACCOUNTS_TEAM)
+                await _deliver_to_users(session, users, TYPE_REQUEST_CREATED, message, request.id)
+    except Exception as exc:
+        logger.error(
+            "notify_request_created failed", request_id=str(request_id), error=str(exc)
+        )
+
+
+async def notify_status_change(
+    request_id: UUID, new_status: str, actor_role: str, remarks: str | None = None
+) -> None:
+    """After hold / resume / cancel / reopen — the counterpart is notified
+    (Aug 2026 batch, item 1.2: transition_status emitted nothing before).
+
+    Merchandiser actions fan out to the Accounts Team; accounts-side actions
+    (accounts_team / super_admin / finance_admin) go to the raising
+    merchandiser via _find_target_user. Own session; failures logged and
+    swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+
+    try:
+        async with AsyncSessionFactory() as session:
+            request = await _load_request(session, request_id)
+            if request is None:
+                return
+            actor_is_merchandiser = actor_role == UserRole.MERCHANDISER.value
+            message = build_status_change_message(
+                new_status, request.request_number, request.id,
+                actor_is_merchandiser, remarks,
+            )
+            if actor_is_merchandiser:
+                users = await _active_users_with_role(session, UserRole.ACCOUNTS_TEAM)
+                await _deliver_to_users(session, users, TYPE_STATUS_CHANGED, message, request.id)
+            else:
+                target = await _find_target_user(session, request)
+                if target is None:
+                    logger.info(
+                        "No target user for status-change notification — skipping",
+                        request_id=str(request_id),
+                    )
+                    return
+                await _deliver_to_users(session, [target], TYPE_STATUS_CHANGED, message, request.id)
+    except Exception as exc:
+        logger.error(
+            "notify_status_change failed",
+            request_id=str(request_id), new_status=new_status, error=str(exc),
+        )
+
+
+async def notify_tranche_removed(request_id: UUID, label: str) -> None:
+    """After a merchandiser deletes a tranche — bell + push to every active
+    Accounts Team user. The tranche row is gone, so the label travels as an
+    argument instead of being loaded.
+
+    Own session; failures logged and swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+
+    try:
+        async with AsyncSessionFactory() as session:
+            request = await _load_request(session, request_id)
+            if request is None:
+                return
+            message = {
+                "title": "Tranche removed",
+                "body": f"{label} of {request.request_number} was removed by the merchandiser.",
+                "url": f"/accounts/{request_id}",
+                "attachment_url": None,
+            }
+            result = await session.execute(
+                select(User).where(
+                    User.role == UserRole.ACCOUNTS_TEAM, User.is_active == True  # noqa: E712
+                )
+            )
+            accounts_users = list(result.scalars().all())
+            for user in accounts_users:
+                session.add(
+                    Notification(
+                        user_id=user.id,
+                        type=TYPE_TRANCHE_UPDATED,
+                        title=message["title"],
+                        body=message["body"],
+                        url=message["url"],
+                        attachment_url=None,
+                        deposit_request_id=request.id,
+                    )
+                )
+            await session.commit()
+            for user in accounts_users:
+                await _push_to_user(session, user.id, message)
+            await session.commit()
+    except Exception as exc:
+        logger.error(
+            "notify_tranche_removed failed",
+            request_id=str(request_id), label=label, error=str(exc),
         )
 
 

@@ -24,12 +24,12 @@ class PaymentUpdate(BaseModel):
 
 
 class PaymentCreate(PaymentUpdate):
-    """POST body — Payment Date, Bank, Payment Reference Number and Payment
-    Status are mandatory (14 Jul 2026 change note, C7)."""
+    """POST body — Payment Date, Bank and Payment Status are mandatory
+    (14 Jul 2026 change note, C7). The Payment Reference Number was made
+    optional again by the Aug 2026 change batch (item 3.2)."""
 
     payment_date: date
     bank: str = Field(min_length=1)
-    payment_reference_number: str = Field(min_length=1)
     payment_status: PaymentStatus
 
 
