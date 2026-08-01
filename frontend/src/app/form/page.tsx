@@ -124,7 +124,9 @@ export default function PublicFormPage() {
   const [masters, setMasters] = useState<Masters | null>(null);
   const [config, setConfig] = useState<FormConfig>({});
   const [loadError, setLoadError] = useState(false);
-  const [submitted, setSubmitted] = useState<string | null>(null);
+  // Request number + whether it routed to the Head of Merchandiser (flagged
+  // supplier) — the success screen must not claim it went straight to Accounts.
+  const [submitted, setSubmitted] = useState<{ number: string; homReview: boolean } | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showFlagConfirm, setShowFlagConfirm] = useState(false);
@@ -272,7 +274,10 @@ export default function PublicFormPage() {
         setServerError(typeof msg === "string" ? msg : "Something went wrong. Please try again.");
         return;
       }
-      setSubmitted(data.request_number as string);
+      setSubmitted({
+        number: data.request_number as string,
+        homReview: data.current_status === "pending_hom_approval",
+      });
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
       const isNetworkError = errMsg === "Failed to fetch" || errMsg.toLowerCase().includes("network");
@@ -292,13 +297,17 @@ export default function PublicFormPage() {
       <div className="min-h-screen flex items-center justify-center p-4 bg-gray-50">
         <div className="w-full max-w-md bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center">
           <CheckCircle2 className="h-14 w-14 text-gray-900 mx-auto mb-5" />
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Request Submitted</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">
+            {submitted.homReview ? "Request Sent for Approval" : "Request Submitted"}
+          </h1>
           <p className="text-gray-600 text-sm mb-6">
-            Your Supplier Advance Payment Request has been received and will be reviewed by the accounts team.
+            {submitted.homReview
+              ? "Your Supplier Advance Payment Request has been sent to the Head of Merchandiser for approval before it reaches the accounts team. You will be notified once it is reviewed."
+              : "Your Supplier Advance Payment Request has been received and will be reviewed by the accounts team."}
           </p>
           <div className="bg-gray-50 rounded-xl border border-gray-200 px-6 py-4 mb-6">
             <p className="text-xs text-gray-500 mb-1">Request Number</p>
-            <p className="text-2xl font-mono font-bold text-gray-900">{submitted}</p>
+            <p className="text-2xl font-mono font-bold text-gray-900">{submitted.number}</p>
           </div>
           <p className="text-xs text-gray-400">Keep this number for your records.</p>
         </div>

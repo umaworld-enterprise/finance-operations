@@ -21,7 +21,7 @@ from app.core.database import get_db_session
 from app.core.rate_limit import limiter
 import json
 
-from app.models.enums import CurrencyCode
+from app.models.enums import CurrencyCode, RequestStatus
 from app.models.integrations import DefaultedSupplier
 from app.models.masters import Customer, PaymentTermsMaster, Supplier, SystemConfig, Vertical
 from app.schemas.deposit_request import DepositRequestCreate
@@ -146,6 +146,9 @@ class PublicSubmissionRequest(BaseModel):
 class PublicSubmissionResponse(BaseModel):
     request_number: str
     message: str
+    # Lets the form's success screen say where the request actually went:
+    # flagged-supplier submissions route to the Head of Merchandiser first.
+    current_status: str | None = None
 
 
 @router.post("/submit", response_model=PublicSubmissionResponse)
@@ -228,7 +231,19 @@ async def submit_public_form(
 
     background_tasks.add_task(seed_snapshot_for_request, request.id)
 
+    routed_to_hom = request.current_status == RequestStatus.PENDING_HOM_APPROVAL
+    message = (
+        f"Your Supplier Advance Payment Request {request.request_number} has been "
+        "submitted and sent to the Head of Merchandiser for approval. "
+        "You will be notified once it is reviewed."
+        if routed_to_hom
+        else (
+            f"Your Supplier Advance Payment Request {request.request_number} has been "
+            "submitted successfully. The accounts team will review it shortly."
+        )
+    )
     return PublicSubmissionResponse(
         request_number=request.request_number,
-        message=f"Your Supplier Advance Payment Request {request.request_number} has been submitted successfully. The accounts team will review it shortly.",
+        message=message,
+        current_status=request.current_status.value,
     )
