@@ -21,6 +21,7 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { useRequestsPaginated, usePendingQueue } from "@/hooks/useRequests";
+import { ShipmentsTable } from "@/components/analytics/ShipmentsTable";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
@@ -459,6 +460,9 @@ export default function AccountsDashboard() {
             )}
           </TabsContent>
         </Tabs>
+
+        {/* Analytical Snapshot — all shipments (Aug 2026, item 4.2) */}
+        <ShipmentsTable linkBase="/accounts" />
       </main>
     </RoleGuard>
   );

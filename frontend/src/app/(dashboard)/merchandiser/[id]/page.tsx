@@ -15,7 +15,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { TrancheList } from "@/components/tranches/TrancheList";
 import { RequestAuditTrail } from "@/components/tranches/RequestAuditTrail";
 import { RequestAdjustments } from "@/components/tranches/RequestAdjustments";
-import { useRequest, useRequestAction, useFieldVisibility, useUpdateRemarks, usePayment } from "@/hooks/useRequests";
+import { useRequest, useRequestAction, useFieldVisibility, useUpdateRemarks, usePayment, useTranchesModifiable } from "@/hooks/useRequests";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { ArrowLeft, Lock, FileQuestion, ExternalLink } from "lucide-react";
@@ -25,6 +25,7 @@ export default function MerchandiserRequestDetail() {
   const { id } = useParams<{ id: string }>();
   const { data: req, isLoading } = useRequest(id);
   const { data: payment } = usePayment(id);
+  const { data: modifiable } = useTranchesModifiable(id);
   const { data: fv = {} } = useFieldVisibility();
   const { mutateAsync: performAction, isPending } = useRequestAction();
   const { mutateAsync: saveRemarks, isPending: savingRemarks } = useUpdateRemarks(id);
@@ -163,7 +164,7 @@ export default function MerchandiserRequestDetail() {
               {fv.total_supplier_invoice_amount !== false && field("Total Invoice Amount", formatCurrency(req.total_supplier_invoice_amount, req.currency))}
               {fv.exchange_rate !== false && req.exchange_rate != null && field("Exchange Rate", req.exchange_rate)}
               {field("Sunshine Invoice #", req.sunshine_invoice_number)}
-              {field("Supplier Invoice #", req.supplier_invoice_number)}
+              {field("Supplier Proforma Invoice #", req.supplier_invoice_number)}
               {field("Estimated ETD", req.estimated_etd ? formatDate(req.estimated_etd) : null)}
               {req.payment_terms && field("Payment Terms", req.payment_terms)}
               {field("Submission Source", req.submission_source)}
@@ -192,8 +193,9 @@ export default function MerchandiserRequestDetail() {
           <CardContent className="p-5 md:p-6">
             <h2 className="text-sm font-semibold text-foreground mb-1">Advance Payment Tranches</h2>
             <p className="text-xs text-muted-foreground mb-4">
-              You can edit the amount and tentative payment date of unpaid tranches.
-              The Accounts team is notified of every change. Paid tranches are locked.
+              You can edit, add or delete tranches while the request is pending and
+              the Accounts team has not started processing it. The Accounts team is
+              notified of every change.
             </p>
             <TrancheList
               requestId={id}
@@ -207,6 +209,8 @@ export default function MerchandiserRequestDetail() {
                   ? "readonly"
                   : "merchandiser"
               }
+              canModify={modifiable?.modifiable ?? false}
+              modifyBlockedReason={modifiable?.reason ?? null}
             />
           </CardContent>
         </Card>

@@ -29,6 +29,28 @@ export function useAnalyticsSnapshots(filters?: AnalyticsFilters) {
   });
 }
 
+export function useWeeklyDeposits(enabled = true) {
+  return useQuery({
+    queryKey: ["analytics", "weekly-deposits"],
+    queryFn: analyticsService.getWeeklyDeposits,
+    enabled,
+    staleTime: STALE,
+    gcTime: GC,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useShipments(enabled = true) {
+  return useQuery({
+    queryKey: ["analytics", "shipments"],
+    queryFn: analyticsService.getShipments,
+    enabled,
+    staleTime: STALE,
+    gcTime: GC,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useNpa() {
   return useQuery<NpaResponse>({
     queryKey: ["analytics", "npa"],

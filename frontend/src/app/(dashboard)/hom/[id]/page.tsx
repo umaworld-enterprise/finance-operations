@@ -136,7 +136,7 @@ export default function HomRequestDetail() {
               {fv.total_supplier_invoice_amount !== false && field("Total Invoice Amount", formatCurrency(req.total_supplier_invoice_amount, req.currency ?? undefined))}
               {fv.exchange_rate !== false && req.exchange_rate != null && field("Exchange Rate", req.exchange_rate)}
               {req.sunshine_invoice_number && field("Sunshine Invoice #", req.sunshine_invoice_number)}
-              {req.supplier_invoice_number && field("Supplier Invoice #", req.supplier_invoice_number)}
+              {req.supplier_invoice_number && field("Supplier Proforma Invoice #", req.supplier_invoice_number)}
               {req.estimated_etd && field("Estimated ETD", formatDate(req.estimated_etd))}
               {req.payment_terms && field("Payment Terms", req.payment_terms)}
               {field("Submitted", formatDate(req.created_at))}

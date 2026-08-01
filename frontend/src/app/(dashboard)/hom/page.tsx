@@ -13,6 +13,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { NpaPanel } from "@/components/analytics/NpaPanel";
+import { ShipmentsTable } from "@/components/analytics/ShipmentsTable";
 import { DecisionDialog } from "@/components/hom/DecisionDialog";
 import { useHomQueue, useHomApprove, useHomReject } from "@/hooks/useRequests";
 import { SearchInput } from "@/components/ui/SearchInput";
@@ -229,6 +230,9 @@ export default function HomDashboard() {
             )}
           </CardContent>
         </Card>
+
+        {/* Analytical Snapshot — all shipments (Aug 2026, item 4.2) */}
+        <ShipmentsTable linkBase="/hom" />
 
         {/* Non-Performing Assets */}
         <div>

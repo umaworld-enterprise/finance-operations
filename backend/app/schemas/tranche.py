@@ -38,6 +38,19 @@ class TrancheUpdate(BaseModel):
         return _assert_two_decimal_places(v) if v is not None else v
 
 
+class TranchePaymentDetailsUpdate(BaseModel):
+    """Accounts-entered payment details on a single UNPAID tranche.
+
+    All fields are individually optional so details can be saved in stages —
+    but marking the tranche paid requires payment_date and bank (plus the TT
+    copy). The reference number is optional throughout (Aug 2026, item 3.2).
+    """
+
+    payment_date: date | None = None
+    bank: str | None = None
+    payment_reference_number: str | None = None
+
+
 class TrancheResponse(OrmBase):
     id: UUID
     deposit_request_id: UUID
@@ -54,6 +67,9 @@ class TrancheResponse(OrmBase):
     tt_copy_url: str | None = None
     tt_copy_file_id: str | None = None
     tt_copy_filename: str | None = None
+    payment_date: date | None = None
+    bank: str | None = None
+    payment_reference_number: str | None = None
     is_legacy: bool
     created_at: datetime
     updated_at: datetime

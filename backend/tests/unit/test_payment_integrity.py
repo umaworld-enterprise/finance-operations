@@ -90,7 +90,8 @@ async def test_process_payment_refuses_incomplete_details(db_session):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "blank_field", ["payment_date", "bank", "payment_reference_number", "payment_status"]
+    # payment_reference_number became optional (Aug 2026, item 3.2)
+    "blank_field", ["payment_date", "bank", "payment_status"]
 )
 async def test_process_payment_names_each_missing_field(db_session, blank_field):
     accounts, request, _, payment = await _setup(
@@ -106,14 +107,15 @@ async def test_process_payment_names_each_missing_field(db_session, blank_field)
 # ── Schemas: PaymentCreate strict, PaymentUpdate permissive ───────────────────
 
 
-def test_payment_create_requires_the_four_fields():
+def test_payment_create_requires_the_mandatory_fields():
+    """Payment Date, Bank and Payment Status — the reference number became
+    optional in the Aug 2026 batch (item 3.2)."""
     with pytest.raises(PydanticValidationError) as exc:
         PaymentCreate()
     missing = {e["loc"][0] for e in exc.value.errors()}
     assert missing == {
         "payment_date",
         "bank",
-        "payment_reference_number",
         "payment_status",
     }
 
@@ -123,18 +125,17 @@ def test_payment_create_rejects_blank_strings():
         PaymentCreate(
             payment_date=date(2026, 7, 1),
             bank="",
-            payment_reference_number="REF-1",
             payment_status=PaymentStatus.PROCESSED,
         )
 
 
-def test_payment_create_accepts_complete_details():
+def test_payment_create_accepts_details_without_reference_number():
     data = PaymentCreate(
         payment_date=date(2026, 7, 1),
         bank="Test Bank",
-        payment_reference_number="REF-1",
         payment_status=PaymentStatus.PROCESSED,
     )
+    assert data.payment_reference_number is None
     assert data.accounts_remarks is None  # optional fields remain optional
 
 

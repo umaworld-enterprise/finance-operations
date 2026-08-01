@@ -5,6 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
+from pydantic import BaseModel
 
 from app.analytics.snapshot_job import seed_snapshot_for_request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +27,11 @@ from app.schemas.deposit_request import (
 )
 from app.schemas.common import MessageResponse, PaginatedResponse
 from app.services.deposit_request_service import DepositRequestService
-from app.services.notification_service import notify_hom_decision
+from app.services.notification_service import (
+    notify_hom_decision,
+    notify_request_created,
+    notify_status_change,
+)
 
 router = APIRouter(prefix="/requests", tags=["deposit-requests"])
 
@@ -93,6 +98,8 @@ async def create_request(
     # Analytics snapshot is computed after the response — it adds ~2 DB round
     # trips and is fully recalculable, so it must not block the submit.
     background_tasks.add_task(seed_snapshot_for_request, req.id)
+    # Accounts (or HoM for flagged suppliers) learn about the new request.
+    background_tasks.add_task(notify_request_created, req.id)
     return DepositRequestResponse.model_validate(req)
 
 
@@ -151,6 +158,28 @@ async def hom_queue(
         status=[RequestStatus.PENDING_HOM_APPROVAL], limit=500, offset=0,
     )
     return [DepositRequestResponse.model_validate(r) for r in items]
+
+
+class InvoiceCheckResponse(BaseModel):
+    duplicate: bool
+    request_number: str | None = None
+
+
+@router.get("/check-invoice", response_model=InvoiceCheckResponse)
+async def check_invoice_number(
+    current_user: User,
+    db: DB,
+    field: str = Query(pattern="^(sunshine_invoice_number|supplier_invoice_number)$"),
+    value: str = Query(min_length=1, max_length=200),
+) -> InvoiceCheckResponse:
+    """Pre-submit duplicate check for the request form — is this invoice
+    number already used by a live (non-cancelled/rejected) request?
+    Creation/update re-validate server-side regardless."""
+    conflict = await DepositRequestService(db).find_invoice_conflict(field, value)
+    return InvoiceCheckResponse(
+        duplicate=conflict is not None,
+        request_number=conflict.request_number if conflict else None,
+    )
 
 
 @router.get("/{request_id}", response_model=DepositRequestDetailResponse)
@@ -218,6 +247,7 @@ async def hold_request(
     current_user: User,
     request: Request,
     db: DB,
+    background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
     from app.models.enums import RequestStatus, UserRole
     svc = DepositRequestService(db)
@@ -231,6 +261,9 @@ async def hold_request(
         ip_address=_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
+    background_tasks.add_task(
+        notify_status_change, request_id, target.value, current_user.role.value, body.remarks
+    )
     return DepositRequestResponse.model_validate(req)
 
 
@@ -241,6 +274,7 @@ async def resume_request(
     current_user: User,
     request: Request,
     db: DB,
+    background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
     svc = DepositRequestService(db)
     req = await svc.transition_status(
@@ -252,6 +286,10 @@ async def resume_request(
         ip_address=_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
+    background_tasks.add_task(
+        notify_status_change, request_id,
+        RequestStatus.PENDING_PAYMENT.value, current_user.role.value, body.remarks,
+    )
     return DepositRequestResponse.model_validate(req)
 
 
@@ -262,6 +300,7 @@ async def cancel_request(
     current_user: User,
     request: Request,
     db: DB,
+    background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
     from app.models.enums import UserRole
     svc = DepositRequestService(db)
@@ -275,6 +314,9 @@ async def cancel_request(
         ip_address=_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
+    background_tasks.add_task(
+        notify_status_change, request_id, target.value, current_user.role.value, body.remarks
+    )
     return DepositRequestResponse.model_validate(req)
 
 
@@ -285,6 +327,7 @@ async def reopen_request(
     current_user: User,
     request: Request,
     db: DB,
+    background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
     svc = DepositRequestService(db)
     req = await svc.transition_status(
@@ -295,6 +338,10 @@ async def reopen_request(
         body.remarks,
         ip_address=_ip(request),
         user_agent=request.headers.get("user-agent"),
+    )
+    background_tasks.add_task(
+        notify_status_change, request_id,
+        RequestStatus.REOPENED.value, current_user.role.value, body.remarks,
     )
     return DepositRequestResponse.model_validate(req)
 
@@ -334,6 +381,9 @@ async def hom_approve(
         user_agent=request.headers.get("user-agent"),
     )
     background_tasks.add_task(notify_hom_decision, request_id, "approved", body.remarks)
+    # The request just entered the payment queue — Accounts learn about it the
+    # same way they do for directly-created requests.
+    background_tasks.add_task(notify_request_created, request_id)
     return DepositRequestResponse.model_validate(req)
 
 

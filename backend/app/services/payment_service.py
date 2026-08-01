@@ -94,16 +94,16 @@ class PaymentService:
         if not payment:
             raise ConflictError("Payment details must be entered before processing.")
 
-        # Completeness gate — the four mandatory Payment Details fields must be
+        # Completeness gate — the mandatory Payment Details fields must be
         # recorded before the request can be processed. Partial rows created by
         # set_ship_date / attach_tt_copy are legitimate, but they cannot be
-        # processed until Accounts completes them.
+        # processed until Accounts completes them. (Payment Reference Number
+        # became optional in the Aug 2026 batch, item 3.2.)
         missing = [
             label
             for field, label in (
                 ("payment_date", "Payment Date"),
                 ("bank", "Bank"),
-                ("payment_reference_number", "Payment Reference Number"),
                 ("payment_status", "Payment Status"),
             )
             if getattr(payment, field) in (None, "")

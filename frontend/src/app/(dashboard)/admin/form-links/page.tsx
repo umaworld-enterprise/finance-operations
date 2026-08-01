@@ -122,6 +122,11 @@ export default function FormLinksPage() {
       <div className="min-h-screen bg-background">
         <TopNav title="Form Links" />
         <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+          <div className="rounded-lg bg-amber-50 border border-amber-300 text-amber-800 p-3 text-sm">
+            <strong>Deprecated.</strong> The public (login-free) request form was retired in
+            August 2026 — shared links now show a sign-in notice and submissions are
+            blocked server-side. Existing link records are kept for reference only.
+          </div>
           <div className="flex items-center gap-3">
             <Link href="/admin" className="text-muted-foreground hover:text-foreground transition-colors">
               <ArrowLeft className="h-4 w-4" />

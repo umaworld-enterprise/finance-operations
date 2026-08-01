@@ -26,7 +26,7 @@ import dynamic from "next/dynamic";
 const OverdueChart       = dynamic(() => import("@/components/charts/OverdueChart").then(m => ({ default: m.OverdueChart })), { ssr: false });
 const CostOfFundChart    = dynamic(() => import("@/components/charts/CostOfFundChart").then(m => ({ default: m.CostOfFundChart })), { ssr: false });
 const MonthlyTrendChart  = dynamic(() => import("@/components/charts/MonthlyTrendChart").then(m => ({ default: m.MonthlyTrendChart })), { ssr: false });
-import { useAnalyticsSummary, useAnalyticsSnapshots } from "@/hooks/useAnalytics";
+import { useAnalyticsSummary, useAnalyticsSnapshots, useWeeklyDeposits } from "@/hooks/useAnalytics";
 import { useRequests } from "@/hooks/useRequests";
 import { useVerticals, useCustomers, useUsers } from "@/hooks/useMasters";
 import { currencyDisplayLabel, formatCurrency, formatDate, cn } from "@/lib/utils";
@@ -280,6 +280,9 @@ const ALL_TABS = [
   { key: "by_vertical",     label: "By Vertical",     permKey: "by_vertical" },
   { key: "by_customer",     label: "By Customer",     permKey: "by_customer" },
   { key: "outstanding_tracker", label: "Outstanding", permKey: "outstanding_tracker" },
+  // Weekly Deposit Tracker (Aug 2026, item 4.1) — same permission section as
+  // Outstanding: identical data domain, different cut.
+  { key: "weekly_tracker",  label: "Weekly Tracker",  permKey: "outstanding_tracker" },
 ] as const;
 
 type TabKey = typeof ALL_TABS[number]["key"];
@@ -804,6 +807,86 @@ function OutstandingTrackerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo
   );
 }
 
+function WeeklyTrackerTab() {
+  const { data: groups = [], isLoading } = useWeeklyDeposits();
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Requested, unpaid deposits sorted by Estimated ETD, bucketed into the
+        ETD&apos;s Monday–Sunday week. Requests without an ETD collect at the bottom.
+      </p>
+      {isLoading ? (
+        <Card className="overflow-hidden">
+          <Table>
+            <TableBody><TableSkeleton rows={8} cols={7} /></TableBody>
+          </Table>
+        </Card>
+      ) : groups.length === 0 ? (
+        <Card className="p-8 text-center text-sm text-muted-foreground">
+          No unpaid deposits — the tracker is clear.
+        </Card>
+      ) : (
+        groups.map((g) => (
+          <Card key={g.week_start ?? "no-etd"} className="overflow-hidden">
+            <div className="px-5 py-3 border-b border-border flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-foreground">
+                {g.week_start ? `ETD week ${g.week}` : g.week}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {Object.entries(g.outstanding)
+                  .map(([cur, amt]) => fmtCurrency(amt, cur))
+                  .join(" · ")}
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Request #</TableHead>
+                    <TableHead>Invoice #</TableHead>
+                    <TableHead>Supplier</TableHead>
+                    <TableHead>Tranche</TableHead>
+                    <TableHead className="text-right">Unpaid Amount</TableHead>
+                    <TableHead>Tentative Payment</TableHead>
+                    <TableHead>Estimated ETD</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {g.rows.map((row, i) => (
+                    <TableRow key={`${row.request_id}-${row.tranche_label}-${i}`}>
+                      <TableCell className="font-mono text-xs font-semibold whitespace-nowrap">
+                        {row.request_number}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {row.sunshine_invoice_number || "—"}
+                      </TableCell>
+                      <TableCell className="text-sm">{row.supplier_name}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                        {row.tranche_label}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-semibold">
+                        {fmtCurrency(row.amount, row.currency)}
+                      </TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">
+                        {row.tentative_payment_date ? formatDate(row.tentative_payment_date) : "—"}
+                      </TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">
+                        {row.estimated_etd ? formatDate(row.estimated_etd) : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+        ))
+      )}
+    </div>
+  );
+}
+
+
 // ── Overview tab (original analytics content) ─────────────────────────────────
 
 const GLOSSARY = [
@@ -1305,6 +1388,7 @@ export default function AnalyticsPage() {
         {activeTab === "by_vertical" && <ByVerticalTab dateFrom={globalFrom} dateTo={globalTo} />}
         {activeTab === "by_customer" && <ByCustomerTab dateFrom={globalFrom} dateTo={globalTo} />}
         {activeTab === "outstanding_tracker" && <OutstandingTrackerTab dateFrom={globalFrom} dateTo={globalTo} />}
+        {activeTab === "weekly_tracker" && <WeeklyTrackerTab />}
 
         {/* Fallback: user landed on a tab they can't access */}
         {activeTab !== "overview" && !isSuperAdmin && !permsLoading && permissions &&
