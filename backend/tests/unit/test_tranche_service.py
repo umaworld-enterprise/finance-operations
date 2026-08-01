@@ -58,12 +58,14 @@ async def _with_tt(db_session, *tranches):
 
 async def _payable(db_session, *tranches):
     """pay_tranche requires the TT copy AND payment details (Aug 2026,
-    item 3.1) — satisfy both so tests can exercise the payment paths beyond
-    that gate. The reference number stays empty: it is optional."""
+    item 3.1: payment date, bank, accounts remarks) — satisfy all so tests
+    can exercise the payment paths beyond that gate. The reference number
+    stays empty: it is optional."""
     for t in tranches:
         t.tt_copy_url = f"https://drive.test/tt-{t.id}.pdf"
         t.payment_date = date(2026, 8, 1)
         t.bank = "Test Bank"
+        t.accounts_remarks = "processed via test"
     await db_session.flush()
 
 
@@ -184,6 +186,57 @@ async def test_paying_final_tranche_completes_and_locks_request(db_session):
     assert any(log.new_value == RequestStatus.PAYMENT_PROCESSED.value for log in logs)
 
 
+async def test_final_tranche_pay_syncs_request_payment_details(db_session):
+    """The request-level Payment Details form is gone (Aug 2026 follow-up) —
+    analytics and reports read payment_details.payment_date/payment_status,
+    so paying the FINAL tranche derives them: latest tranche payment date +
+    'processed'."""
+    from app.repositories.payment_repo import PaymentRepository
+
+    _, accounts, request, (t1, t2) = await _setup(
+        db_session, tranche_amounts=("600.00", "400.00")
+    )
+    await _payable(db_session, t1, t2)
+    t2.payment_date = date(2026, 8, 5)  # later than t1's 2026-08-01
+    await db_session.flush()
+
+    svc = TrancheService(db_session)
+    repo = PaymentRepository(db_session)
+    await svc.pay_tranche(request.id, t1.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    assert await repo.get_by_request_id(request.id) is None  # partial: no sync yet
+    await svc.pay_tranche(request.id, t2.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+
+    payment = await repo.get_by_request_id(request.id)
+    assert payment is not None
+    assert payment.payment_date == date(2026, 8, 5)
+    assert payment.payment_status == "processed"
+
+
+async def test_payment_details_sync_updates_existing_partial_row(db_session):
+    """A partial payment_details row (e.g. a pre-recorded ship date) is
+    updated in place — never replaced — when the final tranche is paid."""
+    from app.repositories.payment_repo import PaymentRepository
+
+    _, accounts, request, (tranche,) = await _setup(db_session)
+    await _payable(db_session, tranche)
+    db_session.add(
+        PaymentDetails(
+            id=uuid.uuid4(),
+            deposit_request_id=request.id,
+            ship_date=date(2026, 8, 20),
+        )
+    )
+    await db_session.flush()
+
+    svc = TrancheService(db_session)
+    await svc.pay_tranche(request.id, tranche.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+
+    payment = await PaymentRepository(db_session).get_by_request_id(request.id)
+    assert payment.ship_date == date(2026, 8, 20)  # preserved
+    assert payment.payment_date == date(2026, 8, 1)
+    assert payment.payment_status == "processed"
+
+
 async def test_double_payment_rejected(db_session):
     _, accounts, request, (t1, t2) = await _setup(
         db_session, tranche_amounts=("600.00", "400.00")
@@ -230,6 +283,20 @@ async def test_pay_tranche_without_payment_details_rejected(db_session):
     await _with_tt(db_session, tranche)
     svc = TrancheService(db_session)
     with pytest.raises(ConflictError, match="payment date and bank"):
+        await svc.pay_tranche(request.id, tranche.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    assert tranche.status == TrancheStatus.UNPAID
+
+
+async def test_pay_tranche_requires_accounts_remarks(db_session):
+    """Aug 2026 follow-up: accounts remarks are mandatory per tranche — TT,
+    date and bank alone are not enough."""
+    _, accounts, request, (tranche,) = await _setup(db_session)
+    tranche.tt_copy_url = "https://drive.test/tt.pdf"
+    tranche.payment_date = date(2026, 8, 1)
+    tranche.bank = "Test Bank"
+    await db_session.flush()
+    svc = TrancheService(db_session)
+    with pytest.raises(ConflictError, match="accounts remarks"):
         await svc.pay_tranche(request.id, tranche.id, accounts.id, UserRole.ACCOUNTS_TEAM)
     assert tranche.status == TrancheStatus.UNPAID
 

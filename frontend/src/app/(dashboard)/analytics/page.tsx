@@ -1304,14 +1304,42 @@ export default function AnalyticsPage() {
       <TopNav title="Analytics" />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-4">
 
-        <div className="flex justify-end">
-          <Button onClick={handleRecalculate} disabled={recalculating} variant="outline" size="sm">
+        {/* Global date filter + Recalculate on their own row — the picker
+            used to sit inside the tab strip and covered the last tabs
+            (Aug 2026 client bug report). */}
+        <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">Period:</span>
+            <input
+              type="date"
+              value={draftFrom}
+              onChange={(e) => setDraftFrom(e.target.value)}
+              className="h-8 rounded border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <span className="text-xs text-muted-foreground">to</span>
+            <input
+              type="date"
+              value={draftTo}
+              min={draftFrom || undefined}
+              onChange={(e) => setDraftTo(e.target.value)}
+              className="h-8 rounded border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <Button size="sm" onClick={applyGlobalDates} className="h-8 text-xs px-2.5">
+              Apply
+            </Button>
+            {(globalFrom || globalTo) && (
+              <Button size="sm" variant="ghost" onClick={clearGlobalDates} className="h-8 w-8 p-0 text-muted-foreground">
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+          <Button onClick={handleRecalculate} disabled={recalculating} variant="outline" size="sm" className="h-8">
             <RefreshCw className={cn("h-4 w-4 mr-2", recalculating && "animate-spin")} />
             Recalculate
           </Button>
         </div>
 
-        {/* Tab strip + global date filter */}
+        {/* Tab strip — full width, never overlapped */}
         {permsLoading ? (
           <div className="flex items-end gap-0.5 border-b border-border overflow-x-auto pb-0">
             {ALL_TABS.map((tab) => (
@@ -1325,48 +1353,20 @@ export default function AnalyticsPage() {
           </div>
         ) : (
           <div className="flex items-end gap-0.5 border-b border-border overflow-x-auto">
-            <div className="flex gap-0.5 flex-1 min-w-0">
-              {visibleTabs.map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                  className={cn(
-                    "px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors border-b-2",
-                    activeTab === tab.key
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            {/* Global date filter */}
-            <div className="flex items-center gap-1.5 shrink-0 pb-1 pr-1 pl-2">
-              <span className="text-xs text-muted-foreground hidden sm:block whitespace-nowrap">Period:</span>
-              <input
-                type="date"
-                value={draftFrom}
-                onChange={(e) => setDraftFrom(e.target.value)}
-                className="h-7 rounded border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-              <span className="text-xs text-muted-foreground">–</span>
-              <input
-                type="date"
-                value={draftTo}
-                min={draftFrom || undefined}
-                onChange={(e) => setDraftTo(e.target.value)}
-                className="h-7 rounded border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-              <Button size="sm" onClick={applyGlobalDates} className="h-7 text-xs px-2.5">
-                Apply
-              </Button>
-              {(globalFrom || globalTo) && (
-                <Button size="sm" variant="ghost" onClick={clearGlobalDates} className="h-7 w-7 p-0 text-muted-foreground">
-                  <X className="h-3 w-3" />
-                </Button>
-              )}
-            </div>
+            {visibleTabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={cn(
+                  "px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors border-b-2",
+                  activeTab === tab.key
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         )}
 

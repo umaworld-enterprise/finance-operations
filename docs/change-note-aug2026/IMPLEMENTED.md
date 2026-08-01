@@ -301,15 +301,75 @@ ordering; identifiers present + rejected requests excluded.
 
 ---
 
+## Follow-up fixes (client screenshots, 1 Aug 2026) · **migration 0023**
+
+1. **Supplier default history on request detail — app-wide.** New
+   `GET /masters/suppliers/{id}/default-history` (all flags, active +
+   resolved, newest first; `DefaultedSupplierRepository.list_for_supplier`).
+   Shared `components/forms/SupplierDefaultHistory.tsx` renders below the
+   Analytics Snapshot on the HoM, Accounts AND Merchandiser detail pages:
+   amber-bordered card with an "Active flag" banner + full flag table
+   (flagged date, reason, outstanding, Active/Resolved). Renders nothing for
+   clean suppliers.
+2. **Per-tranche Accounts Remarks — required (migration 0023:**
+   `payment_tranches.accounts_remarks` text, nullable). Added to the tranche
+   payment-details form (required), the pay readiness gate (TT + date + bank
+   + remarks), the "Payment details recorded" checklist tick, and the
+   accounts-touched guard. **File-input bug fixed:** the native input (whole
+   row clickable, its own "Choose file" text) is now hidden — a dedicated
+   "Choose File" button opens the picker, with the selected filename shown as
+   text. Fixed in both the unpaid-tranche block and the legacy remediation
+   block.
+3. **Analytics screen:** the Period date-range picker moved out of the tab
+   strip onto its own row next to Recalculate — tabs can no longer be
+   covered. Week-range labels (Outstanding + Weekly Tracker) now read
+   `DD/MM/YYYY to DD/MM/YYYY` (server-side format change; tests updated).
+   The picker's separator also reads "to".
+4. **Invoice numbers editable by the merchandiser:** new "Invoice Numbers"
+   card on `merchandiser/[id]` (Sunshine + Supplier Proforma), shown while
+   the request is pending and untouched by Accounts (same `modifiable` gate
+   as tranches). Saves through the existing PATCH — duplicate validation and
+   per-field audit apply automatically. The super-admin editor on the
+   accounts page is unchanged.
+
+Tests: `test_pay_tranche_requires_accounts_remarks` added; `_payable` helper
+and week-label assertions updated. 219 backend tests green.
+
+5. **Request-level Payment Details form removed — Ship Date only.** With
+   details captured per tranche (items 2 above + Phase 4), the request-page
+   panel keeps only the Cost of Fund strip, the Ship Date entry, and the
+   legacy request-level TT copy link (view-only). Card retitled "Ship Date &
+   Cost of Fund"; `PaymentForm.tsx` reduced accordingly.
+   **Consequence analysis + mitigation:** `analytics/engine.py`
+   (payment_to_ship_days, payment_to_request_days, one CoF input) and
+   `report_service.py` (exports + payment-date range filter) read
+   `payment_details.payment_date` / `payment_status` — with no UI writing
+   them they would go null forever. Mitigated:
+   `tranche_service._sync_request_payment_details` now derives them when the
+   FINAL tranche is paid — payment_date = latest tranche payment date (the
+   day the request became fully paid), payment_status = 'processed' — and
+   updates any existing partial row (pre-recorded ship date preserved).
+   Bank / reference number are NOT synced (they live per-tranche);
+   report exports show "—" for those two columns on new requests — adding
+   per-tranche columns to reports is a flagged follow-up. Removed dead
+   frontend plumbing: `useSavePayment`, `useProcessPayment`,
+   `requestService.savePayment/processPayment`, request-level
+   `notificationService.uploadTtCopy`. The backend POST /payment,
+   /payment/process and /payment/tt-copy endpoints remain API-only legacy.
+   Tests: final-tranche sync (latest date wins, partial row updated in
+   place, no sync while tranches remain unpaid). 221 backend tests green.
+
+---
+
 # Batch complete — 1 Aug 2026
 
-All seven phases delivered (Ship Date removal deliberately deferred by the
-client). Final state: 218 backend unit tests green, `npx tsc --noEmit`
-clean, migration head **0022**. Everything is uncommitted in the working
-tree alongside the July change-note work.
+All seven phases plus the screenshot follow-ups delivered (Ship Date removal
+deliberately deferred by the client). Final state: 219 backend unit tests
+green, `npx tsc --noEmit` clean, migration head **0023**. Everything is
+uncommitted in the working tree alongside the July change-note work.
 
 Deploy checklist:
-1. `alembic upgrade head` (applies 0020 → 0022; the inspected DB was at 0019).
+1. `alembic upgrade head` (applies 0020 → 0023; the inspected DB was at 0019).
 2. Post-deploy: unpaid tranches with a July-era TT copy need their per-tranche
    payment details backfilled by Accounts before they can be marked paid
    (deliberate — no auto-migration of attestation data).

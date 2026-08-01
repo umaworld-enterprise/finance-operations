@@ -42,16 +42,6 @@ export interface CreateRequestPayload {
 
 export type UpdateRequestPayload = Partial<CreateRequestPayload>;
 
-export interface PaymentPayload {
-  payment_date?: string;
-  bank?: string;
-  payment_reference_number?: string;
-  payment_status?: string;
-  ship_date?: string;
-  actual_etd?: string;
-  accounts_remarks?: string;
-}
-
 const requestService = {
   list: async (params?: Record<string, string>): Promise<DepositRequest[]> => {
     // Fetch up to 1000 records for legacy callers (analytics, drill pages) that need all data.
@@ -129,16 +119,9 @@ const requestService = {
     return data;
   },
 
-  savePayment: async (id: string, payload: PaymentPayload): Promise<PaymentDetails> => {
-    // Strip empty strings so date fields aren't sent as "" (FastAPI rejects "" for Optional[date]).
-    const clean = Object.fromEntries(Object.entries(payload).filter(([, v]) => v !== ""));
-    const { data } = await api.post<PaymentDetails>(`/requests/${id}/payment`, clean);
-    return data;
-  },
-
-  processPayment: async (id: string): Promise<void> => {
-    await api.post(`/requests/${id}/payment/process`);
-  },
+  // savePayment / processPayment were removed with the request-level Payment
+  // Details form (Aug 2026 follow-up) — details are captured per tranche; the
+  // POST /payment and /payment/process endpoints remain API-only legacy.
 
   // Works on locked (processed) records — recording the final ship date is the
   // designed post-lock action that stops Cost of Fund accrual.
@@ -223,7 +206,12 @@ const requestService = {
   updateTranchePaymentDetails: async (
     id: string,
     trancheId: string,
-    payload: { payment_date?: string; bank?: string; payment_reference_number?: string },
+    payload: {
+      payment_date?: string;
+      bank?: string;
+      payment_reference_number?: string;
+      accounts_remarks?: string;
+    },
   ): Promise<PaymentTranche> => {
     const { data } = await api.patch<PaymentTranche>(
       `/requests/${id}/tranches/${trancheId}/payment-details`,

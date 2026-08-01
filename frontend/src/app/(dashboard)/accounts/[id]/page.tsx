@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PaymentForm } from "@/components/forms/PaymentForm";
 import { TrancheList } from "@/components/tranches/TrancheList";
+import { SupplierDefaultHistory } from "@/components/forms/SupplierDefaultHistory";
 import { RequestAuditTrail } from "@/components/tranches/RequestAuditTrail";
 import { RequestAdjustments } from "@/components/tranches/RequestAdjustments";
 import { useRequest, usePayment, useRequestAction, useFieldVisibility, useUpdateRequest } from "@/hooks/useRequests";
@@ -271,6 +272,9 @@ export default function AccountsPaymentPage() {
           </Card>
         )}
 
+        {/* Supplier default track record — context before paying */}
+        <SupplierDefaultHistory supplierId={req.supplier.id} supplierName={req.supplier.name} />
+
         {/* Advance Payment Tranches — Accounts pays tranche-by-tranche and
             uploads the TT copy against the specific tranche it paid. */}
         <Card>
@@ -299,11 +303,13 @@ export default function AccountsPaymentPage() {
 
         <RequestAdjustments requestId={id} currency={req.currency} linkBase="/accounts" />
 
+        {/* Ship Date & Cost of Fund — the request-level Payment Details form
+            was removed (Aug 2026 follow-up): payment date / bank / reference /
+            remarks are captured per tranche above, and the backend derives the
+            request-level payment date when the final tranche is paid. */}
         <Card>
           <CardContent className="p-5 md:p-6">
-            <h2 className="font-semibold text-foreground mb-4">Payment Details</h2>
-            {/* Cost of Fund surfaced at the point of processing (Aug 2026,
-                item 3.4) — same fv gate as the Analytics Snapshot card. */}
+            <h2 className="font-semibold text-foreground mb-4">Ship Date &amp; Cost of Fund</h2>
             {fv.cost_of_fund !== false && snap && (
               <div className="mb-4 rounded-lg border border-border bg-muted/40 px-4 py-3 flex flex-wrap items-baseline gap-x-6 gap-y-1">
                 <span className="text-sm">
@@ -322,7 +328,7 @@ export default function AccountsPaymentPage() {
                 )}
               </div>
             )}
-            <PaymentForm requestId={id} isLocked={req.is_locked} existing={payment} readOnly={isFinance} trancheMode />
+            <PaymentForm requestId={id} existing={payment} />
           </CardContent>
         </Card>
 

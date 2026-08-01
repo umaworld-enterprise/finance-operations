@@ -108,6 +108,16 @@ async def get_supplier_default_status(supplier_id: UUID, db: DB, _: User) -> Sup
     return SupplierDefaultStatusResponse(supplier_id=supplier_id, is_defaulted=False)
 
 
+@router.get("/{supplier_id}/default-history", response_model=list[DefaultedSupplierResponse])
+async def get_supplier_default_history(supplier_id: UUID, db: DB, _: User) -> list[DefaultedSupplierResponse]:
+    """Full default history for one supplier — active and resolved flags,
+    newest first. Shown on request detail pages so approvers can weigh the
+    supplier's track record before deciding (Aug 2026 follow-up)."""
+    repo = DefaultedSupplierRepository(db)
+    flags = await repo.list_for_supplier(supplier_id)
+    return [DefaultedSupplierResponse.from_orm_obj(f) for f in flags]
+
+
 # ── Defaulted Suppliers ───────────────────────────────────────────────────────
 
 @router.get("/defaulted", response_model=list[DefaultedSupplierResponse])

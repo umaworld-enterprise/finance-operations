@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useRequest, useHomApprove, useHomReject, useFieldVisibility } from "@/hooks/useRequests";
 import { DecisionDialog } from "@/components/hom/DecisionDialog";
+import { SupplierDefaultHistory } from "@/components/forms/SupplierDefaultHistory";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { ArrowLeft, Lock, FileQuestion, Check, X } from "lucide-react";
 import Link from "next/link";
@@ -165,6 +166,9 @@ export default function HomRequestDetail() {
             </CardContent>
           </Card>
         )}
+
+        {/* Supplier default track record — decisive context for approval */}
+        <SupplierDefaultHistory supplierId={req.supplier.id} supplierName={req.supplier.name} />
 
         {/* Status history */}
         {fv.status_history !== false && req.status_history && req.status_history.length > 0 && (

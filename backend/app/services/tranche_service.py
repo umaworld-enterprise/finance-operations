@@ -261,6 +261,8 @@ class TrancheService:
             missing.append("payment date")
         if not tranche.bank:
             missing.append("bank")
+        if not tranche.accounts_remarks:
+            missing.append("accounts remarks")
         if missing:
             raise ConflictError(
                 f"{tranche.label} cannot be marked paid until its "
@@ -315,8 +317,41 @@ class TrancheService:
                 new_status=RequestStatus.PAYMENT_PROCESSED.value,
                 ip_address=ip_address, user_agent=user_agent,
             )
+            await self._sync_request_payment_details(request_id, user_id)
 
         return tranche
+
+    async def _sync_request_payment_details(self, request_id: UUID, user_id: UUID) -> None:
+        """Derive the request-level payment_details from the tranches when the
+        final tranche is paid (Aug 2026 follow-up: the request-level Payment
+        Details form was removed — details are captured per tranche now).
+
+        Analytics (payment_to_ship_days, payment_to_request_days, CoF inputs)
+        and report exports read payment_details.payment_date / payment_status,
+        so these must keep being written: payment_date = the latest tranche
+        payment date (the day the request became fully paid), payment_status =
+        'processed'. Bank and reference number remain per-tranche. An existing
+        partial row (ship_date / legacy TT copy) is updated, never replaced.
+        """
+        from app.models.enums import PaymentStatus
+        from app.repositories.payment_repo import PaymentRepository
+
+        tranches = await self._repo.list_for_request(request_id)
+        dates = [t.payment_date for t in tranches if t.payment_date]
+        payment_date = (
+            max(dates) if dates else datetime.now(timezone.utc).date()
+        )
+        fields = {
+            "payment_date": payment_date,
+            "payment_status": PaymentStatus.PROCESSED.value,
+            "updated_by": user_id,
+        }
+        repo = PaymentRepository(self._session)
+        existing = await repo.get_by_request_id(request_id)
+        if existing:
+            await repo.update(existing, **fields)
+        else:
+            await repo.create(deposit_request_id=request_id, **fields)
 
     async def attach_tt_copy(
         self,
@@ -423,7 +458,10 @@ class TrancheService:
             return "a tranche has already been paid"
         if any(t.tt_copy_url for t in tranches):
             return "a TT copy has already been uploaded"
-        if any(t.payment_date or t.bank or t.payment_reference_number for t in tranches):
+        if any(
+            t.payment_date or t.bank or t.payment_reference_number or t.accounts_remarks
+            for t in tranches
+        ):
             return "payment details have been recorded against a tranche"
         payment_row = await self._session.scalar(
             select(PaymentDetails.id).where(
