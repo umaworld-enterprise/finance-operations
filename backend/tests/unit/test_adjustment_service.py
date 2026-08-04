@@ -119,7 +119,7 @@ async def test_destination_must_be_unpaid(db_session):
         db_session, req_c, amount=Decimal("100.00"), status=TrancheStatus.PAID
     )
     svc = AdjustmentService(db_session)
-    with pytest.raises(ValidationError, match="already paid"):
+    with pytest.raises(ValidationError, match="not payable"):
         await svc.create(_payload(paid, paid_dest, "50.00"), accounts.id, UserRole.ACCOUNTS_TEAM)
 
 
@@ -366,7 +366,7 @@ async def test_approve_rejects_destination_paid_meanwhile(db_session):
     )
     unpaid.status = TrancheStatus.PAID
     await db_session.flush()
-    with pytest.raises(ValidationError, match="already paid"):
+    with pytest.raises(ValidationError, match="not payable"):
         await svc.approve(adj.id, accounts.id, UserRole.ACCOUNTS_TEAM, "ok")
 
 
@@ -405,6 +405,34 @@ async def test_pending_queue_lists_oldest_first(db_session):
     pending = await svc.list_pending()
     assert [p.id for p in pending] == [a1.id, a2.id]
     assert completed.id not in {p.id for p in pending}
+
+
+async def test_rejected_tranche_is_never_an_adjustment_destination(db_session):
+    """Aug 2026 rejection workflow: a rejected tranche is a dead record —
+    excluded from the destination options and refused at create/approve."""
+    accounts, supplier, _, _, _, paid, unpaid = await _setup(db_session)
+    unpaid.status = TrancheStatus.REJECTED
+    await db_session.flush()
+    svc = AdjustmentService(db_session)
+
+    _, destinations = await svc.supplier_tranche_options(supplier.id)
+    assert unpaid.id not in {t.id for t in destinations}
+
+    with pytest.raises(ValidationError, match="not payable"):
+        await svc.create(_payload(paid, unpaid, "50.00"), accounts.id, UserRole.ACCOUNTS_TEAM)
+
+
+async def test_approve_rejects_destination_rejected_meanwhile(db_session):
+    accounts, _, _, _, _, paid, unpaid = await _setup(db_session)
+    merch = await _merch(db_session)
+    svc = AdjustmentService(db_session)
+    adj = await svc.create(
+        _payload(paid, unpaid, "100.00", reason="r"), merch.id, UserRole.MERCHANDISER
+    )
+    unpaid.status = TrancheStatus.REJECTED
+    await db_session.flush()
+    with pytest.raises(ValidationError, match="not payable"):
+        await svc.approve(adj.id, accounts.id, UserRole.ACCOUNTS_TEAM, "ok")
 
 
 async def test_merchandiser_history_scoped_to_own(db_session):

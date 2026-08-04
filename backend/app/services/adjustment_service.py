@@ -221,8 +221,11 @@ class AdjustmentService:
 
         if source.status != TrancheStatus.PAID:
             raise ValidationError("Only an already-paid tranche can be the adjustment source.")
-        if destination.status == TrancheStatus.PAID:
-            raise ValidationError("The destination tranche is already paid.")
+        if destination.status != TrancheStatus.UNPAID:
+            raise ValidationError(
+                "The destination tranche is not payable "
+                f"(status: {destination.status.value})."
+            )
         if source.deposit_request_id == destination.deposit_request_id:
             raise ValidationError(
                 "The destination must be a tranche on another invoice, not the same request."
@@ -381,7 +384,8 @@ class AdjustmentService:
                 resp.available_paid_balance = Decimal(str(t.amount)) - out_total
                 if resp.available_paid_balance > 0:
                     paid_sources.append(resp)
-            else:
+            elif t.status == TrancheStatus.UNPAID:
+                # REJECTED tranches are dead records — never a destination.
                 resp.adjusted_in_total = await self._repo.adjusted_in_total(t.id)
                 unpaid_destinations.append(resp)
         return paid_sources, unpaid_destinations

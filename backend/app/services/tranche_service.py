@@ -101,6 +101,11 @@ class TrancheService:
                 f"{tranche.label} is already paid and can no longer be edited. "
                 "Use the Adjust Invoices module to reallocate paid value."
             )
+        if tranche.status == TrancheStatus.REJECTED:
+            raise ConflictError(
+                f"{tranche.label} was rejected and is kept for record-keeping only — "
+                "add a replacement tranche instead."
+            )
 
         changes = data.model_dump(exclude_unset=True, exclude_none=True)
         if not changes:
@@ -151,7 +156,7 @@ class TrancheService:
         assert_record_not_locked(request.is_locked, role)
         if request.current_status in _TERMINAL_STATUSES:
             raise ConflictError("Tranches cannot be added on a cancelled or rejected request.")
-        await self._assert_merchandiser_may_modify(request, role)
+        await self._assert_merchandiser_may_modify(request, role, adding=True)
 
         new_total = await self._repo.sum_amounts_for_request(request_id) + Decimal(str(data.amount))
         if new_total > Decimal(str(request.total_supplier_invoice_amount)):
@@ -204,6 +209,10 @@ class TrancheService:
         tranche = await self._get_tranche_locked(request_id, tranche_id)
         if tranche.status == TrancheStatus.PAID:
             raise ConflictError(f"{tranche.label} is paid and cannot be deleted.")
+        if tranche.status == TrancheStatus.REJECTED:
+            raise ConflictError(
+                f"{tranche.label} was rejected and is kept for record-keeping — it cannot be deleted."
+            )
         if len(await self._repo.list_for_request(request_id)) <= 1:
             raise ValidationError("A request must keep at least one tranche.")
         # FK safety: invoice adjustments reference tranches on either side.
@@ -251,6 +260,8 @@ class TrancheService:
 
         if tranche.status == TrancheStatus.PAID:
             raise ConflictError(f"{tranche.label} is already paid.")
+        if tranche.status == TrancheStatus.REJECTED:
+            raise ConflictError(f"{tranche.label} was rejected and cannot be paid.")
         # Readiness gate (Aug 2026, item 3.1): a tranche becomes PAID only via
         # this explicit action, and only once its TT copy AND payment details
         # (payment date + bank; reference number optional) are recorded.
@@ -353,6 +364,63 @@ class TrancheService:
         else:
             await repo.create(deposit_request_id=request_id, **fields)
 
+    async def reject_tranche(
+        self,
+        request_id: UUID,
+        tranche_id: UUID,
+        reason: str,
+        user_id: UUID,
+        role: UserRole,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> PaymentTranche:
+        """Accounts/HoM reject an UNPAID tranche with a mandatory reason
+        (Aug 2026 — breaks the touched-lock deadlock).
+
+        The tranche stays visible for record-keeping but its amount stops
+        counting toward the invoice ceiling and the derived deposit_amount,
+        and the merchandiser regains the ability to ADD replacement tranches
+        even though Accounts have touched the request."""
+        if role not in _ACCOUNTS_ROLES | {UserRole.HEAD_OF_MERCHANDISER}:
+            raise AuthorizationError(
+                "Only Accounts Team, Head of Merchandiser or Super Admin can reject a tranche."
+            )
+        if not reason or not reason.strip():
+            raise ValidationError("A reason is mandatory when rejecting a tranche.")
+
+        request = await self._get_request_or_404(request_id)
+        if request.current_status in _TERMINAL_STATUSES:
+            raise ConflictError("Tranches cannot be rejected on a cancelled or rejected request.")
+        assert_record_not_locked(request.is_locked, role)
+
+        tranche = await self._get_tranche_locked(request_id, tranche_id)
+        if tranche.status == TrancheStatus.PAID:
+            raise ConflictError(
+                f"{tranche.label} is already paid and cannot be rejected. "
+                "Use the Adjust Invoices module to reallocate paid value."
+            )
+        if tranche.status == TrancheStatus.REJECTED:
+            raise ConflictError(f"{tranche.label} is already rejected.")
+
+        tranche = await self._repo.update(
+            tranche,
+            status=TrancheStatus.REJECTED,
+            rejection_reason=reason.strip(),
+            rejected_at=datetime.now(timezone.utc),
+            rejected_by=user_id,
+        )
+        await self._audit.record_update(
+            "payment_tranches", tranche.id, user_id,
+            field_name="status",
+            old_value=TrancheStatus.UNPAID.value,
+            new_value=f"{TrancheStatus.REJECTED.value} — {reason.strip()}",
+            ip_address=ip_address, user_agent=user_agent,
+        )
+        # The rejected amount stops counting — deposit_amount re-derives from
+        # the live tranches only.
+        await self._sync_request_totals(request, user_id, ip_address, user_agent)
+        return tranche
+
     async def attach_tt_copy(
         self,
         request_id: UUID,
@@ -381,6 +449,8 @@ class TrancheService:
         await self._get_request_or_404(request_id)
         tranche = await self._get_tranche_locked(request_id, tranche_id)
 
+        if tranche.status == TrancheStatus.REJECTED:
+            raise ConflictError(f"{tranche.label} was rejected — TT copies cannot be attached.")
         if tranche.tt_copy_url and role != UserRole.SUPER_ADMIN:
             raise ConflictError(
                 f"A TT copy is already attached to {tranche.label}. "
@@ -428,6 +498,10 @@ class TrancheService:
             raise ConflictError(
                 f"{tranche.label} is already paid — its payment details are locked."
             )
+        if tranche.status == TrancheStatus.REJECTED:
+            raise ConflictError(
+                f"{tranche.label} was rejected — payment details cannot be recorded."
+            )
 
         changes = data.model_dump(exclude_unset=True)
         if not changes:
@@ -452,15 +526,19 @@ class TrancheService:
         (incl. partial rows from ship-date / TT paths), or a COMPLETED invoice
         adjustment touching the request's tranches. Pending merchandiser-raised
         adjustments do not count — Accounts hasn't acted on those.
+        REJECTED tranches are dead records: any TT copy / payment details on
+        them no longer count as a touch (otherwise the deadlock the rejection
+        exists to break would immediately re-form).
         """
         tranches = await self._repo.list_for_request(request_id)
-        if any(t.status == TrancheStatus.PAID for t in tranches):
+        live = [t for t in tranches if t.status != TrancheStatus.REJECTED]
+        if any(t.status == TrancheStatus.PAID for t in live):
             return "a tranche has already been paid"
-        if any(t.tt_copy_url for t in tranches):
+        if any(t.tt_copy_url for t in live):
             return "a TT copy has already been uploaded"
         if any(
             t.payment_date or t.bank or t.payment_reference_number or t.accounts_remarks
-            for t in tranches
+            for t in live
         ):
             return "payment details have been recorded against a tranche"
         payment_row = await self._session.scalar(
@@ -477,12 +555,23 @@ class TrancheService:
             return "a completed invoice adjustment references this request"
         return None
 
+    async def has_rejected_tranche(self, request_id: UUID) -> bool:
+        return any(
+            t.status == TrancheStatus.REJECTED
+            for t in await self._repo.list_for_request(request_id)
+        )
+
     async def _assert_merchandiser_may_modify(
-        self, request: DepositRequest, role: UserRole
+        self, request: DepositRequest, role: UserRole, *, adding: bool = False
     ) -> None:
         """Merchandisers may change tranches only while the request is still
         pending AND untouched by Accounts. Super Admin keeps the broader
-        pre-existing rules (lock / terminal-status / paid-tranche checks)."""
+        pre-existing rules (lock / terminal-status / paid-tranche checks).
+
+        Exception (Aug 2026 rejection workflow): while a REJECTED tranche
+        exists, ADDING replacement tranches is allowed even after Accounts
+        have touched the request — that is the point of the rejection.
+        Edits/deletes of other tranches stay frozen."""
         if role != UserRole.MERCHANDISER:
             return
         if request.current_status not in _MERCHANDISER_EDITABLE_STATUSES:
@@ -492,6 +581,8 @@ class TrancheService:
             )
         reason = await self.accounts_touched_reason(request.id)
         if reason:
+            if adding and await self.has_rejected_tranche(request.id):
+                return
             raise ConflictError(f"Tranches can no longer be changed — {reason}.")
 
     async def _sync_request_totals(

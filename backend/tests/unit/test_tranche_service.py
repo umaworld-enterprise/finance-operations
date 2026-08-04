@@ -311,6 +311,133 @@ async def test_pay_tranche_does_not_require_reference_number(db_session):
     assert paid.payment_reference_number is None
 
 
+# ── Reject Tranche workflow (Aug 2026 — breaks the touched-lock deadlock) ─────
+
+
+async def test_reject_tranche_sets_record_and_drops_amount_from_totals(db_session):
+    merch, accounts, request, (t1, t2) = await _setup(
+        db_session, tranche_amounts=("600.00", "400.00")
+    )
+    svc = TrancheService(db_session)
+    rejected = await svc.reject_tranche(
+        request.id, t2.id, "Wrong amount entered", accounts.id, UserRole.ACCOUNTS_TEAM
+    )
+    assert rejected.status == TrancheStatus.REJECTED
+    assert rejected.rejection_reason == "Wrong amount entered"
+    assert rejected.rejected_by == accounts.id
+    assert rejected.rejected_at is not None
+    # The rejected amount stops counting toward the derived deposit_amount.
+    assert Decimal(str(request.deposit_amount)) == Decimal("600.00")
+    logs = await _audit_rows(db_session, "payment_tranches", t2.id)
+    assert any("Wrong amount entered" in (log.new_value or "") for log in logs)
+
+
+async def test_reject_requires_reason_and_valid_state(db_session):
+    merch, accounts, request, (t1, t2) = await _setup(
+        db_session, tranche_amounts=("600.00", "400.00")
+    )
+    svc = TrancheService(db_session)
+    with pytest.raises(ValidationError, match="reason is mandatory"):
+        await svc.reject_tranche(request.id, t2.id, "   ", accounts.id, UserRole.ACCOUNTS_TEAM)
+    with pytest.raises(AuthorizationError):
+        await svc.reject_tranche(request.id, t2.id, "r", merch.id, UserRole.MERCHANDISER)
+    # Paid tranches are immutable — reallocation goes through Adjust Invoices.
+    await _payable(db_session, t1)
+    await svc.pay_tranche(request.id, t1.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    with pytest.raises(ConflictError, match="already paid"):
+        await svc.reject_tranche(request.id, t1.id, "r", accounts.id, UserRole.ACCOUNTS_TEAM)
+    # Double rejection is a conflict.
+    await svc.reject_tranche(request.id, t2.id, "r", accounts.id, UserRole.ACCOUNTS_TEAM)
+    with pytest.raises(ConflictError, match="already rejected"):
+        await svc.reject_tranche(request.id, t2.id, "r", accounts.id, UserRole.ACCOUNTS_TEAM)
+
+
+async def test_rejected_tranche_is_fully_inert(db_session):
+    merch, accounts, request, (t1, t2) = await _setup(
+        db_session, tranche_amounts=("600.00", "400.00")
+    )
+    svc = TrancheService(db_session)
+    await svc.reject_tranche(request.id, t2.id, "r", accounts.id, UserRole.ACCOUNTS_TEAM)
+
+    with pytest.raises(ConflictError, match="rejected"):
+        await svc.pay_tranche(request.id, t2.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    with pytest.raises(ConflictError, match="rejected"):
+        await svc.update_payment_details(
+            request.id, t2.id, TranchePaymentDetailsUpdate(bank="HSBC"),
+            accounts.id, UserRole.ACCOUNTS_TEAM,
+        )
+    with pytest.raises(ConflictError, match="rejected"):
+        await svc.attach_tt_copy(
+            request.id, t2.id,
+            tt_copy_url="https://drive.test/x", tt_copy_file_id="f",
+            tt_copy_filename="a.pdf",
+            user_id=accounts.id, role=UserRole.ACCOUNTS_TEAM,
+        )
+    with pytest.raises(ConflictError, match="rejected"):
+        await svc.update_tranche(
+            request.id, t2.id, TrancheUpdate(amount=Decimal("1.00")),
+            merch.id, UserRole.SUPER_ADMIN,
+        )
+    with pytest.raises(ConflictError, match="rejected"):
+        await svc.delete_tranche(request.id, t2.id, merch.id, UserRole.SUPER_ADMIN)
+
+
+async def test_rejection_unlocks_adding_replacement_tranches(db_session):
+    """THE deadlock case: Accounts recorded details (touch) → merchandiser is
+    frozen → Accounts reject the wrong tranche → merchandiser can ADD again,
+    with the ceiling computed from live tranches only."""
+    merch, accounts, request, (t1, t2) = await _setup(
+        db_session, tranche_amounts=("600.00", "9000.00")
+    )
+    svc = TrancheService(db_session)
+    # Accounts touch the request (details on t1) — merchandiser frozen.
+    await svc.update_payment_details(
+        request.id, t1.id,
+        TranchePaymentDetailsUpdate(payment_date=date(2026, 8, 1), bank="HSBC"),
+        accounts.id, UserRole.ACCOUNTS_TEAM,
+    )
+    with pytest.raises(ConflictError, match="no longer be changed"):
+        await svc.add_tranche(
+            request.id,
+            TrancheCreate(amount=Decimal("400.00"), tentative_payment_date=date(2026, 9, 1)),
+            merch.id, UserRole.MERCHANDISER,
+        )
+    # Accounts reject the wrong tranche (9000) — adding unlocks.
+    await svc.reject_tranche(request.id, t2.id, "wrong value", accounts.id, UserRole.ACCOUNTS_TEAM)
+    added = await svc.add_tranche(
+        request.id,
+        TrancheCreate(amount=Decimal("9000.00"), tentative_payment_date=date(2026, 9, 1)),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert added.tranche_number == 3
+    # Ceiling counts live tranches only: 600 + 9000 = 9600 ≤ 10000; another
+    # 9000 would breach it.
+    with pytest.raises(ValidationError, match="cannot exceed"):
+        await svc.add_tranche(
+            request.id,
+            TrancheCreate(amount=Decimal("9000.00"), tentative_payment_date=date(2026, 9, 1)),
+            merch.id, UserRole.MERCHANDISER,
+        )
+    # Edits of the remaining live tranche stay frozen (details recorded).
+    with pytest.raises(ConflictError, match="no longer be changed"):
+        await svc.update_tranche(
+            request.id, t1.id, TrancheUpdate(amount=Decimal("500.00")),
+            merch.id, UserRole.MERCHANDISER,
+        )
+
+
+async def test_paying_last_live_tranche_completes_despite_rejected_sibling(db_session):
+    _, accounts, request, (t1, t2) = await _setup(
+        db_session, tranche_amounts=("600.00", "400.00")
+    )
+    svc = TrancheService(db_session)
+    await svc.reject_tranche(request.id, t2.id, "r", accounts.id, UserRole.ACCOUNTS_TEAM)
+    await _payable(db_session, t1)
+    await svc.pay_tranche(request.id, t1.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    assert request.current_status == RequestStatus.PAYMENT_PROCESSED
+    assert request.is_locked is True
+
+
 # ── TT copy upload behaviour ──────────────────────────────────────────────────
 
 

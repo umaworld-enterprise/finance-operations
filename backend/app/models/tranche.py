@@ -81,6 +81,13 @@ class PaymentTranche(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Required (like payment_date/bank) before the tranche can be marked paid
     # — migration 0023. Nullable: legacy tranches predate the field.
     accounts_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Rejection (Aug 2026, migration 0024): a rejected tranche stays visible
+    # for record-keeping; its amount stops counting toward the request total.
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
     # True for tranches synthesised from pre-tranche records (migration 0018
     # backfill or API compat mode) — these may lack a tentative date.
     is_legacy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
