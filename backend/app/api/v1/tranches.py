@@ -29,12 +29,14 @@ from app.schemas.tranche import (
     AdjustmentResponse,
     TrancheCreate,
     TranchePaymentDetailsUpdate,
+    TrancheRejectRequest,
     TrancheResponse,
     TrancheUpdate,
 )
 from app.services.adjustment_service import AdjustmentService
 from app.services.notification_service import (
     notify_tranche_event,
+    notify_tranche_rejected,
     notify_tranche_removed,
     notify_tranche_updated,
 )
@@ -91,16 +93,24 @@ async def tranches_modifiable(
 ) -> dict:
     """Can the merchandiser still modify/add/delete tranches on this request?
     Blocked once the request leaves pending or Accounts write anything
-    (Aug 2026 batch, item 2.3). Returns the human-readable reason when not."""
+    (Aug 2026 batch, item 2.3). Returns the human-readable reason when not.
+
+    can_add is broader than modifiable: while a REJECTED tranche exists,
+    adding replacement tranches stays allowed even after Accounts touched the
+    request (Aug 2026 rejection workflow)."""
     request = await _request_or_404(db, request_id, current_user)
-    if request.current_status not in _MERCHANDISER_EDITABLE_STATUSES:
+    svc = TrancheService(db)
+    still_pending = request.current_status in _MERCHANDISER_EDITABLE_STATUSES
+    if not still_pending:
         reason: str | None = (
             "the request is no longer pending "
             f"(current status: {request.current_status.value})"
         )
     else:
-        reason = await TrancheService(db).accounts_touched_reason(request_id)
-    return {"modifiable": reason is None, "reason": reason}
+        reason = await svc.accounts_touched_reason(request_id)
+    modifiable = reason is None
+    can_add = modifiable or (still_pending and await svc.has_rejected_tranche(request_id))
+    return {"modifiable": modifiable, "reason": reason, "can_add": can_add}
 
 
 @router.post("", response_model=TrancheResponse, status_code=201)
@@ -222,6 +232,33 @@ async def pay_tranche(
     req = await DepositRequestRepository(db).get_for_validation(request_id)
     background_tasks.add_task(seed_snapshot_for_request, request_id)
     background_tasks.add_task(notify_tranche_event, request_id, tranche_id, "paid")
+    return _tranche_response(tranche, req.total_supplier_invoice_amount)
+
+
+@router.post("/{tranche_id}/reject", response_model=TrancheResponse)
+async def reject_tranche(
+    request_id: UUID,
+    tranche_id: UUID,
+    body: TrancheRejectRequest,
+    current_user: User,
+    request: Request,
+    db: DB,
+    background_tasks: BackgroundTasks,
+) -> TrancheResponse:
+    """Accounts/HoM reject an unpaid tranche with a mandatory reason
+    (Aug 2026). The tranche stays visible as a dead record, its amount stops
+    counting toward the request total, and the merchandiser is notified and
+    can add replacement tranches."""
+    svc = TrancheService(db)
+    tranche = await svc.reject_tranche(
+        request_id, tranche_id, body.reason, current_user.id, current_user.role,
+        ip_address=_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    req = await DepositRequestRepository(db).get_for_validation(request_id)
+    # deposit_amount changed — keep the analytics snapshot in step.
+    background_tasks.add_task(seed_snapshot_for_request, request_id)
+    background_tasks.add_task(notify_tranche_rejected, request_id, tranche_id, body.reason)
     return _tranche_response(tranche, req.total_supplier_invoice_amount)
 
 

@@ -195,10 +195,12 @@ const requestService = {
 
   tranchesModifiable: async (
     id: string,
-  ): Promise<{ modifiable: boolean; reason: string | null }> => {
-    const { data } = await api.get<{ modifiable: boolean; reason: string | null }>(
-      `/requests/${id}/tranches/modifiable`,
-    );
+  ): Promise<{ modifiable: boolean; reason: string | null; can_add: boolean }> => {
+    const { data } = await api.get<{
+      modifiable: boolean;
+      reason: string | null;
+      can_add: boolean;
+    }>(`/requests/${id}/tranches/modifiable`);
     return data;
   },
 
@@ -223,6 +225,14 @@ const requestService = {
   payTranche: async (id: string, trancheId: string): Promise<PaymentTranche> => {
     const { data } = await api.post<PaymentTranche>(
       `/requests/${id}/tranches/${trancheId}/pay`,
+    );
+    return data;
+  },
+
+  rejectTranche: async (id: string, trancheId: string, reason: string): Promise<PaymentTranche> => {
+    const { data } = await api.post<PaymentTranche>(
+      `/requests/${id}/tranches/${trancheId}/reject`,
+      { reason },
     );
     return data;
   },

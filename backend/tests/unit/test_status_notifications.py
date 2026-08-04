@@ -12,21 +12,24 @@ from app.models.deposit_request import DepositRequest
 from app.models.enums import RequestStatus, UserRole
 from app.models.masters import Customer, Supplier, User
 from app.models.notification import Notification
+from app.models.tranche import PaymentTranche
 from app.services.notification_service import (
     TYPE_REQUEST_CREATED,
     TYPE_REQUEST_PENDING_HOM,
     TYPE_STATUS_CHANGED,
+    TYPE_TRANCHE_REJECTED,
     build_status_change_message,
     notify_request_created,
     notify_status_change,
+    notify_tranche_rejected,
 )
-from tests.factories import make_customer, make_request, make_supplier, make_user
+from tests.factories import make_customer, make_request, make_supplier, make_tranche, make_user
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_committed_rows(db_session):
     yield
-    for model in (Notification, DepositRequest, User, Supplier, Customer):
+    for model in (Notification, PaymentTranche, DepositRequest, User, Supplier, Customer):
         await db_session.execute(delete(model))
     await db_session.commit()
 
@@ -144,6 +147,24 @@ async def test_accounts_cancel_notifies_raising_merchandiser(db_session, engine,
     assert rows[0].user_id == merch.id
     assert "cancelled" in rows[0].body
     assert "duplicate order" in rows[0].body
+    assert rows[0].url == f"/merchandiser/{request.id}"
+
+
+@pytest.mark.asyncio
+async def test_tranche_rejected_notifies_raising_merchandiser(db_session, engine, monkeypatch):
+    merch, _, _, _, request = await _seed(db_session)
+    tranche = await make_tranche(db_session, request)
+    await db_session.commit()
+    _patch_factory(engine, monkeypatch)
+
+    await notify_tranche_rejected(request.id, tranche.id, "Wrong amount entered")
+
+    rows = await _rows(db_session, TYPE_TRANCHE_REJECTED)
+    assert len(rows) == 1
+    assert rows[0].user_id == merch.id
+    assert "Wrong amount entered" in rows[0].body
+    assert tranche.label in rows[0].body
+    assert "replacement" in rows[0].body
     assert rows[0].url == f"/merchandiser/{request.id}"
 
 

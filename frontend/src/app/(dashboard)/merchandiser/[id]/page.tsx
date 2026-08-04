@@ -286,6 +286,7 @@ export default function MerchandiserRequestDetail() {
               }
               canModify={modifiable?.modifiable ?? false}
               modifyBlockedReason={modifiable?.reason ?? null}
+              canAdd={modifiable?.can_add ?? false}
             />
           </CardContent>
         </Card>

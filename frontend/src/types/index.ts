@@ -93,7 +93,7 @@ export type FontSize = "default" | "large" | "xlarge";
 
 // ── Advance Payment Tranches ───────────────────────────────────────────────────
 
-export type TrancheStatus = "unpaid" | "paid";
+export type TrancheStatus = "unpaid" | "paid" | "rejected";
 
 export interface PaymentTranche {
   id: string;
@@ -117,6 +117,10 @@ export interface PaymentTranche {
   bank: string | null;
   payment_reference_number: string | null;
   accounts_remarks: string | null;
+  /** Set when Accounts rejected the tranche (Aug 2026) — the tranche stays
+   * visible as a dead record and its amount stops counting. */
+  rejection_reason: string | null;
+  rejected_at: string | null;
   is_legacy: boolean;
   created_at: string;
   updated_at: string;

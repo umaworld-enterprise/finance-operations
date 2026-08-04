@@ -85,6 +85,10 @@ class PaymentStatus(str, enum.Enum):
 class TrancheStatus(str, enum.Enum):
     UNPAID = "unpaid"
     PAID = "paid"
+    # Rejected by Accounts with a mandatory reason (Aug 2026): kept visible
+    # for record-keeping but excluded from totals/ceilings — the merchandiser
+    # adds replacement tranches until the sum matches again.
+    REJECTED = "rejected"
 
 
 class AdjustmentStatus(str, enum.Enum):

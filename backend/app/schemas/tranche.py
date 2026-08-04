@@ -53,6 +53,13 @@ class TranchePaymentDetailsUpdate(BaseModel):
     accounts_remarks: str | None = None
 
 
+class TrancheRejectRequest(BaseModel):
+    """Reject-tranche body — the reason is mandatory and travels to the
+    merchandiser's notification and the rejected card (Aug 2026)."""
+
+    reason: str = Field(min_length=1)
+
+
 class TrancheResponse(OrmBase):
     id: UUID
     deposit_request_id: UUID
@@ -73,6 +80,8 @@ class TrancheResponse(OrmBase):
     bank: str | None = None
     payment_reference_number: str | None = None
     accounts_remarks: str | None = None
+    rejection_reason: str | None = None
+    rejected_at: datetime | None = None
     is_legacy: bool
     created_at: datetime
     updated_at: datetime

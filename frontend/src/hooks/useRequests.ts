@@ -283,6 +283,15 @@ export function usePayTranche(requestId: string) {
   });
 }
 
+export function useRejectTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ trancheId, reason }: { trancheId: string; reason: string }) =>
+      requestService.rejectTranche(requestId, trancheId, reason),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
 export function useUploadTrancheTtCopy(requestId: string) {
   const qc = useQueryClient();
   return useMutation({

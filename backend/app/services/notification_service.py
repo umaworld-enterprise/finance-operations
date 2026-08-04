@@ -53,6 +53,7 @@ TYPE_TT_COPY_ATTACHED = "tt_copy_attached"
 TYPE_TRANCHE_PAID = "tranche_paid"
 TYPE_TRANCHE_TT_ATTACHED = "tranche_tt_attached"
 TYPE_TRANCHE_UPDATED = "tranche_updated"
+TYPE_TRANCHE_REJECTED = "tranche_rejected"
 TYPE_HOM_APPROVED = "hom_approved"
 TYPE_HOM_REJECTED = "hom_rejected"
 TYPE_ADJUSTMENT_REQUESTED = "adjustment_requested"
@@ -692,6 +693,49 @@ async def notify_status_change(
         logger.error(
             "notify_status_change failed",
             request_id=str(request_id), new_status=new_status, error=str(exc),
+        )
+
+
+async def notify_tranche_rejected(request_id: UUID, tranche_id: UUID, reason: str) -> None:
+    """After Accounts/HoM reject a tranche — bell + push to the merchandiser
+    who raised the request, including the mandatory reason and a prompt to add
+    replacement tranches (Aug 2026 rejection workflow).
+
+    Own session; failures logged and swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+    from app.models.tranche import PaymentTranche
+
+    try:
+        async with AsyncSessionFactory() as session:
+            request = await _load_request(session, request_id)
+            tranche = await session.get(PaymentTranche, tranche_id)
+            if request is None or tranche is None:
+                return
+            message = {
+                "title": "Tranche rejected",
+                "body": (
+                    f"{tranche.label} of {request.request_number} was rejected by the "
+                    f"Accounts team. Reason: {reason} — add a replacement tranche so "
+                    "the request total matches again."
+                ),
+                "url": f"/merchandiser/{request_id}",
+                "attachment_url": None,
+            }
+            target = await _find_target_user(session, request)
+            if target is None:
+                logger.info(
+                    "No target user for tranche-rejected notification — skipping",
+                    request_id=str(request_id),
+                )
+                return
+            await _deliver_to_users(
+                session, [target], TYPE_TRANCHE_REJECTED, message, request.id
+            )
+    except Exception as exc:
+        logger.error(
+            "notify_tranche_rejected failed",
+            request_id=str(request_id), tranche_id=str(tranche_id), error=str(exc),
         )
 
 

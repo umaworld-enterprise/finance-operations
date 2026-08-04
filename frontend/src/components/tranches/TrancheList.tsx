@@ -5,10 +5,12 @@ import { toast } from "sonner";
 import { CheckCircle2, Circle, ExternalLink, Lock, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { DecisionDialog } from "@/components/hom/DecisionDialog";
 import {
   useAddTranche,
   useDeleteTranche,
   usePayTranche,
+  useRejectTranche,
   useUpdateTranche,
   useUpdateTranchePaymentDetails,
   useUploadTrancheTtCopy,
@@ -31,6 +33,9 @@ interface Props {
   canModify?: boolean;
   /** merchandiser mode: why changes are blocked (shown when canModify is false). */
   modifyBlockedReason?: string | null;
+  /** merchandiser mode: adding replacement tranches stays allowed while a
+   * rejected tranche exists, even when canModify is false (Aug 2026). */
+  canAdd?: boolean;
 }
 
 // Accounts: per-tranche payment details entry (payment date + bank required
@@ -126,11 +131,21 @@ function ReadinessItem({ done, label }: { done: boolean; label: string }) {
 }
 
 function TrancheStatusPill({ status }: { status: PaymentTranche["status"] }) {
-  return status === "paid" ? (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-      <CheckCircle2 className="h-3 w-3" /> Paid
-    </span>
-  ) : (
+  if (status === "paid") {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+        <CheckCircle2 className="h-3 w-3" /> Paid
+      </span>
+    );
+  }
+  if (status === "rejected") {
+    return (
+      <span className="inline-flex items-center text-xs font-medium text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+        Rejected
+      </span>
+    );
+  }
+  return (
     <span className="inline-flex items-center text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
       Unpaid
     </span>
@@ -144,13 +159,16 @@ export function TrancheList({
   mode,
   canModify = true,
   modifyBlockedReason = null,
+  canAdd,
 }: Props) {
   const updateTranche = useUpdateTranche(requestId);
   const uploadTt = useUploadTrancheTtCopy(requestId);
   const addTranche = useAddTranche(requestId);
   const deleteTranche = useDeleteTranche(requestId);
   const payTranche = usePayTranche(requestId);
+  const rejectTranche = useRejectTranche(requestId);
   const [payConfirmId, setPayConfirmId] = useState<string | null>(null);
+  const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState("");
@@ -161,6 +179,9 @@ export function TrancheList({
   const [addDate, setAddDate] = useState(todayLocalISO());
 
   const merchandiserCanModify = mode === "merchandiser" && canModify;
+  // Adding replacement tranches stays possible after a rejection even when
+  // other changes are frozen (Aug 2026 rejection workflow).
+  const merchandiserCanAdd = mode === "merchandiser" && (canAdd ?? canModify);
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File | null>>({});
 
@@ -222,6 +243,19 @@ export function TrancheList({
     }
   };
 
+  const doReject = async (reason: string) => {
+    if (!rejectTargetId) return;
+    const t = tranches.find((x) => x.id === rejectTargetId);
+    try {
+      await rejectTranche.mutateAsync({ trancheId: rejectTargetId, reason });
+      toast.success(
+        `${t?.label ?? "Tranche"} rejected — the merchandiser has been notified and can add replacement tranches.`,
+      );
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to reject the tranche.");
+    }
+  };
+
   const doPay = async (trancheId: string) => {
     const t = tranches.find((x) => x.id === trancheId);
     try {
@@ -267,17 +301,28 @@ export function TrancheList({
   }
 
   const paidCount = tranches.filter((t) => t.status === "paid").length;
+  const rejectedCount = tranches.filter((t) => t.status === "rejected").length;
+  const liveCount = tranches.length - rejectedCount;
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        {paidCount} of {tranches.length} tranche{tranches.length === 1 ? "" : "s"} paid.
+        {paidCount} of {liveCount} tranche{liveCount === 1 ? "" : "s"} paid
+        {rejectedCount > 0 ? ` · ${rejectedCount} rejected` : ""}.
       </p>
       <ul className="space-y-3">
         {tranches.map((t) => {
           const isEditing = editingId === t.id;
+          const isRejected = t.status === "rejected";
           return (
-            <li key={t.id} className="rounded-lg border border-border p-3 space-y-2">
+            <li
+              key={t.id}
+              className={
+                isRejected
+                  ? "rounded-lg border border-red-200 bg-red-50/40 p-3 space-y-2 opacity-90"
+                  : "rounded-lg border border-border p-3 space-y-2"
+              }
+            >
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-semibold text-foreground">{t.label}</span>
                 <TrancheStatusPill status={t.status} />
@@ -292,6 +337,17 @@ export function TrancheList({
                   </span>
                 )}
               </div>
+
+              {/* Rejected tranches stay visible for record-keeping, reason
+                  prominent, all actions disabled (Aug 2026). */}
+              {isRejected && (
+                <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800">
+                  <span className="font-semibold">Rejected by Accounts</span>
+                  {t.rejected_at ? ` on ${formatDate(t.rejected_at)}` : ""} —{" "}
+                  {t.rejection_reason || "no reason recorded"}. This tranche no longer
+                  counts toward the request total.
+                </div>
+              )}
 
               {isEditing ? (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -444,16 +500,27 @@ export function TrancheList({
                         label="Payment details recorded"
                       />
                     </div>
-                    <Button
-                      size="sm"
-                      onClick={() => setPayConfirmId(t.id)}
-                      disabled={
-                        !t.tt_copy_url || !t.payment_date || !t.bank ||
-                        !t.accounts_remarks || payTranche.isPending
-                      }
-                    >
-                      Mark {t.label} Paid
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => setRejectTargetId(t.id)}
+                        disabled={rejectTranche.isPending || payTranche.isPending}
+                      >
+                        Reject {t.label}
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => setPayConfirmId(t.id)}
+                        disabled={
+                          !t.tt_copy_url || !t.payment_date || !t.bank ||
+                          !t.accounts_remarks || payTranche.isPending
+                        }
+                      >
+                        Mark {t.label} Paid
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -502,14 +569,15 @@ export function TrancheList({
       {/* Merchandiser: changes frozen once Accounts act on the request */}
       {mode === "merchandiser" && !canModify && (
         <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-          Tranches can no longer be changed
-          {modifyBlockedReason ? ` — ${modifyBlockedReason}.` : "."} Contact the
-          Accounts team if an amount or date is wrong.
+          {merchandiserCanAdd
+            ? "A tranche was rejected — add replacement tranches below until the total matches the required amount again. Existing tranches stay locked."
+            : `Tranches can no longer be changed${modifyBlockedReason ? ` — ${modifyBlockedReason}.` : "."} Contact the Accounts team if an amount or date is wrong.`}
         </p>
       )}
 
-      {/* Merchandiser: add a tranche while changes are still allowed */}
-      {merchandiserCanModify && (
+      {/* Merchandiser: add a tranche while allowed — including replacement
+          tranches after a rejection (Aug 2026). */}
+      {merchandiserCanAdd && (
         addOpen ? (
           <div className="rounded-lg border border-dashed border-border p-3 space-y-2">
             <p className="text-sm font-semibold text-foreground">New Tranche</p>
@@ -561,6 +629,18 @@ export function TrancheList({
         description="Its TT copy and payment details are recorded. The merchandiser will be notified and the tranche will be locked against edits. Paying the final unpaid tranche completes the request and locks the record."
         confirmLabel="Yes, mark paid"
         onConfirm={() => payConfirmId && doPay(payConfirmId)}
+      />
+
+      <DecisionDialog
+        open={rejectTargetId !== null}
+        title="Reject Tranche"
+        description="The tranche stays visible as a rejected record and its amount stops counting toward the request total. The merchandiser will be notified with your reason and can add replacement tranches."
+        placeholder="Reason for rejection (e.g. wrong amount entered)"
+        confirmLabel="Confirm Reject"
+        destructive
+        busy={rejectTranche.isPending}
+        onClose={() => setRejectTargetId(null)}
+        onConfirm={doReject}
       />
     </div>
   );

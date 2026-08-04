@@ -361,15 +361,62 @@ and week-label assertions updated. 219 backend tests green.
 
 ---
 
+## Reject Tranche workflow (deadlock fix, 2 Aug 2026) · **migration 0024**
+
+The touched-lock deadlock: once Accounts wrote anything, the merchandiser's
+tranches froze — a wrong amount had no way out. Accounts/HoM can now reject a
+tranche with a mandatory reason.
+
+- **Migration 0024:** `'rejected'` label added to the `tranche_status` PG enum
+  (ALTER TYPE outside transaction, 0013 pattern — enum values cannot be
+  removed on downgrade) + `rejection_reason` / `rejected_at` / `rejected_by`
+  columns.
+- **Semantics of REJECTED (the important invariants):**
+  - Excluded from `sum_amounts_for_request` → drops out of the invoice
+    ceiling and the derived `deposit_amount` the moment it's rejected.
+  - Fully inert: cannot be paid, edited, deleted, TT'd, given payment
+    details, or targeted by invoice adjustments (option lists exclude it;
+    create/approve re-validate — destination must now be strictly UNPAID).
+  - Its TT copy / payment details no longer count as an "accounts touch"
+    (otherwise the deadlock would re-form).
+  - Excluded automatically from the Outstanding/Weekly trackers (they key on
+    UNPAID) and from the "N of M paid" completion logic — paying the last
+    LIVE tranche still completes the request.
+- **Unlock rule:** while a rejected tranche exists and the request is still
+  pending, the merchandiser may ADD replacement tranches even after Accounts
+  touched the request (ceiling computed from live tranches). Edits/deletes of
+  other tranches stay frozen. `GET /tranches/modifiable` gained `can_add`.
+- **API:** `POST /requests/{id}/tranches/{tranche_id}/reject`
+  (`{reason}`, min_length 1; accounts_team / super_admin /
+  head_of_merchandiser) — audited, re-seeds the analytics snapshot, and
+  notifies the merchandiser (`tranche_rejected`, reason + "add a replacement
+  tranche" prompt, bell + push).
+- **UI (`TrancheList`):** accounts see a "Reject {label}" button beside Mark
+  Paid, opening the shared mandatory-reason dialog. A rejected tranche renders
+  as a disabled red card ("Rejected by Accounts on {date} — {reason}. This
+  tranche no longer counts…"), red "Rejected" pill, all actions gone. The
+  merchandiser sees an amber "add replacement tranches" note and the Add
+  Tranche form stays available via `can_add`; the paid counter reads
+  "X of Y paid · N rejected".
+
+Tests (+10): rejection record + totals drop + audit; reason/role/state
+guards; full inertness matrix; the deadlock scenario end-to-end (touch →
+frozen → reject → add unlocked → ceiling on live sum → edits still frozen);
+completion despite rejected sibling; adjustment destination exclusion at
+options/create/approve; rejected-notification content. 229 backend tests
+green.
+
+---
+
 # Batch complete — 1 Aug 2026
 
 All seven phases plus the screenshot follow-ups delivered (Ship Date removal
 deliberately deferred by the client). Final state: 219 backend unit tests
-green, `npx tsc --noEmit` clean, migration head **0023**. Everything is
+green, `npx tsc --noEmit` clean, migration head **0024**. Everything is
 uncommitted in the working tree alongside the July change-note work.
 
 Deploy checklist:
-1. `alembic upgrade head` (applies 0020 → 0023; the inspected DB was at 0019).
+1. `alembic upgrade head` (applies 0020 → 0024; the inspected DB was at 0019).
 2. Post-deploy: unpaid tranches with a July-era TT copy need their per-tranche
    payment details backfilled by Accounts before they can be marked paid
    (deliberate — no auto-migration of attestation data).
