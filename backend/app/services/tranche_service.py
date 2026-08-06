@@ -265,6 +265,8 @@ class TrancheService:
         # Readiness gate (Aug 2026, item 3.1): a tranche becomes PAID only via
         # this explicit action, and only once its TT copy AND payment details
         # (payment date + bank; reference number optional) are recorded.
+        # accounts_remarks was briefly mandatory here (1 Aug) — reverted to
+        # optional by the CIO batch of 4 Aug.
         missing = []
         if not tranche.tt_copy_url:
             missing.append("TT copy")
@@ -272,8 +274,6 @@ class TrancheService:
             missing.append("payment date")
         if not tranche.bank:
             missing.append("bank")
-        if not tranche.accounts_remarks:
-            missing.append("accounts remarks")
         if missing:
             raise ConflictError(
                 f"{tranche.label} cannot be marked paid until its "
@@ -507,6 +507,12 @@ class TrancheService:
         if not changes:
             raise ValidationError("No changes supplied.")
 
+        # Bank is dropdown-only (Aug 2026 bank master, client decision:
+        # no free-text fallback) — the value must be an active bank name
+        # composed with the request's currency: "DBS (EUR)".
+        if changes.get("bank"):
+            await self._assert_bank_allowed(request, changes["bank"])
+
         for field, new_val in changes.items():
             old_val = getattr(tranche, field)
             await self._audit.record_update(
@@ -515,6 +521,32 @@ class TrancheService:
                 ip_address=ip_address, user_agent=user_agent,
             )
         return await self._repo.update(tranche, **changes)
+
+    async def _assert_bank_allowed(self, request: DepositRequest, bank_value: str) -> None:
+        """The bank master stores names only; the stored tranche value is
+        '{name} ({request currency})' — or the bare name when the request has
+        no currency. An empty master blocks bank entry entirely."""
+        from app.models.masters import BankMaster
+
+        names = list(
+            (
+                await self._session.execute(
+                    select(BankMaster.name).where(BankMaster.is_active == True)  # noqa: E712
+                )
+            ).scalars().all()
+        )
+        if not names:
+            raise ValidationError(
+                "No banks are configured — ask an administrator to add banks "
+                "before recording payment details."
+            )
+        currency = request.currency.value if request.currency else None
+        allowed = {f"{n} ({currency})" for n in names} if currency else {n for n in names}
+        if bank_value not in allowed:
+            raise ValidationError(
+                f"'{bank_value}' is not an available bank for this request's "
+                "currency. Pick one from the dropdown."
+            )
 
     # ── Internals ─────────────────────────────────────────────────────────────
 

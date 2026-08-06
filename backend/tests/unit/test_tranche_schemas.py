@@ -23,11 +23,11 @@ def _tranche(amount: str, day: int = 1) -> dict:
 
 
 def test_tranche_labels_are_roman():
-    assert tranche_label(1) == "Tranche I"
-    assert tranche_label(2) == "Tranche II"
-    assert tranche_label(3) == "Tranche III"
-    assert tranche_label(4) == "Tranche IV"
-    assert tranche_label(9) == "Tranche IX"
+    assert tranche_label(1) == "Deposit - Tranche I"
+    assert tranche_label(2) == "Deposit - Tranche II"
+    assert tranche_label(3) == "Deposit - Tranche III"
+    assert tranche_label(4) == "Deposit - Tranche IV"
+    assert tranche_label(9) == "Deposit - Tranche IX"
 
 
 def test_tranche_requires_positive_amount():

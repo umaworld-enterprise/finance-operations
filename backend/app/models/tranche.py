@@ -39,15 +39,19 @@ _ROMAN = [
 
 
 def tranche_label(number: int) -> str:
-    """1 → 'Tranche I', 2 → 'Tranche II', …"""
+    """1 → 'Deposit - Tranche I', 2 → 'Deposit - Tranche II', …
+
+    Single source for the display label (4 Aug 2026 rename, applied
+    everywhere): API responses, notifications, audit wording and the
+    adjustment pickers all derive from this."""
     if number < 1:
-        return f"Tranche {number}"
+        return f"Deposit - Tranche {number}"
     n, out = number, ""
     for value, numeral in _ROMAN:
         while n >= value:
             out += numeral
             n -= value
-    return f"Tranche {out}"
+    return f"Deposit - Tranche {out}"
 
 
 class PaymentTranche(UUIDPrimaryKeyMixin, TimestampMixin, Base):

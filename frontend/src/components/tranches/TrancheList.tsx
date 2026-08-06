@@ -15,7 +15,8 @@ import {
   useUpdateTranchePaymentDetails,
   useUploadTrancheTtCopy,
 } from "@/hooks/useRequests";
-import { currencyDisplayLabel, formatCurrency, formatDate, todayLocalISO } from "@/lib/utils";
+import { useBanks } from "@/hooks/useMasters";
+import { currencyDisplayLabel, currencySign, formatCurrency, formatDate, todayLocalISO } from "@/lib/utils";
 import type { PaymentTranche } from "@/types";
 
 interface Props {
@@ -44,11 +45,18 @@ interface Props {
 function TranchePaymentDetailsForm({
   requestId,
   tranche,
+  currency,
 }: {
   requestId: string;
   tranche: PaymentTranche;
+  currency: string | null;
 }) {
   const updateDetails = useUpdateTranchePaymentDetails(requestId);
+  // Bank master (Aug 2026): the master stores names only — options are
+  // composed with the REQUEST currency ("DBS (EUR)", sign shown in front).
+  // Dropdown-only by client decision: no free-text fallback.
+  const { data: banks = [] } = useBanks();
+  const composeBank = (name: string) => (currency ? `${name} (${currency})` : name);
   const [paymentDate, setPaymentDate] = useState(tranche.payment_date ?? "");
   const [bank, setBank] = useState(tranche.bank ?? "");
   const [reference, setReference] = useState(tranche.payment_reference_number ?? "");
@@ -58,8 +66,8 @@ function TranchePaymentDetailsForm({
     "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring";
 
   const save = async () => {
-    if (!paymentDate || !bank.trim() || !remarks.trim()) {
-      toast.error("Payment date, bank and accounts remarks are required.");
+    if (!paymentDate || !bank.trim()) {
+      toast.error("Payment date and bank are required.");
       return;
     }
     try {
@@ -69,7 +77,7 @@ function TranchePaymentDetailsForm({
           payment_date: paymentDate,
           bank: bank.trim(),
           payment_reference_number: reference.trim() || undefined,
-          accounts_remarks: remarks.trim(),
+          accounts_remarks: remarks.trim() || undefined,
         },
       });
       toast.success(`Payment details saved for ${tranche.label}.`);
@@ -91,7 +99,31 @@ function TranchePaymentDetailsForm({
           <p className="text-xs text-muted-foreground mb-1">
             Bank<span className="text-foreground ml-0.5" aria-hidden="true">*</span>
           </p>
-          <input type="text" value={bank} onChange={(e) => setBank(e.target.value)} className={inputCls} />
+          <select
+            value={bank}
+            onChange={(e) => setBank(e.target.value)}
+            disabled={banks.length === 0}
+            className={inputCls}
+          >
+            <option value="" disabled>
+              {banks.length === 0 ? "No banks configured" : "Select bank"}
+            </option>
+            {/* Legacy free-text value from before the master — keep visible */}
+            {bank && !banks.some((b) => composeBank(b.name) === bank) && (
+              <option value={bank} disabled>{bank} (legacy)</option>
+            )}
+            {banks.map((b) => (
+              <option key={b.id} value={composeBank(b.name)}>
+                {`${currencySign(currency)} ${b.name}${currency ? ` (${currency})` : ""}`.trim()}
+              </option>
+            ))}
+          </select>
+          {banks.length === 0 && (
+            <p className="text-xs text-destructive mt-1">
+              No banks configured — ask an administrator to add banks before
+              recording payment details.
+            </p>
+          )}
         </div>
         <div>
           <p className="text-xs text-muted-foreground mb-1">Payment ref. # (optional)</p>
@@ -100,9 +132,7 @@ function TranchePaymentDetailsForm({
       </div>
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="flex-1">
-          <p className="text-xs text-muted-foreground mb-1">
-            Accounts remarks<span className="text-foreground ml-0.5" aria-hidden="true">*</span>
-          </p>
+          <p className="text-xs text-muted-foreground mb-1">Accounts remarks (optional)</p>
           <input
             type="text"
             value={remarks}
@@ -281,8 +311,10 @@ export function TrancheList({
       setSelectedFiles((prev) => ({ ...prev, [t.id]: null }));
       const input = fileInputs.current[t.id];
       if (input) input.value = "";
+      // No notification fires on upload (4 Aug fix) — the merchandiser is
+      // notified once, when the tranche is explicitly marked paid.
       toast.success(
-        `TT copy uploaded for ${t.label} — the merchandiser has been notified.` +
+        `TT copy uploaded for ${t.label}.` +
           (t.status === "unpaid" ? " Click Mark Paid once payment details are also recorded." : ""),
       );
     } catch (err: unknown) {
@@ -455,7 +487,7 @@ export function TrancheList({
                   item 3.1 — uploads never auto-pay). */}
               {mode === "accounts" && t.status === "unpaid" && (
                 <div className="space-y-3 pt-2 mt-1 border-t border-border">
-                  <TranchePaymentDetailsForm requestId={requestId} tranche={t} />
+                  <TranchePaymentDetailsForm requestId={requestId} tranche={t} currency={currency} />
 
                   {!t.tt_copy_url && (
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
@@ -496,7 +528,7 @@ export function TrancheList({
                     <div className="flex items-center gap-3 flex-wrap">
                       <ReadinessItem done={!!t.tt_copy_url} label="TT copy uploaded" />
                       <ReadinessItem
-                        done={!!t.payment_date && !!t.bank && !!t.accounts_remarks}
+                        done={!!t.payment_date && !!t.bank}
                         label="Payment details recorded"
                       />
                     </div>
@@ -514,8 +546,7 @@ export function TrancheList({
                         size="sm"
                         onClick={() => setPayConfirmId(t.id)}
                         disabled={
-                          !t.tt_copy_url || !t.payment_date || !t.bank ||
-                          !t.accounts_remarks || payTranche.isPending
+                          !t.tt_copy_url || !t.payment_date || !t.bank || payTranche.isPending
                         }
                       >
                         Mark {t.label} Paid
@@ -580,7 +611,7 @@ export function TrancheList({
       {merchandiserCanAdd && (
         addOpen ? (
           <div className="rounded-lg border border-dashed border-border p-3 space-y-2">
-            <p className="text-sm font-semibold text-foreground">New Tranche</p>
+            <p className="text-sm font-semibold text-foreground">New Deposit Tranche</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <p className="text-xs text-muted-foreground mb-1">

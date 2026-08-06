@@ -57,15 +57,14 @@ async def _with_tt(db_session, *tranches):
 
 
 async def _payable(db_session, *tranches):
-    """pay_tranche requires the TT copy AND payment details (Aug 2026,
-    item 3.1: payment date, bank, accounts remarks) — satisfy all so tests
-    can exercise the payment paths beyond that gate. The reference number
-    stays empty: it is optional."""
+    """pay_tranche requires the TT copy AND payment details (payment date +
+    bank) — satisfy both so tests can exercise the payment paths beyond that
+    gate. Reference number AND accounts remarks stay empty: both are optional
+    (remarks reverted to optional 4 Aug 2026)."""
     for t in tranches:
         t.tt_copy_url = f"https://drive.test/tt-{t.id}.pdf"
         t.payment_date = date(2026, 8, 1)
         t.bank = "Test Bank"
-        t.accounts_remarks = "processed via test"
     await db_session.flush()
 
 
@@ -287,18 +286,15 @@ async def test_pay_tranche_without_payment_details_rejected(db_session):
     assert tranche.status == TrancheStatus.UNPAID
 
 
-async def test_pay_tranche_requires_accounts_remarks(db_session):
-    """Aug 2026 follow-up: accounts remarks are mandatory per tranche — TT,
-    date and bank alone are not enough."""
+async def test_pay_tranche_does_not_require_accounts_remarks(db_session):
+    """4 Aug 2026: accounts remarks reverted to OPTIONAL — TT copy, payment
+    date and bank are sufficient to mark a tranche paid."""
     _, accounts, request, (tranche,) = await _setup(db_session)
-    tranche.tt_copy_url = "https://drive.test/tt.pdf"
-    tranche.payment_date = date(2026, 8, 1)
-    tranche.bank = "Test Bank"
-    await db_session.flush()
+    await _payable(db_session, tranche)  # sets no accounts_remarks
     svc = TrancheService(db_session)
-    with pytest.raises(ConflictError, match="accounts remarks"):
-        await svc.pay_tranche(request.id, tranche.id, accounts.id, UserRole.ACCOUNTS_TEAM)
-    assert tranche.status == TrancheStatus.UNPAID
+    paid = await svc.pay_tranche(request.id, tranche.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    assert paid.status == TrancheStatus.PAID
+    assert paid.accounts_remarks is None
 
 
 async def test_pay_tranche_does_not_require_reference_number(db_session):
@@ -389,11 +385,12 @@ async def test_rejection_unlocks_adding_replacement_tranches(db_session):
     merch, accounts, request, (t1, t2) = await _setup(
         db_session, tranche_amounts=("600.00", "9000.00")
     )
+    await _seed_bank(db_session)
     svc = TrancheService(db_session)
     # Accounts touch the request (details on t1) — merchandiser frozen.
     await svc.update_payment_details(
         request.id, t1.id,
-        TranchePaymentDetailsUpdate(payment_date=date(2026, 8, 1), bank="HSBC"),
+        TranchePaymentDetailsUpdate(payment_date=date(2026, 8, 1), bank="HSBC (USD)"),
         accounts.id, UserRole.ACCOUNTS_TEAM,
     )
     with pytest.raises(ConflictError, match="no longer be changed"):
@@ -482,6 +479,15 @@ async def test_duplicate_tt_upload_rejected(db_session):
 
 async def _add_payment_row(db_session, request):
     db_session.add(PaymentDetails(id=uuid.uuid4(), deposit_request_id=request.id))
+    await db_session.flush()
+
+
+async def _seed_bank(db_session, name="HSBC"):
+    """Bank master (Aug 2026): update_payment_details validates the bank
+    against the active list, composed with the request currency."""
+    from app.models.masters import BankMaster
+
+    db_session.add(BankMaster(id=uuid.uuid4(), name=name))
     await db_session.flush()
 
 
@@ -579,7 +585,7 @@ async def test_delete_tranche_syncs_totals(db_session):
     )
     svc = TrancheService(db_session)
     label = await svc.delete_tranche(request.id, t2.id, merch.id, UserRole.MERCHANDISER)
-    assert label == "Tranche II"
+    assert label == "Deposit - Tranche II"
     assert Decimal(str(request.deposit_amount)) == Decimal("600.00")
     remaining = await svc.list_for_request(request.id)
     assert [t.id for t in remaining] == [t1.id]
@@ -649,17 +655,54 @@ async def test_super_admin_may_replace_tt_copy(db_session):
 
 async def test_update_payment_details_saves_and_audits(db_session):
     _, accounts, request, (tranche,) = await _setup(db_session)
+    await _seed_bank(db_session)
     svc = TrancheService(db_session)
     updated = await svc.update_payment_details(
         request.id, tranche.id,
-        TranchePaymentDetailsUpdate(payment_date=date(2026, 8, 2), bank="HSBC"),
+        TranchePaymentDetailsUpdate(payment_date=date(2026, 8, 2), bank="HSBC (USD)"),
         accounts.id, UserRole.ACCOUNTS_TEAM,
     )
     assert updated.payment_date == date(2026, 8, 2)
-    assert updated.bank == "HSBC"
+    assert updated.bank == "HSBC (USD)"  # composed "{name} ({request currency})"
     assert updated.payment_reference_number is None
     logs = await _audit_rows(db_session, "payment_tranches", tranche.id)
     assert {log.field_name for log in logs} == {"payment_date", "bank"}
+
+
+async def test_bank_must_come_from_the_master(db_session):
+    """Bank master (Aug 2026): dropdown-only — arbitrary values are rejected,
+    and an empty master blocks bank entry entirely."""
+    _, accounts, request, (tranche,) = await _setup(db_session)
+    svc = TrancheService(db_session)
+    # Empty master → blocked.
+    with pytest.raises(ValidationError, match="No banks are configured"):
+        await svc.update_payment_details(
+            request.id, tranche.id,
+            TranchePaymentDetailsUpdate(bank="HSBC (USD)"),
+            accounts.id, UserRole.ACCOUNTS_TEAM,
+        )
+    await _seed_bank(db_session)
+    # Wrong composition (missing currency suffix) → rejected.
+    with pytest.raises(ValidationError, match="not an available bank"):
+        await svc.update_payment_details(
+            request.id, tranche.id,
+            TranchePaymentDetailsUpdate(bank="HSBC"),
+            accounts.id, UserRole.ACCOUNTS_TEAM,
+        )
+    # Unknown bank → rejected.
+    with pytest.raises(ValidationError, match="not an available bank"):
+        await svc.update_payment_details(
+            request.id, tranche.id,
+            TranchePaymentDetailsUpdate(bank="Barclays (USD)"),
+            accounts.id, UserRole.ACCOUNTS_TEAM,
+        )
+    # Details without a bank change are unaffected by the master.
+    updated = await svc.update_payment_details(
+        request.id, tranche.id,
+        TranchePaymentDetailsUpdate(payment_date=date(2026, 8, 2)),
+        accounts.id, UserRole.ACCOUNTS_TEAM,
+    )
+    assert updated.payment_date == date(2026, 8, 2)
 
 
 async def test_merchandiser_cannot_record_payment_details(db_session):
@@ -692,10 +735,11 @@ async def test_tranche_payment_details_count_as_accounts_touch(db_session):
     merch, accounts, request, (t1, t2) = await _setup(
         db_session, tranche_amounts=("600.00", "400.00")
     )
+    await _seed_bank(db_session)
     svc = TrancheService(db_session)
     await svc.update_payment_details(
         request.id, t1.id,
-        TranchePaymentDetailsUpdate(payment_date=date(2026, 8, 2), bank="HSBC"),
+        TranchePaymentDetailsUpdate(payment_date=date(2026, 8, 2), bank="HSBC (USD)"),
         accounts.id, UserRole.ACCOUNTS_TEAM,
     )
     with pytest.raises(ConflictError, match="payment details"):

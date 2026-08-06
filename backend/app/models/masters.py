@@ -104,6 +104,19 @@ class PaymentTermsMaster(UUIDPrimaryKeyMixin, Base):
     sort_order: Mapped[int] = mapped_column(nullable=False, default=0)
 
 
+class BankMaster(UUIDPrimaryKeyMixin, Base):
+    """Bank name master (Aug 2026, migration 0026). Stores bank NAMES only —
+    deliberately not per-currency rows: the tranche form composes the option
+    as '{name} ({currency})' from the request's currency at render time, and
+    that composed string is what payment_tranches.bank stores."""
+
+    __tablename__ = "banks_master"
+
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sort_order: Mapped[int] = mapped_column(nullable=False, default=0)
+
+
 class FormLink(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "form_links"
 

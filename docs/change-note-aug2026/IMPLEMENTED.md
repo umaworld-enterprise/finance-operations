@@ -408,15 +408,106 @@ green.
 
 ---
 
+## CIO Batch 2 — Phase 1 (4 Aug 2026, no migration)
+
+1. **Accounts Remarks optional again** (reverses the 1 Aug mandatory rule,
+   per CIO): dropped from the pay readiness gate, the checklist tick and the
+   tranche form validation. Field, column (0023) and its role as an
+   "accounts touch" all remain. Test inverted to prove optionality; the
+   `_payable` helper no longer sets remarks, so every pay-path test exercises
+   the optional case.
+2. **Bug fix — no notification on TT upload:** the tranche TT-copy endpoint
+   no longer dispatches anything; the merchandiser is notified exactly once,
+   on the explicit Mark Paid (that message carries the TT link).
+   `tranche_tt_attached` type, builder branch and test retired; upload toast
+   no longer claims a notification; matrix updated. Legacy request-level TT
+   path untouched (API-only).
+3. **"Deposit - Tranche I" everywhere** (client chose global): renamed at the
+   single source — `tranche_label()` — so API responses, notifications,
+   audit wording, adjustment pickers and the weekly tracker all follow; the
+   create-form headers and TrancheList add-form updated to match. ~8 test
+   literals updated. Note: historical audit rows / past notifications keep
+   the old wording — only new events use the new label.
+
+## CIO Batch 2 — Phase 2: File Remarks module (4 Aug 2026) · **migration 0025**
+
+A tracked Open → Resolved channel from merchandisers to Accounts that
+bypasses Adjust Invoices for the time being. **Moves no money** — Accounts
+act manually (e.g. the super-admin invoice editor) and resolve.
+
+- **Migration 0025 / model:** `file_remarks` — request FK, `category`
+  (varchar + CHECK: invoice_number_change / invoice_split / other),
+  `old_file_number`, `new_file_number`, `remark`, `status` (open/resolved),
+  creator/resolver + timestamps, `response_note`.
+- **Category-specific required fields** (client examples, enforced in the
+  pydantic schema): number change = old + new file numbers; split = the file
+  number(s) it splits to; other = remark only.
+- **Rules:** merchandisers raise on their OWN requests — any status,
+  deliberately including locked/processed files (the whole point);
+  accounts/super may also raise. Deciders (accounts/super) resolve once,
+  optional response note; double-resolve conflicts. Lists: merchandiser →
+  own, accounts/finance/super → all; filterable by status/request.
+  Audit rows on the remark AND the request-level trail for both create and
+  resolve.
+- **Endpoints:** `GET/POST /file-remarks`, `POST /file-remarks/{id}/resolve`.
+- **Notifications:** `file_remark_raised` → active Accounts users excl. the
+  actor (category + file numbers + remark in the body);
+  `file_remark_resolved` → the raiser, response note included. Matrix
+  updated.
+- **UI:** new **File Remarks** sidebar entry (merchandiser, accounts_team,
+  super_admin, finance_admin). One page: New File Remark form (request
+  picker from the user's role-scoped list, category dropdown driving the
+  field set), an **Open Remarks** inbox for Accounts with a Resolve dialog
+  (optional response), and a full Remark History with status pills and
+  response notes.
+
+**Tests** (`test_file_remarks.py`, 8): category field validation both ways,
+raise-on-own-locked + audit rows, non-owner/HoM blocked, resolve flow +
+self-resolve blocked + double-resolve conflict, list scoping + status filter,
+raised fan-out content, resolved notification with response note.
+236 backend tests green; migration head **0025**.
+
+## Bank name master (4 Aug 2026) · **migration 0026**
+
+Bank on the per-tranche payment details is now a dropdown driven by a master.
+Client design decisions: the master stores bank **names only** (DBS, Citi,
+SCB seeded by the migration) — NOT per-currency rows; the option is composed
+from the request's currency at render time as "€ DBS (EUR)" (sign in front,
+suffix appended), and the composed string "DBS (EUR)" is what
+`payment_tranches.bank` stores (report/analytics compatible, no FK).
+**Dropdown-only — no free-text fallback:** an empty master blocks payment
+details entry (UI note + disabled select, and server-side).
+
+- Model `BankMaster` (`banks_master`: name, is_active, sort_order) +
+  migration 0026 with the three-bank seed.
+- Endpoints mirror the Payment Terms master: `GET /masters/banks` (active,
+  any authenticated), `/all` + POST/PATCH/DELETE(deactivate) for
+  finance_admin/super_admin, case-insensitive uniqueness, audited.
+- **Server enforcement** in `update_payment_details`
+  (`_assert_bank_allowed`): the bank value must equal
+  "{active name} ({request currency})" (bare name when the request has no
+  currency); empty master → "No banks are configured…". Legacy stored values
+  are untouched — only new bank changes are validated; the UI shows a legacy
+  value as a disabled "(legacy)" option so it stays visible.
+- UI: tranche form bank select scoped by the request currency; new
+  **Banks** admin page (add / rename / activate–deactivate) + admin
+  quick-link; `currencySign()` helper in utils.
+
+Tests: composed-value save + audit, wrong-composition and unknown-bank
+rejected, empty-master block, non-bank changes unaffected; touched/unlock
+tests reseeded accordingly. 237 backend tests green; migration head **0026**.
+
+---
+
 # Batch complete — 1 Aug 2026
 
 All seven phases plus the screenshot follow-ups delivered (Ship Date removal
 deliberately deferred by the client). Final state: 219 backend unit tests
-green, `npx tsc --noEmit` clean, migration head **0024**. Everything is
+green, `npx tsc --noEmit` clean, migration head **0026**. Everything is
 uncommitted in the working tree alongside the July change-note work.
 
 Deploy checklist:
-1. `alembic upgrade head` (applies 0020 → 0024; the inspected DB was at 0019).
+1. `alembic upgrade head` (applies 0020 → 0026; the inspected DB was at 0019).
 2. Post-deploy: unpaid tranches with a July-era TT copy need their per-tranche
    payment details backfilled by Accounts before they can be marked paid
    (deliberate — no auto-migration of attestation data).

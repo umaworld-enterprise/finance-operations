@@ -51,7 +51,8 @@ settings = get_settings()
 TYPE_PAYMENT_PROCESSED = "payment_processed"
 TYPE_TT_COPY_ATTACHED = "tt_copy_attached"
 TYPE_TRANCHE_PAID = "tranche_paid"
-TYPE_TRANCHE_TT_ATTACHED = "tranche_tt_attached"
+# TYPE_TRANCHE_TT_ATTACHED was removed 4 Aug 2026 — a TT upload alone no
+# longer notifies; the merchandiser hears when the tranche is marked paid.
 TYPE_TRANCHE_UPDATED = "tranche_updated"
 TYPE_TRANCHE_REJECTED = "tranche_rejected"
 TYPE_HOM_APPROVED = "hom_approved"
@@ -62,6 +63,8 @@ TYPE_ADJUSTMENT_DECIDED = "adjustment_decided"
 TYPE_REQUEST_CREATED = "request_created"
 TYPE_REQUEST_PENDING_HOM = "request_pending_hom"
 TYPE_STATUS_CHANGED = "status_changed"
+TYPE_FILE_REMARK_RAISED = "file_remark_raised"
+TYPE_FILE_REMARK_RESOLVED = "file_remark_resolved"
 
 _EMAIL_ROLES = (UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN)
 
@@ -102,8 +105,10 @@ def build_tranche_notification_message(
 ) -> dict:
     """Title/body/url/attachment for tranche-level notifications.
 
-    tranche_paid / tranche_tt_attached go to the merchandiser who raised the
-    request; tranche_updated goes to the Accounts Team.
+    tranche_paid goes to the merchandiser who raised the request (and carries
+    the TT link); tranche_updated goes to the Accounts Team. The old
+    tranche_tt_attached notification was removed on 4 Aug 2026 — a TT upload
+    alone no longer notifies anyone.
     """
     if type_ == TYPE_TRANCHE_UPDATED:
         body = f"{tranche_label} of {request_number} was updated by the merchandiser."
@@ -114,13 +119,6 @@ def build_tranche_notification_message(
             "body": body,
             "url": f"/accounts/{request_id}",
             "attachment_url": None,
-        }
-    if type_ == TYPE_TRANCHE_TT_ATTACHED:
-        return {
-            "title": "TT copy attached",
-            "body": f"The TT copy for {tranche_label} of {request_number} is now available.",
-            "url": f"/merchandiser/{request_id}",
-            "attachment_url": tt_copy_url,
         }
     body = f"{tranche_label} of {request_number} has been paid."
     if tt_copy_url:
@@ -463,11 +461,13 @@ async def notify_payment_processed_if_ready(request_id: UUID) -> None:
 
 
 async def notify_tranche_event(request_id: UUID, tranche_id: UUID, event: str) -> None:
-    """After a tranche payment or TT upload — bell + push to the merchandiser
-    who raised the request, naming the paid tranche and request number.
+    """After a tranche is explicitly marked paid — bell + push to the
+    merchandiser who raised the request, naming the paid tranche and request
+    number and carrying the TT link.
 
-    event: 'paid' or 'tt_attached'. When the tranche payment completed the
-    whole request, HoM / super admins also get the payment-processed email.
+    event: 'paid' (the only event since 4 Aug 2026 — TT uploads no longer
+    notify). When the tranche payment completed the whole request,
+    HoM / super admins also get the payment-processed email.
     Own session; failures logged and swallowed (BackgroundTasks contract).
     """
     from app.core.database import AsyncSessionFactory
@@ -479,7 +479,7 @@ async def notify_tranche_event(request_id: UUID, tranche_id: UUID, event: str) -
             tranche = await session.get(PaymentTranche, tranche_id)
             if request is None or tranche is None:
                 return
-            type_ = TYPE_TRANCHE_TT_ATTACHED if event == "tt_attached" else TYPE_TRANCHE_PAID
+            type_ = TYPE_TRANCHE_PAID
             message = build_tranche_notification_message(
                 type_, request.request_number, tranche.label, request.id,
                 tt_copy_url=tranche.tt_copy_url,
@@ -901,6 +901,97 @@ async def notify_adjustment_decided(adjustment_id: UUID, decision: str, reason: 
         logger.error(
             "notify_adjustment_decided failed",
             adjustment_id=str(adjustment_id), decision=decision, error=str(exc),
+        )
+
+
+async def _load_file_remark_context(session: AsyncSession, remark_id: UUID):
+    from app.models.file_remark import FileRemark
+
+    remark = await session.get(FileRemark, remark_id)
+    if remark is None:
+        return None, None
+    request = await _load_request(session, remark.deposit_request_id)
+    return remark, request
+
+
+def _file_remark_body(remark, request_number: str) -> str:
+    from app.services.file_remark_service import category_label
+
+    body = f"{category_label(remark.category)} on {request_number}"
+    if remark.old_file_number:
+        body += f" — old file {remark.old_file_number}"
+    if remark.new_file_number:
+        body += f" — new file {remark.new_file_number}"
+    body += f". {remark.remark}"
+    return body
+
+
+async def notify_file_remark_raised(remark_id: UUID) -> None:
+    """After a file remark is raised — bell + push to every active Accounts
+    user except the actor (CIO batch 2, Aug 2026).
+
+    Own session; failures logged and swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+
+    try:
+        async with AsyncSessionFactory() as session:
+            remark, request = await _load_file_remark_context(session, remark_id)
+            if remark is None or request is None:
+                return
+            message = {
+                "title": "File remark raised",
+                "body": _file_remark_body(remark, request.request_number),
+                "url": "/file-remarks",
+                "attachment_url": None,
+            }
+            users = [
+                u for u in await _active_users_with_role(session, UserRole.ACCOUNTS_TEAM)
+                if u.id != remark.created_by
+            ]
+            await _deliver_to_users(
+                session, users, TYPE_FILE_REMARK_RAISED, message, request.id
+            )
+    except Exception as exc:
+        logger.error(
+            "notify_file_remark_raised failed", remark_id=str(remark_id), error=str(exc)
+        )
+
+
+async def notify_file_remark_resolved(remark_id: UUID) -> None:
+    """After Accounts resolve a file remark — bell + push back to the user who
+    raised it, including the response note when given.
+
+    Own session; failures logged and swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+
+    try:
+        async with AsyncSessionFactory() as session:
+            remark, request = await _load_file_remark_context(session, remark_id)
+            if remark is None or request is None:
+                return
+            body = (
+                f"Your file remark on {request.request_number} was resolved by the "
+                "Accounts team."
+            )
+            if remark.response_note:
+                body += f" Response: {remark.response_note}"
+            message = {
+                "title": "File remark resolved",
+                "body": body,
+                "url": "/file-remarks",
+                "attachment_url": None,
+            }
+            creator = await session.get(User, remark.created_by)
+            if creator is None:
+                return
+            await _deliver_to_users(
+                session, [creator], TYPE_FILE_REMARK_RESOLVED, message, request.id
+            )
+    except Exception as exc:
+        logger.error(
+            "notify_file_remark_resolved failed", remark_id=str(remark_id), error=str(exc)
         )
 
 

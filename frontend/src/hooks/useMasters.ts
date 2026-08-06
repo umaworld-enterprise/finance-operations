@@ -95,6 +95,16 @@ export function useSuppliers() {
   });
 }
 
+export function useBanks() {
+  return useQuery({
+    queryKey: ["banks"],
+    queryFn: masterService.getBanks,
+    staleTime: STALE,
+    gcTime: GC,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useSupplierDefaultStatus(supplierId: string | null) {
   return useQuery({
     queryKey: ["supplier-default", supplierId],
