@@ -1,0 +1,97 @@
+SUM of Deposit Amount,,,Payt Status - Yogesh to Enter,,,"Payt Date 
+(MM YYYY)",Currency of Advance Deposit,Bank,SUM of Deposit Amount,,,"Payt Date 
+(MM YYYY)",Currency of Advance Deposit,Total Count of Payments
+"Payt Date 
+(MM YYYY)",Staff,Currency of Advance Deposit,Payment Processed,,,Apr-2026,EUR,DBS,"5,808.80",,,Apr-2026,EUR,1
+Apr-2026,Anil,USD,"18,900.00",,,,EUR Total,,"5,808.80",,,,RMB,1
+,Asta,EUR,"5,808.80",,,,RMB,CITI,"352,275.00",,,,USD,137
+,,USD,"174,229.68",,,,RMB Total,,"352,275.00",,,Aug-2023,RMB,1
+,Connie,USD,"120,000.00",,,,USD,CITI,"274,018.75",,,,USD,5
+,Joey,USD,"2,107,133.58",,,,,DBS,"4,849,033.77",,,Aug-2026,USD,9
+,Robin,RMB,"352,275.00",,,,,SCB,"111,626.40",,,Dec-1899,USD,0
+,,USD,"346,018.56",,,,USD Total,,"5,234,678.92",,,Dec-2025,EUR,1
+,Shilpali,USD,"1,760,159.00",,,Aug-2023,RMB,CITI,"12,600.00",,,,RMB,2
+,Tricia,USD,"317,937.80",,,,RMB Total,,"12,600.00",,,,USD,24
+,Ulrica,USD,"110,000.00",,,,USD,CITI,"46,081.22",,,Feb-2026,RMB,1
+,Yogesh.Tulsiani,USD,"280,300.30",,,,USD Total,,"46,081.22",,,,USD,74
+Aug-2023,Connie,USD,"20,000.00",,,Aug-2026,USD,CITI,"362,756.12",,,Jan-2026,EUR,6
+,Joey,USD,"16,396.24",,,,USD Total,,"362,756.12",,,,RMB,8
+,Robin,RMB,"12,600.00",,,Dec-1899,USD,,"10,425.00",,,,USD,121
+,,USD,"9,684.98",,,,USD Total,,"10,425.00",,,Jul-2026,EUR,6
+Aug-2026,Joey,USD,"51,673.77",,,Dec-2025,EUR,DBS,"5,832.00",,,,RMB,5
+,Tricia,USD,"311,082.35",,,,EUR Total,,"5,832.00",,,,USD,134
+Dec-1899,Robin,USD,425.00,,,,RMB,DBS,"17,640.61",,,Jun-2026,EUR,1
+,Ulrica,USD,"10,000.00",,,,,SCB,"5,202.00",,,,RMB,3
+Dec-2025,Anil,EUR,"5,832.00",,,,RMB Total,,"22,842.61",,,,USD,82
+,,USD,"33,400.50",,,,USD,CITI,"42,511.13",,,Mar-2026,EUR,1
+,Joey,USD,"15,663.13",,,,,DBS,"511,090.50",,,,USD,89
+,Robin,RMB,"5,202.00",,,,,SCB,"94,041.82",,,May-2026,EUR,5
+,,USD,"564,418.87",,,,USD Total,,"647,643.45",,,,RMB,4
+,Ulrica,USD,"10,000.00",,,Feb-2026,RMB,CITI,"113,491.00",,,,USD,87
+,Yogesh.Tulsiani,RMB,"17,640.61",,,,RMB Total,,"113,491.00",,,Nov-2025,USD,1
+,,USD,"24,160.95",,,,USD,CITI,"495,846.09",,,Grand Total,,809
+Feb-2026,Agnes,USD,"125,482.26",,,,,DBS,"3,038,656.70",,,,,
+,Anil,USD,"8,491.20",,,,,SCB,"133,032.38",,,,,
+,Asta,USD,"55,738.04",,,,USD Total,,"3,667,535.17",,,,,
+,Joey,USD,"591,450.52",,,Jan-2026,EUR,CITI,"11,097.00",,,,,
+,Robin,RMB,"113,491.00",,,,,DBS,"40,144.40",,,,,
+,,USD,"1,618,750.45",,,,EUR Total,,"51,241.40",,,,,
+,Shilpali,USD,"1,087,500.00",,,,RMB,DBS,"1,134,807.82",,,,,
+,Ulrica,USD,"145,800.00",,,,,SCB,"232,102.00",,,,,
+,Yogesh.Tulsiani,USD,"34,322.70",,,,RMB Total,,"1,366,909.82",,,,,
+Jan-2026,Agnes,USD,"65,990.83",,,,USD,CITI,"127,059.09",,,,,
+,Anil,EUR,"37,871.00",,,,,DBS,"2,255,385.33",,,,,
+,,USD,"98,782.80",,,,,SCB,"89,298.41",,,,,
+,Asta,USD,"68,813.17",,,,USD Total,,"2,471,742.82",,,,,
+,Joey,EUR,"13,370.40",,,Jul-2026,EUR,CITI,"36,390.50",,,,,
+,,RMB,"846,007.25",,,,,CITI ,"6,888.00",,,,,
+,,USD,"920,458.71",,,,,DBS,"17,379.00",,,,,
+,Robin,USD,"959,030.87",,,,EUR Total,,"60,657.50",,,,,
+,Shilpali,USD,"5,366.00",,,,RMB,CITI,"591,216.37",,,,,
+,Ulrica,USD,"288,229.99",,,,RMB Total,,"591,216.37",,,,,
+,Yogesh.Tulsiani,RMB,"520,902.57",,,,USD,,"103,787.78",,,,,
+,,USD,"65,070.45",,,,,CIT ,"2,301.00",,,,,
+Jul-2026,Anil,USD,"102,715.20",,,,,CITI,"2,361,288.47",,,,,
+,Asta,EUR,"43,278.50",,,,,CITI ,"53,662.00",,,,,
+,,USD,"228,748.00",,,,,DBS,"630,715.19",,,,,
+,Connie,USD,"99,840.00",,,,,SCB,"12,431.78",,,,,
+,Joey,EUR,"17,379.00",,,,USD Total,,"3,164,186.22",,,,,
+,,RMB,"272,759.77",,,Jun-2026,EUR,DBS,"5,994.00",,,,,
+,,USD,"1,686,775.67",,,,EUR Total,,"5,994.00",,,,,
+,Robin,RMB,"318,456.60",,,,RMB,CITI,"354,546.00",,,,,
+,,USD,"607,301.45",,,,RMB Total,,"354,546.00",,,,,
+,Shilpali,USD,"14,812.00",,,,USD,CITI,"787,872.97",,,,,
+,Ulrica,USD,"286,106.00",,,,,DBS,"2,075,760.09",,,,,
+,Yogesh.Tulsiani,USD,"137,887.90",,,,,SCB,"168,164.00",,,,,
+Jun-2026,Asta,EUR,"5,994.00",,,,USD Total,,"3,031,797.05",,,,,
+,,USD,"92,566.50",,,Mar-2026,EUR,DBS,"64,435.00",,,,,
+,Connie,USD,"20,000.00",,,,EUR Total,,"64,435.00",,,,,
+,Joey,USD,"1,234,605.84",,,,USD,CITI,"36,600.00",,,,,
+,Robin,RMB,"15,840.00",,,,,DBS,"2,516,456.17",,,,,
+,,USD,"349,743.18",,,,,SCB,"145,038.88",,,,,
+,Shilpali,USD,"1,177,035.33",,,,USD Total,,"2,698,095.05",,,,,
+,Tricia,RMB,"189,945.00",,,May-2026,EUR,CITI,"21,927.36",,,,,
+,Ulrica,USD,"10,000.00",,,,,DBS,"5,000.00",,,,,
+,Yogesh.Tulsiani,RMB,"148,761.00",,,,,SCB,"7,868.00",,,,,
+,,USD,"147,846.20",,,,EUR Total,,"34,795.36",,,,,
+Mar-2026,Anil,EUR,"64,435.00",,,,RMB,CITI,"236,656.00",,,,,
+,,USD,"152,337.00",,,,,DBS,"236,721.58",,,,,
+,Asta,USD,"260,983.17",,,,,SCB,"345,150.00",,,,,
+,Joey,USD,"775,522.35",,,,RMB Total,,"818,527.58",,,,,
+,Robin,USD,"331,990.20",,,,USD,CITI,"394,082.43",,,,,
+,Shilpali,USD,"861,656.83",,,,,DBS,"778,505.20",,,,,
+,Tricia,USD,"3,307.50",,,,,SCB,"676,325.32",,,,,
+,Ulrica,USD,"308,008.00",,,,USD Total,,"1,848,912.95",,,,,
+,Yogesh.Tulsiani,USD,"4,290.00",,,Nov-2025,USD,DBS,"4,928.00",,,,,
+May-2026,Anil,USD,"77,716.80",,,,USD Total,,"4,928.00",,,,,
+,Asta,EUR,"12,868.00",,,,,,,,,,,
+,,USD,"162,626.88",,,,,,,,,,,
+,Joey,EUR,"21,927.36",,,,,,,,,,,
+,,RMB,"236,721.58",,,,,,,,,,,
+,,USD,"935,871.91",,,,,,,,,,,
+,Robin,USD,"265,297.26",,,,,,,,,,,
+,Tricia,RMB,"581,806.00",,,,,,,,,,,
+,,USD,"164,521.80",,,,,,,,,,,
+,Ulrica,USD,"202,500.00",,,,,,,,,,,
+,Yogesh.Tulsiani,USD,"40,378.30",,,,,,,,,,,
+Nov-2025,Robin,USD,"4,928.00",,,,,,,,,,,

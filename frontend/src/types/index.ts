@@ -67,6 +67,15 @@ export interface DefaultedSupplier {
   resolved_date: string | null;
 }
 
+// Bank master (Aug 2026) — names only; the tranche form composes the stored
+// value as "{name} ({currency})" from the request's currency.
+export interface Bank {
+  id: string;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+}
+
 export interface SupplierDefaultStatus {
   supplier_id?: string;
   is_defaulted: boolean;
@@ -152,6 +161,30 @@ export interface InvoiceAdjustment {
   destination_request_number: string | null;
   destination_tranche_label: string | null;
   supplier_name: string | null;
+}
+
+// File Remarks module (CIO batch 2, Aug 2026) — tracked merchandiser →
+// Accounts communication on a file; bypasses Adjust Invoices for now.
+export type FileRemarkCategory = "invoice_number_change" | "invoice_split" | "other";
+export type FileRemarkStatus = "open" | "resolved";
+
+export interface FileRemark {
+  id: string;
+  deposit_request_id: string;
+  category: FileRemarkCategory;
+  old_file_number: string | null;
+  new_file_number: string | null;
+  remark: string;
+  status: FileRemarkStatus;
+  created_by: string;
+  created_at: string;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  response_note: string | null;
+  request_number: string | null;
+  supplier_name: string | null;
+  created_by_name: string | null;
+  resolved_by_name: string | null;
 }
 
 export interface SupplierTrancheOptions {

@@ -39,6 +39,15 @@ export function currencyDisplayLabel(c: string | null | undefined): string {
   return c === "CNY" ? "CNY (RMB)" : c;
 }
 
+// Currency sign for compact prefixes (bank dropdown etc.); empty when the
+// currency has no common single symbol.
+const CURRENCY_SIGNS: Record<string, string> = {
+  USD: "$", EUR: "€", GBP: "£", CNY: "¥", JPY: "¥", INR: "₹", SGD: "S$",
+};
+export function currencySign(c: string | null | undefined): string {
+  return c ? CURRENCY_SIGNS[c] ?? "" : "";
+}
+
 export function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "—";
   return new Date(dateStr).toLocaleDateString("en-GB", {

@@ -346,12 +346,12 @@ export function NewRequestForm({ onSuccess, onCancel }: Props) {
               {fields.map((f, i) => (
                 <div key={f.id} className="rounded-lg border border-border p-3 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-foreground">Tranche {roman(i + 1)}</span>
+                    <span className="text-sm font-semibold text-foreground">Deposit - Tranche {roman(i + 1)}</span>
                     {fields.length > 1 && (
                       <button
                         type="button"
                         onClick={() => remove(i)}
-                        aria-label={`Remove Tranche ${roman(i + 1)}`}
+                        aria-label={`Remove Deposit - Tranche ${roman(i + 1)}`}
                         className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-muted transition-colors"
                       >
                         <Trash2 className="h-4 w-4" />

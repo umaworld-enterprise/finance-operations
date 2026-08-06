@@ -1,5 +1,5 @@
 import { api } from "@/lib/api";
-import type { AppUser, Customer, DefaultedSupplier, PaymentTerm, Supplier, SupplierDefaultStatus, UserRole, Vertical } from "@/types";
+import type { AppUser, Bank, Customer, DefaultedSupplier, PaymentTerm, Supplier, SupplierDefaultStatus, UserRole, Vertical } from "@/types";
 
 export interface FlagSupplierPayload {
   supplier_id: string;
@@ -59,6 +59,35 @@ const masterService = {
   getSuppliers: async (): Promise<Supplier[]> => {
     const { data } = await api.get<Supplier[]>("/masters/suppliers");
     return data;
+  },
+
+  // ── Bank master (Aug 2026) ────────────────────────────────────────────────
+
+  getBanks: async (): Promise<Bank[]> => {
+    const { data } = await api.get<Bank[]>("/masters/banks");
+    return data;
+  },
+
+  getAllBanks: async (): Promise<Bank[]> => {
+    const { data } = await api.get<Bank[]>("/masters/banks/all");
+    return data;
+  },
+
+  createBank: async (name: string, sortOrder = 0): Promise<Bank> => {
+    const { data } = await api.post<Bank>("/masters/banks", { name, sort_order: sortOrder });
+    return data;
+  },
+
+  updateBank: async (
+    id: string,
+    payload: { name?: string; is_active?: boolean; sort_order?: number },
+  ): Promise<Bank> => {
+    const { data } = await api.patch<Bank>(`/masters/banks/${id}`, payload);
+    return data;
+  },
+
+  deleteBank: async (id: string): Promise<void> => {
+    await api.delete(`/masters/banks/${id}`);
   },
 
   checkSupplierDefault: async (supplierId: string): Promise<SupplierDefaultStatus> => {

@@ -16,8 +16,8 @@ fan-outs go to every **active** user of that role.
 |---|---|---|---|
 | Payment processed (request-level, legacy) | Merchandiser (+ email to HoM/super admins) | `payment_processed` | pre-July |
 | Request-level TT copy attached | Merchandiser | `tt_copy_attached` | pre-July |
-| Tranche marked paid | Merchandiser | `tranche_paid` | 0018 |
-| Tranche TT copy attached | Merchandiser | `tranche_tt_attached` | 0018 |
+| Tranche marked paid (carries the TT link) | Merchandiser | `tranche_paid` | 0018 |
+| ~~Tranche TT copy attached~~ | ~~Merchandiser~~ | REMOVED 4 Aug 2026 — a TT upload alone notifies no one; the paid notification carries the link | — |
 | Tranche edited by merchandiser | Accounts Team | `tranche_updated` | 0018 |
 | HoM approved / rejected | Merchandiser (reason included) | `hom_approved` / `hom_rejected` | July C4 |
 | Adjustment raised (pending) | Accounts Team (excl. actor) | `adjustment_requested` | July B2/B3 |
@@ -40,6 +40,13 @@ fan-outs go to every **active** user of that role.
 | Cancel by merchandiser | Accounts Team | `status_changed` | `POST /{id}/cancel` |
 | Cancel by accounts | Merchandiser | `status_changed` | `POST /{id}/cancel` |
 | Reopen (accounts) | Merchandiser | `status_changed` | `POST /{id}/reopen` |
+
+## File Remarks module (CIO batch 2, 4 Aug 2026)
+
+| Event | Recipient(s) | Type | Trigger point |
+|---|---|---|---|
+| File remark raised | Accounts Team (excl. actor) | `file_remark_raised` | `POST /file-remarks` |
+| File remark resolved | The raiser (response note included) | `file_remark_resolved` | `POST /file-remarks/{id}/resolve` |
 
 Routing rule for `status_changed`: the actor's counterpart is notified —
 merchandiser actions fan out to Accounts (deep-link `/accounts/{id}`),

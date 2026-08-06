@@ -4,7 +4,6 @@ from uuid import uuid4
 
 from app.services.notification_service import (
     TYPE_TRANCHE_PAID,
-    TYPE_TRANCHE_TT_ATTACHED,
     TYPE_TRANCHE_UPDATED,
     build_tranche_notification_message,
 )
@@ -31,14 +30,8 @@ def test_tranche_paid_message_mentions_tt_copy_when_present():
     assert msg["attachment_url"] == "https://drive.test/x"
 
 
-def test_tranche_tt_attached_follow_up():
-    msg = build_tranche_notification_message(
-        TYPE_TRANCHE_TT_ATTACHED, "Dep-2026-0009", "Tranche III", uuid4(),
-        tt_copy_url="https://drive.test/y",
-    )
-    assert msg["title"] == "TT copy attached"
-    assert "Tranche III" in msg["body"]
-    assert msg["attachment_url"] == "https://drive.test/y"
+# test_tranche_tt_attached_follow_up was removed 4 Aug 2026 with the
+# notification itself — a TT upload alone no longer notifies anyone.
 
 
 def test_tranche_updated_targets_accounts_view():

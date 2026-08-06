@@ -43,7 +43,7 @@ async def test_create_with_tranches(db_session):
 
     tranches = await TrancheService(db_session).list_for_request(request.id)
     assert [t.tranche_number for t in tranches] == [1, 2]
-    assert [t.label for t in tranches] == ["Tranche I", "Tranche II"]
+    assert [t.label for t in tranches] == ["Deposit - Tranche I", "Deposit - Tranche II"]
     assert all(t.status == TrancheStatus.UNPAID for t in tranches)
     assert all(not t.is_legacy for t in tranches)
 

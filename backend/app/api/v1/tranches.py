@@ -274,9 +274,10 @@ async def upload_tranche_tt_copy(
 ) -> TrancheResponse:
     """Upload the bank's TT copy against a specific tranche.
 
-    Attach only — the tranche's status does NOT change (Aug 2026, item 3.1).
-    Marking it paid is a separate explicit action once payment details are
-    also recorded. The merchandiser is notified of the attachment.
+    Attach only — the tranche's status does NOT change (Aug 2026, item 3.1),
+    and NO notification is sent (4 Aug bug fix: the merchandiser is notified
+    once, when the tranche is explicitly marked paid — that notification
+    carries the TT link).
     """
     content = await file.read()
     error = validate_tt_copy(file.content_type, len(content))
@@ -312,7 +313,6 @@ async def upload_tranche_tt_copy(
         user_agent=request.headers.get("user-agent"),
     )
     background_tasks.add_task(seed_snapshot_for_request, request_id)
-    background_tasks.add_task(notify_tranche_event, request_id, tranche_id, "tt_attached")
     return _tranche_response(tranche, deposit_request.total_supplier_invoice_amount)
 
 

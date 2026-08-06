@@ -24,7 +24,7 @@ import { NpaPanel } from "@/components/analytics/NpaPanel";
 import { formatCurrency, formatDate, requestDisplayNumber } from "@/lib/utils";
 import {
   Users, ClipboardList, TrendingUp, AlertTriangle, ArrowUpRight,
-  LayoutDashboard, ScrollText, BarChart3, ShieldCheck, Eye, ListChecks,
+  LayoutDashboard, ScrollText, BarChart3, ShieldCheck, Eye, Landmark, ListChecks,
 } from "lucide-react";
 import Link from "next/link";
 import type { DepositRequest } from "@/types";
@@ -50,6 +50,7 @@ const QUICK_LINKS = [
   { label: "Analytics Access",  href: "/admin/analytics-access",  desc: "Control which roles see which analytics sections",            icon: ShieldCheck },
   { label: "Field Visibility",  href: "/admin/field-visibility",  desc: "Control which columns each role sees in request details",     icon: Eye },
   { label: "Payment Terms",     href: "/admin/payment-terms",     desc: "Manage the payment terms available in request forms",         icon: ListChecks },
+  { label: "Banks",             href: "/admin/banks",             desc: "Bank names for the tranche payment dropdown",                 icon: Landmark },
 ];
 
 function RequestRow({ req }: { req: DepositRequest }) {

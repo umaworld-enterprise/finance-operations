@@ -28,6 +28,24 @@ class PaymentTermResponse(OrmBase):
     sort_order: int
 
 
+# ── Bank master (Aug 2026) ────────────────────────────────────────────────────
+
+class BankCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    sort_order: int = 0
+
+class BankUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=200)
+    is_active: bool | None = None
+    sort_order: int | None = None
+
+class BankResponse(OrmBase):
+    id: UUID
+    name: str
+    is_active: bool
+    sort_order: int
+
+
 # ── Vertical ─────────────────────────────────────────────────────────────────
 
 class VerticalCreate(BaseModel):
