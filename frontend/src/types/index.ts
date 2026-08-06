@@ -163,18 +163,27 @@ export interface InvoiceAdjustment {
   supplier_name: string | null;
 }
 
-// File Remarks module (CIO batch 2, Aug 2026) — tracked merchandiser →
-// Accounts communication on a file; bypasses Adjust Invoices for now.
-export type FileRemarkCategory = "invoice_number_change" | "invoice_split" | "other";
+// File Remarks module (CIO batch 2, Aug 2026; reworked 4 Aug) — tracked
+// merchandiser → Accounts communication on a payment-completed file;
+// bypasses Adjust Invoices for now.
+export type FileRemarkCategory = "invoice_split" | "invoice_amount_change";
 export type FileRemarkStatus = "open" | "resolved";
+
+export interface SplitTarget {
+  file_number: string;
+  amount: number;
+}
 
 export interface FileRemark {
   id: string;
   deposit_request_id: string;
   category: FileRemarkCategory;
   old_file_number: string | null;
+  old_amount: number | null;
   new_file_number: string | null;
-  remark: string;
+  new_amount: number | null;
+  split_targets: SplitTarget[] | null;
+  remark: string | null;
   status: FileRemarkStatus;
   created_by: string;
   created_at: string;

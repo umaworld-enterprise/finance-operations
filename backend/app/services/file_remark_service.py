@@ -17,11 +17,12 @@ from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import (
     AuthorizationError,
+    BusinessRuleError,
     ConflictError,
     NotFoundError,
 )
 from app.models.deposit_request import DepositRequest
-from app.models.enums import UserRole
+from app.models.enums import RequestStatus, UserRole
 from app.models.file_remark import FileRemark, FileRemarkStatus
 from app.models.masters import Supplier, User
 from app.repositories.deposit_request_repo import DepositRequestRepository
@@ -33,9 +34,8 @@ _RAISER_ROLES = _DECIDER_ROLES | {UserRole.MERCHANDISER}
 _VIEWER_ROLES = _RAISER_ROLES | {UserRole.FINANCE_ADMIN}
 
 _CATEGORY_LABELS = {
-    "invoice_number_change": "Invoice number change",
-    "invoice_split": "Invoice split",
-    "other": "Other",
+    "invoice_split": "Split Invoices",
+    "invoice_amount_change": "Invoice amount changes",
 }
 
 
@@ -65,15 +65,30 @@ class FileRemarkService:
             raise NotFoundError(f"Request {data.deposit_request_id} not found.")
         if role == UserRole.MERCHANDISER and request.created_by != user_id:
             raise AuthorizationError("You can only raise file remarks on your own requests.")
-        # Deliberately NO lock/status check: paid & processed (locked) files
-        # are precisely what this channel exists for.
+        # Rule (4 Aug rework): only payment-completed files are eligible —
+        # splits and amount moves only make sense once the deposit is paid.
+        if request.current_status != RequestStatus.PAYMENT_PROCESSED:
+            raise BusinessRuleError(
+                "File remarks can only be raised on payment-completed files "
+                f"(current status: {request.current_status.value})."
+            )
 
         remark = FileRemark(
             deposit_request_id=request.id,
             category=data.category,
             old_file_number=(data.old_file_number or "").strip() or None,
+            old_amount=data.old_amount,
             new_file_number=(data.new_file_number or "").strip() or None,
-            remark=data.remark.strip(),
+            new_amount=data.new_amount,
+            split_targets=(
+                [
+                    {"file_number": t.file_number.strip(), "amount": float(t.amount)}
+                    for t in data.split_targets
+                ]
+                if data.split_targets
+                else None
+            ),
+            remark=(data.remark or "").strip() or None,
             status=FileRemarkStatus.OPEN.value,
             created_by=user_id,
         )
@@ -184,8 +199,20 @@ class FileRemarkService:
     def _summary(remark: FileRemark, request_number: str) -> str:
         parts = [f"{category_label(remark.category)} on {request_number}"]
         if remark.old_file_number:
-            parts.append(f"old file {remark.old_file_number}")
+            parts.append(
+                f"old file {remark.old_file_number}"
+                + (f" ({remark.old_amount})" if remark.old_amount is not None else "")
+            )
         if remark.new_file_number:
-            parts.append(f"new file {remark.new_file_number}")
-        parts.append(remark.remark)
+            parts.append(
+                f"new file {remark.new_file_number}"
+                + (f" ({remark.new_amount})" if remark.new_amount is not None else "")
+            )
+        if remark.split_targets:
+            targets = ", ".join(
+                f"{t.get('file_number')} ({t.get('amount')})" for t in remark.split_targets
+            )
+            parts.append(f"splits to {targets}")
+        if remark.remark:
+            parts.append(remark.remark)
         return " — ".join(parts)

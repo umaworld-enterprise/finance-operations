@@ -1,14 +1,16 @@
 "use client";
 
-// File Remarks module (CIO batch 2, Aug 2026) — a tracked Open → Resolved
-// channel from merchandisers to Accounts that bypasses Adjust Invoices for
-// the time being: invoice-number changes and invoice splits on files
-// (including paid & processed ones) are raised as structured remarks.
+// File Remarks module (CIO batch 2, Aug 2026; reworked 4 Aug) — a tracked
+// Open → Resolved channel from merchandisers to Accounts that bypasses
+// Adjust Invoices for the time being. Two categories only:
+//   Split Invoices        — file splits to N × (new file no. + amount)
+//   Invoice amount changes — old file + amount → new file + amount
+// Only payment-completed files are eligible; the remark text is optional.
 // Moves no money — Accounts act manually and resolve with an optional note.
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Inbox, MessageSquarePlus } from "lucide-react";
+import { Inbox, MessageSquarePlus, Plus, Trash2 } from "lucide-react";
 import { TopNav } from "@/components/layout/TopNav";
 import { RoleGuard } from "@/components/layout/RoleGuard";
 import { Button } from "@/components/ui/button";
@@ -30,35 +32,12 @@ import {
 import { formatDate } from "@/lib/utils";
 import type { FileRemark, FileRemarkCategory } from "@/types";
 
-const CATEGORIES: {
-  value: FileRemarkCategory;
-  label: string;
-  needsOld: boolean;
-  needsNew: boolean;
-  newLabel: string;
-}[] = [
-  {
-    value: "invoice_number_change",
-    label: "Invoice number change",
-    needsOld: true,
-    needsNew: true,
-    newLabel: "New file number",
-  },
-  {
-    value: "invoice_split",
-    label: "Invoice split",
-    needsOld: false,
-    needsNew: true,
-    newLabel: "Splits to (file number/s)",
-  },
-  { value: "other", label: "Other", needsOld: false, needsNew: false, newLabel: "" },
-];
-
 const CATEGORY_LABELS: Record<FileRemarkCategory, string> = {
-  invoice_number_change: "Invoice number change",
-  invoice_split: "Invoice split",
-  other: "Other",
+  invoice_split: "Split Invoices",
+  invoice_amount_change: "Invoice amount changes",
 };
+
+type SplitRow = { file_number: string; amount: string };
 
 function StatusPill({ status }: { status: FileRemark["status"] }) {
   return status === "resolved" ? (
@@ -112,12 +91,28 @@ function ResolveDialog({
   );
 }
 
-function RemarkFileNumbers({ r }: { r: FileRemark }) {
+// Structured details cell — split targets or old→new amounts.
+function RemarkDetails({ r }: { r: FileRemark }) {
+  if (r.category === "invoice_split" && r.split_targets?.length) {
+    return (
+      <div className="text-xs text-muted-foreground space-y-0.5">
+        {r.split_targets.map((t, i) => (
+          <p key={`${t.file_number}-${i}`}>
+            → {t.file_number} · {Number(t.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+          </p>
+        ))}
+      </div>
+    );
+  }
   return (
     <span className="text-xs text-muted-foreground">
-      {r.old_file_number ? `old: ${r.old_file_number}` : ""}
+      {r.old_file_number
+        ? `${r.old_file_number}${r.old_amount != null ? ` (${Number(r.old_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })})` : ""}`
+        : ""}
       {r.old_file_number && r.new_file_number ? " → " : ""}
-      {r.new_file_number ? `new: ${r.new_file_number}` : ""}
+      {r.new_file_number
+        ? `${r.new_file_number}${r.new_amount != null ? ` (${Number(r.new_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })})` : ""}`
+        : ""}
     </span>
   );
 }
@@ -127,27 +122,43 @@ export default function FileRemarksPage() {
   const isDecider = user?.role === "accounts_team" || user?.role === "super_admin";
   const canRaise = isDecider || user?.role === "merchandiser";
 
-  // Role-scoped server-side: merchandisers get their own requests.
+  // Role-scoped server-side; only payment-completed files are eligible.
   const { data: requests = [] } = useRequests();
+  const completedRequests = requests.filter((r) => r.current_status === "payment_processed");
   const { data: remarks = [], isLoading } = useFileRemarks();
   const createRemark = useCreateFileRemark();
   const resolveRemark = useResolveFileRemark();
 
+  // Category comes FIRST (4 Aug rework) and drives the rest of the form.
+  const [category, setCategory] = useState<FileRemarkCategory>("invoice_split");
   const [requestId, setRequestId] = useState("");
-  const [category, setCategory] = useState<FileRemarkCategory>("invoice_number_change");
+  const [splitRows, setSplitRows] = useState<SplitRow[]>([{ file_number: "", amount: "" }]);
   const [oldFile, setOldFile] = useState("");
+  const [oldAmount, setOldAmount] = useState("");
   const [newFile, setNewFile] = useState("");
+  const [newAmount, setNewAmount] = useState("");
   const [remarkText, setRemarkText] = useState("");
   const [resolveTarget, setResolveTarget] = useState<FileRemark | null>(null);
 
-  const cat = CATEGORIES.find((c) => c.value === category)!;
   const openRemarks = remarks.filter((r) => r.status === "open");
 
+  const splitRowsValid =
+    splitRows.length > 0 &&
+    splitRows.every((row) => row.file_number.trim() && Number(row.amount) > 0);
+  const amountChangeValid =
+    oldFile.trim() && Number(oldAmount) > 0 && newFile.trim() && Number(newAmount) > 0;
   const canSubmit =
-    requestId &&
-    remarkText.trim() &&
-    (!cat.needsOld || oldFile.trim()) &&
-    (!cat.needsNew || newFile.trim());
+    !!requestId && (category === "invoice_split" ? splitRowsValid : amountChangeValid);
+
+  const resetForm = () => {
+    setRequestId("");
+    setSplitRows([{ file_number: "", amount: "" }]);
+    setOldFile("");
+    setOldAmount("");
+    setNewFile("");
+    setNewAmount("");
+    setRemarkText("");
+  };
 
   const doCreate = async () => {
     if (!canSubmit) return;
@@ -155,15 +166,23 @@ export default function FileRemarksPage() {
       await createRemark.mutateAsync({
         deposit_request_id: requestId,
         category,
-        old_file_number: cat.needsOld ? oldFile.trim() : undefined,
-        new_file_number: cat.needsNew ? newFile.trim() : undefined,
-        remark: remarkText.trim(),
+        ...(category === "invoice_split"
+          ? {
+              split_targets: splitRows.map((row) => ({
+                file_number: row.file_number.trim(),
+                amount: Number(row.amount),
+              })),
+            }
+          : {
+              old_file_number: oldFile.trim(),
+              old_amount: Number(oldAmount),
+              new_file_number: newFile.trim(),
+              new_amount: Number(newAmount),
+            }),
+        remark: remarkText.trim() || undefined,
       });
       toast.success("File remark raised — the Accounts team has been notified.");
-      setRequestId("");
-      setOldFile("");
-      setNewFile("");
-      setRemarkText("");
+      resetForm();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to raise the file remark.");
     }
@@ -180,14 +199,14 @@ export default function FileRemarksPage() {
     }
   };
 
-  const selectCls =
+  const inputCls =
     "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring";
 
   return (
     <RoleGuard allowedRoles={["merchandiser", "accounts_team", "super_admin", "finance_admin"]}>
       <TopNav
         title="File Remarks"
-        subtitle="Invoice number changes and splits on existing files — routed to Accounts, no balances move"
+        subtitle="Invoice splits and amount changes on payment-completed files — routed to Accounts, no balances move"
       />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6 max-w-5xl mx-auto w-full">
         {canRaise && (
@@ -198,21 +217,37 @@ export default function FileRemarksPage() {
                 <h2 className="font-semibold text-foreground text-sm">New File Remark</h2>
               </div>
               <p className="text-xs text-muted-foreground -mt-2">
-                Works on any of your files, including paid &amp; processed ones. The
-                Accounts team is notified and resolves the remark once actioned.
+                Only files whose payment is completed can be selected. The Accounts
+                team is notified and resolves the remark once actioned.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="fr-request">File / Request</Label>
+                  <Label htmlFor="fr-category">Category</Label>
+                  <select
+                    id="fr-category"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value as FileRemarkCategory)}
+                    className={`mt-1 ${inputCls}`}
+                  >
+                    <option value="invoice_split">Split Invoices</option>
+                    <option value="invoice_amount_change">Invoice amount changes</option>
+                  </select>
+                </div>
+                <div>
+                  <Label htmlFor="fr-request">Select file (payment completed)</Label>
                   <select
                     id="fr-request"
                     value={requestId}
                     onChange={(e) => setRequestId(e.target.value)}
-                    className={`mt-1 ${selectCls}`}
+                    className={`mt-1 ${inputCls}`}
                   >
-                    <option value="">Select request</option>
-                    {requests.map((r) => (
+                    <option value="">
+                      {completedRequests.length === 0
+                        ? "No payment-completed files"
+                        : "Select file"}
+                    </option>
+                    {completedRequests.map((r) => (
                       <option key={r.id} value={r.id}>
                         {r.request_number}
                         {r.sunshine_invoice_number ? ` (${r.sunshine_invoice_number})` : ""} — {r.supplier.name}
@@ -220,60 +255,127 @@ export default function FileRemarksPage() {
                     ))}
                   </select>
                 </div>
-                <div>
-                  <Label htmlFor="fr-category">Category</Label>
-                  <select
-                    id="fr-category"
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value as FileRemarkCategory)}
-                    className={`mt-1 ${selectCls}`}
+              </div>
+
+              {category === "invoice_split" ? (
+                <div className="space-y-2">
+                  <Label>
+                    File splits to<span className="ml-0.5" aria-hidden="true">*</span>
+                  </Label>
+                  {splitRows.map((row, i) => (
+                    <div key={i} className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        placeholder={`New file no. ${i + 1}`}
+                        value={row.file_number}
+                        onChange={(e) =>
+                          setSplitRows((rows) =>
+                            rows.map((r, j) => (j === i ? { ...r, file_number: e.target.value } : r)),
+                          )
+                        }
+                        className={inputCls}
+                      />
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="Amount"
+                        value={row.amount}
+                        onChange={(e) =>
+                          setSplitRows((rows) =>
+                            rows.map((r, j) => (j === i ? { ...r, amount: e.target.value } : r)),
+                          )
+                        }
+                        className={`${inputCls} sm:max-w-44`}
+                      />
+                      {splitRows.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setSplitRows((rows) => rows.filter((_, j) => j !== i))}
+                          aria-label={`Remove split row ${i + 1}`}
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-muted transition-colors self-center"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSplitRows((rows) => [...rows, { file_number: "", amount: "" }])}
                   >
-                    {CATEGORIES.map((c) => (
-                      <option key={c.value} value={c.value}>{c.label}</option>
-                    ))}
-                  </select>
+                    <Plus className="h-3.5 w-3.5 mr-1.5" /> Add file
+                  </Button>
                 </div>
-                {cat.needsOld && (
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="fr-old">
+                    <Label htmlFor="fr-old-file">
                       Old file number<span className="ml-0.5" aria-hidden="true">*</span>
                     </Label>
                     <input
-                      id="fr-old"
+                      id="fr-old-file"
                       type="text"
                       value={oldFile}
                       onChange={(e) => setOldFile(e.target.value)}
-                      className={`mt-1 ${selectCls}`}
+                      className={`mt-1 ${inputCls}`}
                     />
                   </div>
-                )}
-                {cat.needsNew && (
                   <div>
-                    <Label htmlFor="fr-new">
-                      {cat.newLabel}<span className="ml-0.5" aria-hidden="true">*</span>
+                    <Label htmlFor="fr-old-amount">
+                      Old file amount<span className="ml-0.5" aria-hidden="true">*</span>
                     </Label>
                     <input
-                      id="fr-new"
+                      id="fr-old-amount"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={oldAmount}
+                      onChange={(e) => setOldAmount(e.target.value)}
+                      className={`mt-1 ${inputCls}`}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="fr-new-file">
+                      New file number<span className="ml-0.5" aria-hidden="true">*</span>
+                    </Label>
+                    <input
+                      id="fr-new-file"
                       type="text"
                       value={newFile}
                       onChange={(e) => setNewFile(e.target.value)}
-                      className={`mt-1 ${selectCls}`}
+                      className={`mt-1 ${inputCls}`}
                     />
                   </div>
-                )}
-                <div className="sm:col-span-2">
-                  <Label htmlFor="fr-remark">
-                    Remarks<span className="ml-0.5" aria-hidden="true">*</span>
-                  </Label>
-                  <Textarea
-                    id="fr-remark"
-                    rows={2}
-                    className="mt-1"
-                    value={remarkText}
-                    onChange={(e) => setRemarkText(e.target.value)}
-                    placeholder="e.g. Full deposit amount is transferred to the new file."
-                  />
+                  <div>
+                    <Label htmlFor="fr-new-amount">
+                      New file amount<span className="ml-0.5" aria-hidden="true">*</span>
+                    </Label>
+                    <input
+                      id="fr-new-amount"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={newAmount}
+                      onChange={(e) => setNewAmount(e.target.value)}
+                      className={`mt-1 ${inputCls}`}
+                    />
+                  </div>
                 </div>
+              )}
+
+              <div>
+                <Label htmlFor="fr-remark">Remarks (optional)</Label>
+                <Textarea
+                  id="fr-remark"
+                  rows={2}
+                  className="mt-1"
+                  value={remarkText}
+                  onChange={(e) => setRemarkText(e.target.value)}
+                  placeholder="Any additional context for the Accounts team."
+                />
               </div>
 
               <Button onClick={doCreate} disabled={!canSubmit || createRemark.isPending}>
@@ -309,7 +411,7 @@ export default function FileRemarksPage() {
                         <TableHead>Raised</TableHead>
                         <TableHead>Request #</TableHead>
                         <TableHead>Category</TableHead>
-                        <TableHead>File numbers</TableHead>
+                        <TableHead>Details</TableHead>
                         <TableHead>Remark / By</TableHead>
                         {isDecider && <TableHead />}
                       </TableRow>
@@ -326,9 +428,9 @@ export default function FileRemarksPage() {
                           <TableCell className="text-sm whitespace-nowrap">
                             {CATEGORY_LABELS[r.category]}
                           </TableCell>
-                          <TableCell><RemarkFileNumbers r={r} /></TableCell>
+                          <TableCell><RemarkDetails r={r} /></TableCell>
                           <TableCell className="text-sm max-w-64">
-                            {r.remark}
+                            {r.remark ?? "—"}
                             <span className="text-xs text-muted-foreground"> — {r.created_by_name ?? "?"}</span>
                           </TableCell>
                           {isDecider && (
@@ -373,7 +475,7 @@ export default function FileRemarksPage() {
                       <TableHead>Raised</TableHead>
                       <TableHead>Request #</TableHead>
                       <TableHead>Category</TableHead>
-                      <TableHead>File numbers</TableHead>
+                      <TableHead>Details</TableHead>
                       <TableHead>Remark</TableHead>
                       <TableHead>Status / Response</TableHead>
                     </TableRow>
@@ -390,8 +492,8 @@ export default function FileRemarksPage() {
                         <TableCell className="text-sm whitespace-nowrap">
                           {CATEGORY_LABELS[r.category]}
                         </TableCell>
-                        <TableCell><RemarkFileNumbers r={r} /></TableCell>
-                        <TableCell className="text-sm max-w-64">{r.remark}</TableCell>
+                        <TableCell><RemarkDetails r={r} /></TableCell>
+                        <TableCell className="text-sm max-w-64">{r.remark ?? "—"}</TableCell>
                         <TableCell>
                           <div className="space-y-1">
                             <StatusPill status={r.status} />

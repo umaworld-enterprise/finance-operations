@@ -16,7 +16,7 @@ import {
   useUploadTrancheTtCopy,
 } from "@/hooks/useRequests";
 import { useBanks } from "@/hooks/useMasters";
-import { currencyDisplayLabel, currencySign, formatCurrency, formatDate, todayLocalISO } from "@/lib/utils";
+import { currencyDisplayLabel, formatCurrency, formatDate, todayLocalISO } from "@/lib/utils";
 import type { PaymentTranche } from "@/types";
 
 interface Props {
@@ -114,7 +114,7 @@ function TranchePaymentDetailsForm({
             )}
             {banks.map((b) => (
               <option key={b.id} value={composeBank(b.name)}>
-                {`${currencySign(currency)} ${b.name}${currency ? ` (${currency})` : ""}`.trim()}
+                {composeBank(b.name)}
               </option>
             ))}
           </select>

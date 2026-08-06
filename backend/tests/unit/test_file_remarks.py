@@ -46,17 +46,25 @@ async def _setup(db_session):
     return merch, accounts, request
 
 
-def _payload(request, category="invoice_number_change", **extra):
-    defaults = {"old_file_number": "INV-OLD-1", "new_file_number": "INV-NEW-1"}
+def _payload(request, category="invoice_amount_change", **extra):
+    """4 Aug rework: two categories only, amounts included, remark OPTIONAL."""
+    from decimal import Decimal
+
+    defaults: dict = {
+        "old_file_number": "INV-OLD-1", "old_amount": Decimal("1000.00"),
+        "new_file_number": "INV-NEW-1", "new_amount": Decimal("1000.00"),
+    }
     if category == "invoice_split":
-        defaults = {"new_file_number": "INV-NEW-1, INV-NEW-2"}
-    if category == "other":
-        defaults = {}
+        defaults = {
+            "split_targets": [
+                {"file_number": "INV-NEW-1", "amount": Decimal("600.00")},
+                {"file_number": "INV-NEW-2", "amount": Decimal("400.00")},
+            ]
+        }
     defaults.update(extra)
     return FileRemarkCreate(
         deposit_request_id=request.id,
         category=category,
-        remark="Please move the full deposit.",
         **defaults,
     )
 
@@ -64,28 +72,37 @@ def _payload(request, category="invoice_number_change", **extra):
 # ── Category-specific field validation (schema) ───────────────────────────────
 
 
-def test_invoice_number_change_requires_both_file_numbers():
+def test_amount_change_requires_files_and_amounts():
+    from decimal import Decimal
     from uuid import uuid4
 
-    with pytest.raises(PydanticValidationError, match="Old file number"):
+    with pytest.raises(PydanticValidationError, match="Old file amount"):
         FileRemarkCreate(
-            deposit_request_id=uuid4(), category="invoice_number_change",
-            new_file_number="N-1", remark="r",
+            deposit_request_id=uuid4(), category="invoice_amount_change",
+            old_file_number="O-1", new_file_number="N-1", new_amount=Decimal("10"),
         )
     with pytest.raises(PydanticValidationError, match="New file number"):
         FileRemarkCreate(
-            deposit_request_id=uuid4(), category="invoice_number_change",
-            old_file_number="O-1", remark="r",
+            deposit_request_id=uuid4(), category="invoice_amount_change",
+            old_file_number="O-1", old_amount=Decimal("10"), new_amount=Decimal("10"),
         )
 
 
-def test_invoice_split_requires_target_file_numbers():
+def test_invoice_split_requires_target_rows_and_remark_is_optional():
+    from decimal import Decimal
     from uuid import uuid4
 
     with pytest.raises(PydanticValidationError, match="splits to"):
-        FileRemarkCreate(deposit_request_id=uuid4(), category="invoice_split", remark="r")
-    # "other" needs the remark only.
-    FileRemarkCreate(deposit_request_id=uuid4(), category="other", remark="r")
+        FileRemarkCreate(deposit_request_id=uuid4(), category="invoice_split")
+    # A valid split needs no remark text — the rows carry the instruction.
+    ok = FileRemarkCreate(
+        deposit_request_id=uuid4(), category="invoice_split",
+        split_targets=[{"file_number": "N-1", "amount": Decimal("10")}],
+    )
+    assert ok.remark is None
+    # "other" is no longer a category.
+    with pytest.raises(PydanticValidationError):
+        FileRemarkCreate(deposit_request_id=uuid4(), category="other", remark="r")
 
 
 # ── Create / resolve lifecycle ────────────────────────────────────────────────
@@ -99,6 +116,8 @@ async def test_merchandiser_raises_remark_on_own_locked_request(db_session):
     assert remark.status == "open"
     assert remark.old_file_number == "INV-OLD-1"
     assert remark.new_file_number == "INV-NEW-1"
+    assert float(remark.old_amount) == 1000.0
+    assert remark.remark is None  # optional since the 4 Aug rework
     # Audit on the remark AND the request-level trail.
     for entity, entity_id in (("file_remarks", remark.id), ("deposit_requests", request.id)):
         rows = (
@@ -121,6 +140,24 @@ async def test_non_owner_and_ineligible_roles_blocked(db_session):
         await svc.create(_payload(request), other.id, UserRole.MERCHANDISER)
     with pytest.raises(AuthorizationError):
         await svc.create(_payload(request), hom.id, UserRole.HEAD_OF_MERCHANDISER)
+
+
+@pytest.mark.asyncio
+async def test_only_payment_completed_files_are_eligible(db_session):
+    """4 Aug rework: the select-file list (and the server) only accept files
+    whose payment is completed."""
+    from app.core.exceptions import BusinessRuleError
+
+    merch, _, _ = await _setup(db_session)
+    supplier = await make_supplier(db_session)
+    customer = await make_customer(db_session)
+    pending = await make_request(
+        db_session, supplier=supplier, customer=customer, created_by=merch,
+        status=RequestStatus.PENDING_PAYMENT,
+    )
+    svc = FileRemarkService(db_session)
+    with pytest.raises(BusinessRuleError, match="payment-completed"):
+        await svc.create(_payload(pending), merch.id, UserRole.MERCHANDISER)
 
 
 @pytest.mark.asyncio
@@ -149,12 +186,13 @@ async def test_list_scoping_and_filters(db_session):
     supplier2 = await make_supplier(db_session)
     customer2 = await make_customer(db_session)
     other_req = await make_request(
-        db_session, supplier=supplier2, customer=customer2, created_by=other
+        db_session, supplier=supplier2, customer=customer2, created_by=other,
+        status=RequestStatus.PAYMENT_PROCESSED, is_locked=True,
     )
     svc = FileRemarkService(db_session)
     mine = await svc.create(_payload(request), merch.id, UserRole.MERCHANDISER)
     theirs = await svc.create(
-        _payload(other_req, category="other"), other.id, UserRole.MERCHANDISER
+        _payload(other_req, category="invoice_split"), other.id, UserRole.MERCHANDISER
     )
     await svc.resolve(theirs.id, accounts.id, UserRole.ACCOUNTS_TEAM)
 
@@ -196,9 +234,10 @@ async def test_raised_fans_out_to_accounts(db_session, engine, monkeypatch):
     ).scalars().all()
     assert {n.user_id for n in rows} == {accounts.id, accounts2.id}
     body = rows[0].body
-    assert "Invoice number change" in body
+    assert "Invoice amount changes" in body
     assert request.request_number in body
     assert "INV-OLD-1" in body and "INV-NEW-1" in body
+    assert "1000.0" in body  # amounts travel in the notification
 
 
 @pytest.mark.asyncio
