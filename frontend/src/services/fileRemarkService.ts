@@ -1,12 +1,15 @@
 import { api } from "@/lib/api";
-import type { FileRemark, FileRemarkCategory } from "@/types";
+import type { FileRemark, FileRemarkCategory, SplitTarget } from "@/types";
 
 export interface CreateFileRemarkPayload {
   deposit_request_id: string;
   category: FileRemarkCategory;
   old_file_number?: string;
+  old_amount?: number;
   new_file_number?: string;
-  remark: string;
+  new_amount?: number;
+  split_targets?: SplitTarget[];
+  remark?: string;
 }
 
 const fileRemarkService = {

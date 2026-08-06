@@ -497,6 +497,26 @@ Tests: composed-value save + audit, wrong-composition and unknown-bank
 rejected, empty-master block, non-bank changes unaffected; touched/unlock
 tests reseeded accordingly. 237 backend tests green; migration head **0026**.
 
+**4 Aug follow-up tweaks (same day):**
+1. **Bank dropdown: currency symbol removed** — options read "DBS (EUR)"
+   (name + suffix only); stored value unchanged; `currencySign()` helper
+   retired.
+2. **File Remarks rework** (migration 0025 amended in place — nothing
+   deployed anywhere, live DB still at 0019, so no stacked migration):
+   - Categories reduced to **Split Invoices** and **Invoice amount changes**
+     ("other" and the old "invoice_number_change" removed); category is the
+     FIRST field and drives the form.
+   - **Only payment-completed files** are selectable (UI filter + server-side
+     BusinessRuleError).
+   - **Split Invoices:** dynamic "file splits to" rows — N × (new file no. +
+     amount) stored as JSON `split_targets`; at least one row required.
+   - **Invoice amount changes:** old file + amount → new file + amount, all
+     four required (`old_amount`/`new_amount` numeric columns added).
+   - **Remark text now optional** (column relaxed to nullable) — the
+     structured fields carry the instruction.
+   - Audit summaries and both notifications carry the amounts / split
+     targets; tests reworked (+2). 238 backend tests green.
+
 ---
 
 # Batch complete — 1 Aug 2026

@@ -915,15 +915,11 @@ async def _load_file_remark_context(session: AsyncSession, remark_id: UUID):
 
 
 def _file_remark_body(remark, request_number: str) -> str:
-    from app.services.file_remark_service import category_label
+    # Same wording as the audit summary — category, files, amounts, split
+    # targets, optional remark.
+    from app.services.file_remark_service import FileRemarkService
 
-    body = f"{category_label(remark.category)} on {request_number}"
-    if remark.old_file_number:
-        body += f" — old file {remark.old_file_number}"
-    if remark.new_file_number:
-        body += f" — new file {remark.new_file_number}"
-    body += f". {remark.remark}"
-    return body
+    return FileRemarkService._summary(remark, request_number)
 
 
 async def notify_file_remark_raised(remark_id: UUID) -> None:

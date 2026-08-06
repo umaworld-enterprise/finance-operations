@@ -31,8 +31,12 @@ def upgrade() -> None:
                   sa.ForeignKey("deposit_requests.id"), nullable=False),
         sa.Column("category", sa.String(40), nullable=False),
         sa.Column("old_file_number", sa.String(200), nullable=True),
+        sa.Column("old_amount", sa.Numeric(18, 2), nullable=True),
         sa.Column("new_file_number", sa.String(200), nullable=True),
-        sa.Column("remark", sa.Text(), nullable=False),
+        sa.Column("new_amount", sa.Numeric(18, 2), nullable=True),
+        # Split Invoices: dynamic [{file_number, amount}, …] target rows.
+        sa.Column("split_targets", sa.JSON(), nullable=True),
+        sa.Column("remark", sa.Text(), nullable=True),
         sa.Column("status", sa.String(20), nullable=False, server_default="open"),
         sa.Column("created_by", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("users.id"), nullable=False),
@@ -43,7 +47,7 @@ def upgrade() -> None:
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("response_note", sa.Text(), nullable=True),
         sa.CheckConstraint(
-            "category IN ('invoice_number_change', 'invoice_split', 'other')",
+            "category IN ('invoice_split', 'invoice_amount_change')",
             name="ck_file_remarks_category",
         ),
         sa.CheckConstraint(

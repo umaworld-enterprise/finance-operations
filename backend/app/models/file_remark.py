@@ -11,7 +11,17 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, func
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,9 +29,8 @@ from app.models.base import Base, UUIDPrimaryKeyMixin
 
 
 class FileRemarkCategory(str, enum.Enum):
-    INVOICE_NUMBER_CHANGE = "invoice_number_change"
     INVOICE_SPLIT = "invoice_split"
-    OTHER = "other"
+    INVOICE_AMOUNT_CHANGE = "invoice_amount_change"
 
 
 class FileRemarkStatus(str, enum.Enum):
@@ -38,9 +47,15 @@ class FileRemark(UUIDPrimaryKeyMixin, Base):
     # Plain varchar + CHECK (not a PG enum) — categories can grow without
     # ALTER TYPE pain.
     category: Mapped[str] = mapped_column(String(40), nullable=False)
+    # Invoice amount change: old file + amount → new file + amount.
     old_file_number: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    old_amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     new_file_number: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    remark: Mapped[str] = mapped_column(Text, nullable=False)
+    new_amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    # Split Invoices: dynamic [{"file_number": str, "amount": number}, …].
+    split_targets: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Optional (4 Aug rework) — the structured fields carry the instruction.
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=FileRemarkStatus.OPEN.value
     )
@@ -62,7 +77,7 @@ class FileRemark(UUIDPrimaryKeyMixin, Base):
 
     __table_args__ = (
         CheckConstraint(
-            "category IN ('invoice_number_change', 'invoice_split', 'other')",
+            "category IN ('invoice_split', 'invoice_amount_change')",
             name="ck_file_remarks_category",
         ),
         CheckConstraint("status IN ('open', 'resolved')", name="ck_file_remarks_status"),
