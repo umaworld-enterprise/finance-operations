@@ -47,11 +47,12 @@ async def _setup(db_session):
 
 
 def _payload(request, category="invoice_amount_change", **extra):
-    """4 Aug rework: two categories only, amounts included, remark OPTIONAL."""
+    """4 Aug rework: two categories only, remark OPTIONAL. The old amount is
+    never sent — the server derives it from the file's deposit amount."""
     from decimal import Decimal
 
     defaults: dict = {
-        "old_file_number": "INV-OLD-1", "old_amount": Decimal("1000.00"),
+        "old_file_number": "INV-OLD-1",
         "new_file_number": "INV-NEW-1", "new_amount": Decimal("1000.00"),
     }
     if category == "invoice_split":
@@ -72,20 +73,27 @@ def _payload(request, category="invoice_amount_change", **extra):
 # ── Category-specific field validation (schema) ───────────────────────────────
 
 
-def test_amount_change_requires_files_and_amounts():
+def test_amount_change_requires_files_and_new_amount():
+    """The OLD amount is server-derived (pre-populated, disabled in the UI)
+    — only old file, new file and the new amount come from the client."""
     from decimal import Decimal
     from uuid import uuid4
 
-    with pytest.raises(PydanticValidationError, match="Old file amount"):
-        FileRemarkCreate(
-            deposit_request_id=uuid4(), category="invoice_amount_change",
-            old_file_number="O-1", new_file_number="N-1", new_amount=Decimal("10"),
-        )
     with pytest.raises(PydanticValidationError, match="New file number"):
         FileRemarkCreate(
             deposit_request_id=uuid4(), category="invoice_amount_change",
-            old_file_number="O-1", old_amount=Decimal("10"), new_amount=Decimal("10"),
+            old_file_number="O-1", new_amount=Decimal("10"),
         )
+    with pytest.raises(PydanticValidationError, match="New file amount"):
+        FileRemarkCreate(
+            deposit_request_id=uuid4(), category="invoice_amount_change",
+            old_file_number="O-1", new_file_number="N-1",
+        )
+    # No old_amount needed — valid without it.
+    FileRemarkCreate(
+        deposit_request_id=uuid4(), category="invoice_amount_change",
+        old_file_number="O-1", new_file_number="N-1", new_amount=Decimal("10"),
+    )
 
 
 def test_invoice_split_requires_target_rows_and_remark_is_optional():
@@ -116,6 +124,7 @@ async def test_merchandiser_raises_remark_on_own_locked_request(db_session):
     assert remark.status == "open"
     assert remark.old_file_number == "INV-OLD-1"
     assert remark.new_file_number == "INV-NEW-1"
+    # Server-derived from the file's deposit amount (factory default 1000).
     assert float(remark.old_amount) == 1000.0
     assert remark.remark is None  # optional since the 4 Aug rework
     # Audit on the remark AND the request-level trail.

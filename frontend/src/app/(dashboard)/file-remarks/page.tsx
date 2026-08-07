@@ -134,7 +134,6 @@ export default function FileRemarksPage() {
   const [requestId, setRequestId] = useState("");
   const [splitRows, setSplitRows] = useState<SplitRow[]>([{ file_number: "", amount: "" }]);
   const [oldFile, setOldFile] = useState("");
-  const [oldAmount, setOldAmount] = useState("");
   const [newFile, setNewFile] = useState("");
   const [newAmount, setNewAmount] = useState("");
   const [remarkText, setRemarkText] = useState("");
@@ -142,11 +141,16 @@ export default function FileRemarksPage() {
 
   const openRemarks = remarks.filter((r) => r.status === "open");
 
+  // The old amount pre-populates from the selected file's deposit amount and
+  // is NOT editable (4 Aug follow-up) — the server derives it independently.
+  const selectedRequest = completedRequests.find((r) => r.id === requestId);
+  const oldAmountDisplay =
+    selectedRequest != null ? Number(selectedRequest.deposit_amount).toFixed(2) : "";
+
   const splitRowsValid =
     splitRows.length > 0 &&
     splitRows.every((row) => row.file_number.trim() && Number(row.amount) > 0);
-  const amountChangeValid =
-    oldFile.trim() && Number(oldAmount) > 0 && newFile.trim() && Number(newAmount) > 0;
+  const amountChangeValid = oldFile.trim() && newFile.trim() && Number(newAmount) > 0;
   const canSubmit =
     !!requestId && (category === "invoice_split" ? splitRowsValid : amountChangeValid);
 
@@ -154,7 +158,6 @@ export default function FileRemarksPage() {
     setRequestId("");
     setSplitRows([{ file_number: "", amount: "" }]);
     setOldFile("");
-    setOldAmount("");
     setNewFile("");
     setNewAmount("");
     setRemarkText("");
@@ -166,6 +169,8 @@ export default function FileRemarksPage() {
       await createRemark.mutateAsync({
         deposit_request_id: requestId,
         category,
+        // The old amount is deliberately NOT sent — the server derives it
+        // from the selected file's deposit amount.
         ...(category === "invoice_split"
           ? {
               split_targets: splitRows.map((row) => ({
@@ -175,7 +180,6 @@ export default function FileRemarksPage() {
             }
           : {
               old_file_number: oldFile.trim(),
-              old_amount: Number(oldAmount),
               new_file_number: newFile.trim(),
               new_amount: Number(newAmount),
             }),
@@ -259,6 +263,21 @@ export default function FileRemarksPage() {
 
               {category === "invoice_split" ? (
                 <div className="space-y-2">
+                  <div className="sm:max-w-64">
+                    <Label htmlFor="fr-split-old-amount">Old file amount</Label>
+                    <input
+                      id="fr-split-old-amount"
+                      type="text"
+                      value={oldAmountDisplay}
+                      readOnly
+                      disabled
+                      placeholder="Select a file above"
+                      className={`mt-1 ${inputCls} bg-muted opacity-70 cursor-not-allowed`}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Pre-filled from the selected file — not editable.
+                    </p>
+                  </div>
                   <Label>
                     File splits to<span className="ml-0.5" aria-hidden="true">*</span>
                   </Label>
@@ -324,18 +343,19 @@ export default function FileRemarksPage() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="fr-old-amount">
-                      Old file amount<span className="ml-0.5" aria-hidden="true">*</span>
-                    </Label>
+                    <Label htmlFor="fr-old-amount">Old file amount</Label>
                     <input
                       id="fr-old-amount"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={oldAmount}
-                      onChange={(e) => setOldAmount(e.target.value)}
-                      className={`mt-1 ${inputCls}`}
+                      type="text"
+                      value={oldAmountDisplay}
+                      readOnly
+                      disabled
+                      placeholder="Select a file above"
+                      className={`mt-1 ${inputCls} bg-muted opacity-70 cursor-not-allowed`}
                     />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Pre-filled from the selected file — not editable.
+                    </p>
                   </div>
                   <div>
                     <Label htmlFor="fr-new-file">

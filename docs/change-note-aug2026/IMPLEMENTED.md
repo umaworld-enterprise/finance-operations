@@ -516,6 +516,12 @@ tests reseeded accordingly. 237 backend tests green; migration head **0026**.
      structured fields carry the instruction.
    - Audit summaries and both notifications carry the amounts / split
      targets; tests reworked (+2). 238 backend tests green.
+3. **Old amount pre-populated & locked** (team request, same day): in both
+   categories the "Old file amount" field auto-fills from the selected
+   file's deposit amount and is disabled. Integrity: the value is
+   **server-derived** — `FileRemarkCreate` no longer accepts `old_amount`
+   at all; the service always writes `request.deposit_amount`, so the
+   disabled field cannot be spoofed via raw API either.
 
 ---
 
