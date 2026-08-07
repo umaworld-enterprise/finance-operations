@@ -152,6 +152,41 @@ async def test_non_owner_and_ineligible_roles_blocked(db_session):
 
 
 @pytest.mark.asyncio
+async def test_amounts_cannot_exceed_the_files_deposit(db_session):
+    """7 Aug fix: the old (deposit) amount is the ceiling — split totals and
+    the new file amount may equal it but never exceed it. (Factory deposit is
+    1000; the default split payload totals exactly 1000 and passes.)"""
+    from decimal import Decimal
+
+    from app.core.exceptions import BusinessRuleError
+
+    merch, _, request = await _setup(db_session)
+    svc = FileRemarkService(db_session)
+
+    with pytest.raises(BusinessRuleError, match="exceeds the file's deposit amount"):
+        await svc.create(
+            _payload(
+                request, category="invoice_split",
+                split_targets=[
+                    {"file_number": "INV-NEW-1", "amount": Decimal("800.00")},
+                    {"file_number": "INV-NEW-2", "amount": Decimal("300.00")},
+                ],
+            ),
+            merch.id, UserRole.MERCHANDISER,
+        )
+    with pytest.raises(BusinessRuleError, match="exceeds the file's deposit amount"):
+        await svc.create(
+            _payload(request, new_amount=Decimal("1000.01")),
+            merch.id, UserRole.MERCHANDISER,
+        )
+    # Exactly the deposit amount is allowed.
+    ok = await svc.create(
+        _payload(request, new_amount=Decimal("1000.00")), merch.id, UserRole.MERCHANDISER
+    )
+    assert ok.status == "open"
+
+
+@pytest.mark.asyncio
 async def test_only_payment_completed_files_are_eligible(db_session):
     """4 Aug rework: the select-file list (and the server) only accept files
     whose payment is completed."""

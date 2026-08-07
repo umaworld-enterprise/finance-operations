@@ -523,17 +523,33 @@ tests reseeded accordingly. 237 backend tests green; migration head **0026**.
    at all; the service always writes `request.deposit_amount`, so the
    disabled field cannot be spoofed via raw API either.
 
+**7 Aug fixes · migration 0027:**
+1. **UndefinedColumnError on POST /file-remarks** — at least one environment
+   ran the ORIGINAL 0025 before the in-place amendment, so its
+   `file_remarks` table lacked `old_amount`/`new_amount`/`split_targets`
+   (the in-place-amend assumption was wrong once any DB had applied 0025).
+   Fix: `0027_file_remarks_alignment` — fully idempotent
+   (`ADD COLUMN IF NOT EXISTS` ×3, `remark DROP NOT NULL`, category
+   normalisation + CHECK replacement) so it repairs original-0025 DBs and
+   no-ops on amended/fresh ones. **Lesson recorded: never amend a migration
+   in place once any environment may have run it.**
+2. **Over-amount validation** — the old (deposit) amount is now the ceiling:
+   split totals and the new file amount may equal but never exceed it.
+   Enforced server-side (BusinessRuleError) and mirrored in the UI (live
+   "Split total: X of Y" counter, red errors, submit blocked). Test covers
+   both categories + the exact-equality boundary.
+
 ---
 
 # Batch complete — 1 Aug 2026
 
 All seven phases plus the screenshot follow-ups delivered (Ship Date removal
 deliberately deferred by the client). Final state: 219 backend unit tests
-green, `npx tsc --noEmit` clean, migration head **0026**. Everything is
+green, `npx tsc --noEmit` clean, migration head **0027**. Everything is
 uncommitted in the working tree alongside the July change-note work.
 
 Deploy checklist:
-1. `alembic upgrade head` (applies 0020 → 0026; the inspected DB was at 0019).
+1. `alembic upgrade head` (applies 0020 → 0027; the inspected DB was at 0019).
 2. Post-deploy: unpaid tranches with a July-era TT copy need their per-tranche
    payment details backfilled by Accounts before they can be marked paid
    (deliberate — no auto-migration of attestation data).
