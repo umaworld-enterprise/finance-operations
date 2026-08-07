@@ -77,7 +77,10 @@ class FileRemarkService:
             deposit_request_id=request.id,
             category=data.category,
             old_file_number=(data.old_file_number or "").strip() or None,
-            old_amount=data.old_amount,
+            # Server-derived (4 Aug follow-up): the old amount is always the
+            # selected file's deposit amount — pre-populated and non-editable
+            # in the UI, never accepted from the client.
+            old_amount=request.deposit_amount,
             new_file_number=(data.new_file_number or "").strip() or None,
             new_amount=data.new_amount,
             split_targets=(

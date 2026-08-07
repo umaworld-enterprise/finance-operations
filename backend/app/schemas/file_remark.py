@@ -23,9 +23,10 @@ class SplitTarget(BaseModel):
 class FileRemarkCreate(BaseModel):
     deposit_request_id: UUID
     category: FileRemarkCategoryLiteral
-    # Invoice amount change: old file + amount → new file + amount.
+    # Invoice amount change: old file → new file + amount. The OLD amount is
+    # NOT accepted from the client — it is server-derived from the selected
+    # file's deposit_amount (pre-populated, disabled field in the UI).
     old_file_number: str | None = Field(None, max_length=200)
-    old_amount: Decimal | None = Field(None, gt=0)
     new_file_number: str | None = Field(None, max_length=200)
     new_amount: Decimal | None = Field(None, gt=0)
     # Split Invoices: dynamic target rows.
@@ -45,7 +46,6 @@ class FileRemarkCreate(BaseModel):
                 label
                 for value, label in (
                     (self.old_file_number, "Old file number"),
-                    (self.old_amount, "Old file amount"),
                     (self.new_file_number, "New file number"),
                     (self.new_amount, "New file amount"),
                 )
