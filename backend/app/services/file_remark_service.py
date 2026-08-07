@@ -73,6 +73,25 @@ class FileRemarkService:
                 f"(current status: {request.current_status.value})."
             )
 
+        # Amounts can never exceed the file's deposit amount (7 Aug fix —
+        # the old amount is the ceiling for what can be moved or split).
+        from decimal import Decimal
+
+        deposit = Decimal(str(request.deposit_amount))
+        if data.category == "invoice_split" and data.split_targets:
+            total = sum((t.amount for t in data.split_targets), Decimal("0"))
+            if total > deposit:
+                raise BusinessRuleError(
+                    f"The split amounts total {total}, which exceeds the file's "
+                    f"deposit amount of {deposit}."
+                )
+        if data.category == "invoice_amount_change" and data.new_amount is not None:
+            if data.new_amount > deposit:
+                raise BusinessRuleError(
+                    f"The new file amount ({data.new_amount}) exceeds the file's "
+                    f"deposit amount of {deposit}."
+                )
+
         remark = FileRemark(
             deposit_request_id=request.id,
             category=data.category,

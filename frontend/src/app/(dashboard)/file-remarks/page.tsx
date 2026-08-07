@@ -147,10 +147,18 @@ export default function FileRemarksPage() {
   const oldAmountDisplay =
     selectedRequest != null ? Number(selectedRequest.deposit_amount).toFixed(2) : "";
 
+  // Amounts can never exceed the file's deposit ("old") amount (7 Aug fix).
+  const depositCeiling = selectedRequest != null ? Number(selectedRequest.deposit_amount) : null;
+  const splitTotal = splitRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+  const splitOverCeiling = depositCeiling != null && splitTotal > depositCeiling;
+  const newAmountOverCeiling = depositCeiling != null && Number(newAmount) > depositCeiling;
+
   const splitRowsValid =
     splitRows.length > 0 &&
-    splitRows.every((row) => row.file_number.trim() && Number(row.amount) > 0);
-  const amountChangeValid = oldFile.trim() && newFile.trim() && Number(newAmount) > 0;
+    splitRows.every((row) => row.file_number.trim() && Number(row.amount) > 0) &&
+    !splitOverCeiling;
+  const amountChangeValid =
+    Boolean(oldFile.trim() && newFile.trim() && Number(newAmount) > 0) && !newAmountOverCeiling;
   const canSubmit =
     !!requestId && (category === "invoice_split" ? splitRowsValid : amountChangeValid);
 
@@ -319,14 +327,27 @@ export default function FileRemarksPage() {
                       )}
                     </div>
                   ))}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSplitRows((rows) => [...rows, { file_number: "", amount: "" }])}
-                  >
-                    <Plus className="h-3.5 w-3.5 mr-1.5" /> Add file
-                  </Button>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSplitRows((rows) => [...rows, { file_number: "", amount: "" }])}
+                    >
+                      <Plus className="h-3.5 w-3.5 mr-1.5" /> Add file
+                    </Button>
+                    {depositCeiling != null && (
+                      <p className={`text-xs ${splitOverCeiling ? "text-destructive" : "text-muted-foreground"}`}>
+                        Split total: {splitTotal.toFixed(2)} of {depositCeiling.toFixed(2)}
+                      </p>
+                    )}
+                  </div>
+                  {splitOverCeiling && (
+                    <p className="text-xs text-destructive">
+                      The split amounts cannot exceed the file&apos;s old amount of{" "}
+                      {depositCeiling!.toFixed(2)}.
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -382,6 +403,11 @@ export default function FileRemarksPage() {
                       onChange={(e) => setNewAmount(e.target.value)}
                       className={`mt-1 ${inputCls}`}
                     />
+                    {newAmountOverCeiling && (
+                      <p className="text-xs text-destructive mt-1">
+                        Cannot exceed the file&apos;s old amount of {depositCeiling!.toFixed(2)}.
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
