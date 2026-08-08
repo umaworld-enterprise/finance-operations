@@ -21,6 +21,7 @@ import { useSuppliers } from "@/hooks/useMasters";
 import { useAuth } from "@/hooks/useAuth";
 import { DecisionDialog } from "@/components/hom/DecisionDialog";
 import adjustmentService, { type CreateAdjustmentPayload } from "@/services/adjustmentService";
+import { ADJUST_INVOICES_ENABLED } from "@/lib/features";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { AdjustmentStatus, PaymentTranche } from "@/types";
 import { ArrowLeftRight, Inbox } from "lucide-react";
@@ -52,7 +53,7 @@ function trancheOptionLabel(t: PaymentTranche, withBalance: boolean): string {
   return `${base} · ${withBalance ? `available ${amount}` : amount}`;
 }
 
-export default function AdjustInvoicesPage() {
+function AdjustInvoicesPageImpl() {
   const { user } = useAuth();
   // Deciders record adjustments immediately and act on the pending queue;
   // merchandisers raise adjustment requests that queue for approval.
@@ -529,3 +530,23 @@ export default function AdjustInvoicesPage() {
     </RoleGuard>
   );
 }
+
+// Module hidden from the UI pending further discussion (UAT change note,
+// Aug 2026 item 15) — anyone landing on the route (old bookmark, deep link)
+// sees a notice instead of the tool. Flip ADJUST_INVOICES_ENABLED to restore.
+function AdjustInvoicesDisabled() {
+  return (
+    <>
+      <TopNav title="Adjust Invoices" />
+      <main className="flex-1 overflow-auto p-4 md:p-6">
+        <EmptyState
+          icon={ArrowLeftRight}
+          title="Adjust Invoices is currently unavailable"
+          description="This module has been temporarily disabled. Please use File Remarks to request invoice changes."
+        />
+      </main>
+    </>
+  );
+}
+
+export default ADJUST_INVOICES_ENABLED ? AdjustInvoicesPageImpl : AdjustInvoicesDisabled;

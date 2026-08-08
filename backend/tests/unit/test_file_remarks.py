@@ -19,8 +19,8 @@ from app.services.file_remark_service import FileRemarkService
 from app.services.notification_service import (
     TYPE_FILE_REMARK_RAISED,
     TYPE_FILE_REMARK_RESOLVED,
+    notify_file_remark_decided,
     notify_file_remark_raised,
-    notify_file_remark_resolved,
 )
 from tests.factories import make_customer, make_request, make_supplier, make_user
 
@@ -205,22 +205,45 @@ async def test_only_payment_completed_files_are_eligible(db_session):
 
 
 @pytest.mark.asyncio
-async def test_resolve_flow_and_double_resolve_conflict(db_session):
+async def test_decide_flow_and_double_decision_conflict(db_session):
+    """UAT Aug 2026 item 14: Accounts approve (optional note) or reject
+    (mandatory reason) instead of a single Resolve."""
+    from app.core.exceptions import ValidationError
+
     merch, accounts, request = await _setup(db_session)
     svc = FileRemarkService(db_session)
     remark = await svc.create(_payload(request), merch.id, UserRole.MERCHANDISER)
 
     with pytest.raises(AuthorizationError):
-        await svc.resolve(remark.id, merch.id, UserRole.MERCHANDISER, "self-resolve")
+        await svc.decide(remark.id, "approved", merch.id, UserRole.MERCHANDISER)
+    with pytest.raises(ValidationError, match="approved.*rejected"):
+        await svc.decide(remark.id, "resolved", accounts.id, UserRole.ACCOUNTS_TEAM)
 
-    resolved = await svc.resolve(
-        remark.id, accounts.id, UserRole.ACCOUNTS_TEAM, "Invoice number updated."
+    approved = await svc.decide(
+        remark.id, "approved", accounts.id, UserRole.ACCOUNTS_TEAM, "Invoice number updated."
     )
-    assert resolved.status == "resolved"
-    assert resolved.resolved_by == accounts.id
-    assert resolved.response_note == "Invoice number updated."
-    with pytest.raises(ConflictError, match="already resolved"):
-        await svc.resolve(remark.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    assert approved.status == "approved"
+    assert approved.resolved_by == accounts.id
+    assert approved.response_note == "Invoice number updated."
+    with pytest.raises(ConflictError, match="already been decided"):
+        await svc.decide(remark.id, "rejected", accounts.id, UserRole.ACCOUNTS_TEAM, "no")
+
+
+@pytest.mark.asyncio
+async def test_reject_requires_a_reason(db_session):
+    from app.core.exceptions import ValidationError
+
+    merch, accounts, request = await _setup(db_session)
+    svc = FileRemarkService(db_session)
+    remark = await svc.create(_payload(request), merch.id, UserRole.MERCHANDISER)
+
+    with pytest.raises(ValidationError, match="reason is mandatory"):
+        await svc.decide(remark.id, "rejected", accounts.id, UserRole.ACCOUNTS_TEAM)
+    rejected = await svc.decide(
+        remark.id, "rejected", accounts.id, UserRole.ACCOUNTS_TEAM, "Amount mismatch."
+    )
+    assert rejected.status == "rejected"
+    assert rejected.response_note == "Amount mismatch."
 
 
 @pytest.mark.asyncio
@@ -238,7 +261,7 @@ async def test_list_scoping_and_filters(db_session):
     theirs = await svc.create(
         _payload(other_req, category="invoice_split"), other.id, UserRole.MERCHANDISER
     )
-    await svc.resolve(theirs.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    await svc.decide(theirs.id, "approved", accounts.id, UserRole.ACCOUNTS_TEAM)
 
     own = await svc.list(merch.id, UserRole.MERCHANDISER)
     assert {r.id for r in own} == {mine.id}
@@ -285,21 +308,34 @@ async def test_raised_fans_out_to_accounts(db_session, engine, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_resolved_notifies_the_raiser_with_response(db_session, engine, monkeypatch):
+async def test_decision_notifies_the_raiser_with_the_outcome(db_session, engine, monkeypatch):
     merch, accounts, request = await _setup(db_session)
     svc = FileRemarkService(db_session)
-    remark = await svc.create(_payload(request), merch.id, UserRole.MERCHANDISER)
-    await svc.resolve(remark.id, accounts.id, UserRole.ACCOUNTS_TEAM, "Done — number updated.")
+    approved = await svc.create(_payload(request), merch.id, UserRole.MERCHANDISER)
+    await svc.decide(
+        approved.id, "approved", accounts.id, UserRole.ACCOUNTS_TEAM, "Done — number updated."
+    )
+    rejected = await svc.create(
+        _payload(request, category="invoice_split"), merch.id, UserRole.MERCHANDISER
+    )
+    await svc.decide(
+        rejected.id, "rejected", accounts.id, UserRole.ACCOUNTS_TEAM, "Amounts do not match."
+    )
     await db_session.commit()
     _patch_factory(engine, monkeypatch)
 
-    await notify_file_remark_resolved(remark.id)
+    await notify_file_remark_decided(approved.id)
+    await notify_file_remark_decided(rejected.id)
 
     rows = (
         await db_session.execute(
             select(Notification).where(Notification.type == TYPE_FILE_REMARK_RESOLVED)
         )
     ).scalars().all()
-    assert len(rows) == 1
-    assert rows[0].user_id == merch.id
-    assert "Done — number updated." in rows[0].body
+    assert len(rows) == 2
+    assert {n.user_id for n in rows} == {merch.id}
+    bodies = " | ".join(n.body for n in rows)
+    assert "approved and processed" in bodies
+    assert "rejected" in bodies
+    assert "Done — number updated." in bodies
+    assert "Amounts do not match." in bodies

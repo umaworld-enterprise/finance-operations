@@ -16,10 +16,25 @@ export type RequestStatus =
   | "cancelled_by_accounts"
   | "reopened"
   | "pending_hom_approval"
-  | "rejected_by_hom";
+  | "rejected_by_hom"
+  | "rejected_by_accounts";
 
 export type CurrencyCode =
   | "USD" | "EUR" | "GBP" | "AED" | "INR" | "CNY" | "JPY" | "SGD" | "OTHER";
+
+// FY-to-date (April–March) payment-queue KPI counts
+// (UAT Aug 2026, items 5/17/19).
+export interface QueueKpis {
+  fy_start: string;
+  fy_label: string;
+  pending_payment: number;
+  awaiting_hom: number;
+  on_hold: number;
+  processed: number;
+  rejected: number;
+  cancelled: number;
+  total: number;
+}
 
 export type SubmissionSource = "google_form" | "google_sheet_sync" | "in_app";
 
@@ -65,6 +80,25 @@ export interface DefaultedSupplier {
   flagged_date: string;
   is_active: boolean;
   resolved_date: string | null;
+}
+
+// Whole live supplier exposure (UAT Aug 2026, item 2) — open requests split
+// by whether the graced ETD has already passed.
+export interface SupplierExposureRow {
+  request_id: string;
+  request_number: string;
+  deposit_amount: number;
+  currency: string | null;
+  current_status: RequestStatus;
+  grace_etd: string | null;
+  etd_grace_overdue_days: number | null;
+}
+
+export interface SupplierExposure {
+  supplier_id: string;
+  graced_etd_passed: SupplierExposureRow[];
+  graced_etd_pending: SupplierExposureRow[];
+  totals_by_currency: Record<string, number>;
 }
 
 // Bank master (Aug 2026) — names only; the tranche form composes the stored
@@ -167,7 +201,9 @@ export interface InvoiceAdjustment {
 // merchandiser → Accounts communication on a payment-completed file;
 // bypasses Adjust Invoices for now.
 export type FileRemarkCategory = "invoice_split" | "invoice_amount_change";
-export type FileRemarkStatus = "open" | "resolved";
+// "resolved" is legacy (pre-decision rows); new decisions are
+// approved/rejected (UAT Aug 2026, item 14).
+export type FileRemarkStatus = "open" | "approved" | "rejected" | "resolved";
 
 export interface SplitTarget {
   file_number: string;
@@ -240,6 +276,9 @@ export interface DepositRequest {
   created_at: string;
   updated_at: string;
   tranches: PaymentTranche[];
+  /** Who performed the most recent status change — names the holder /
+   * canceller / rejecter (UAT Aug 2026, item 6). */
+  last_status_change_by?: string | null;
 }
 
 export interface DepositRequestDetail extends DepositRequest {

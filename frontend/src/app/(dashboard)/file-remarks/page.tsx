@@ -1,16 +1,18 @@
 "use client";
 
 // File Remarks module (CIO batch 2, Aug 2026; reworked 4 Aug) — a tracked
-// Open → Resolved channel from merchandisers to Accounts that bypasses
-// Adjust Invoices for the time being. Two categories only:
+// channel from merchandisers to Accounts that bypasses Adjust Invoices for
+// the time being. Two categories only:
 //   Split Invoices        — file splits to N × (new file no. + amount)
 //   Invoice amount changes — old file + amount → new file + amount
 // Only payment-completed files are eligible; the remark text is optional.
-// Moves no money — Accounts act manually and resolve with an optional note.
+// Moves no money. UAT Aug 2026 (item 14): Accounts see a decision queue of
+// remark SUMMARIES (not the merchandiser form) with Processed/Approve and
+// Reject buttons — the merchandiser is notified of either outcome.
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Inbox, MessageSquarePlus, Plus, Trash2 } from "lucide-react";
+import { Check, Inbox, MessageSquarePlus, Plus, Trash2, X } from "lucide-react";
 import { TopNav } from "@/components/layout/TopNav";
 import { RoleGuard } from "@/components/layout/RoleGuard";
 import { Button } from "@/components/ui/button";
@@ -26,8 +28,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useRequests } from "@/hooks/useRequests";
 import {
   useCreateFileRemark,
+  useDecideFileRemark,
   useFileRemarks,
-  useResolveFileRemark,
 } from "@/hooks/useFileRemarks";
 import { formatDate } from "@/lib/utils";
 import type { FileRemark, FileRemarkCategory } from "@/types";
@@ -39,51 +41,67 @@ const CATEGORY_LABELS: Record<FileRemarkCategory, string> = {
 
 type SplitRow = { file_number: string; amount: string };
 
+const STATUS_PILLS: Record<FileRemark["status"], { label: string; cls: string }> = {
+  open:     { label: "Open",     cls: "text-amber-700 bg-amber-50 border-amber-200" },
+  approved: { label: "Approved", cls: "text-emerald-700 bg-emerald-50 border-emerald-200" },
+  rejected: { label: "Rejected", cls: "text-red-700 bg-red-50 border-red-200" },
+  resolved: { label: "Resolved", cls: "text-emerald-700 bg-emerald-50 border-emerald-200" },
+};
+
 function StatusPill({ status }: { status: FileRemark["status"] }) {
-  return status === "resolved" ? (
-    <span className="inline-flex items-center text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-      Resolved
-    </span>
-  ) : (
-    <span className="inline-flex items-center text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
-      Open
+  const pill = STATUS_PILLS[status] ?? STATUS_PILLS.open;
+  return (
+    <span className={`inline-flex items-center text-xs font-medium border px-2 py-0.5 rounded-full ${pill.cls}`}>
+      {pill.label}
     </span>
   );
 }
 
-function ResolveDialog({
+// Approve = mark processed (optional note); Reject = mandatory reason.
+function DecideDialog({
   remark,
+  decision,
   onClose,
   onConfirm,
   busy,
 }: {
   remark: FileRemark | null;
+  decision: "approved" | "rejected";
   onClose: () => void;
   onConfirm: (note: string) => void;
   busy: boolean;
 }) {
   const [note, setNote] = useState("");
   if (!remark) return null;
+  const rejecting = decision === "rejected";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="bg-card rounded-xl border border-border shadow-lg p-6 w-full max-w-md space-y-4">
-        <h3 className="font-semibold text-foreground">Resolve File Remark</h3>
+        <h3 className="font-semibold text-foreground">
+          {rejecting ? "Reject File Remark" : "Approve File Remark"}
+        </h3>
         <p className="text-sm text-muted-foreground">
           {CATEGORY_LABELS[remark.category]} on {remark.request_number} — the
-          merchandiser will be notified. The response note is optional.
+          merchandiser will be notified.{" "}
+          {rejecting ? "A reason is mandatory." : "The note is optional."}
         </p>
         <Textarea
           rows={3}
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          placeholder="Response to the merchandiser (optional)"
+          placeholder={rejecting ? "Reason for rejection (required)" : "Response to the merchandiser (optional)"}
         />
         <div className="flex justify-end gap-2">
           <Button variant="outline" size="sm" onClick={() => { setNote(""); onClose(); }} disabled={busy}>
             Cancel
           </Button>
-          <Button size="sm" disabled={busy} onClick={() => { onConfirm(note.trim()); setNote(""); }}>
-            {busy ? "Resolving…" : "Mark Resolved"}
+          <Button
+            size="sm"
+            variant={rejecting ? "destructive" : "default"}
+            disabled={busy || (rejecting && !note.trim())}
+            onClick={() => { onConfirm(note.trim()); setNote(""); }}
+          >
+            {busy ? "Saving…" : rejecting ? "Confirm Reject" : "Processed / Approve"}
           </Button>
         </div>
       </div>
@@ -120,14 +138,16 @@ function RemarkDetails({ r }: { r: FileRemark }) {
 export default function FileRemarksPage() {
   const { user } = useAuth();
   const isDecider = user?.role === "accounts_team" || user?.role === "super_admin";
-  const canRaise = isDecider || user?.role === "merchandiser";
+  // UAT Aug 2026 (item 14): Accounts see the decision queue only — the raise
+  // form is the merchandiser's UI. (Super admin keeps both for support.)
+  const canRaise = user?.role === "merchandiser" || user?.role === "super_admin";
 
   // Role-scoped server-side; only payment-completed files are eligible.
   const { data: requests = [] } = useRequests();
   const completedRequests = requests.filter((r) => r.current_status === "payment_processed");
   const { data: remarks = [], isLoading } = useFileRemarks();
   const createRemark = useCreateFileRemark();
-  const resolveRemark = useResolveFileRemark();
+  const decideRemark = useDecideFileRemark();
 
   // Category comes FIRST (4 Aug rework) and drives the rest of the form.
   const [category, setCategory] = useState<FileRemarkCategory>("invoice_split");
@@ -137,7 +157,8 @@ export default function FileRemarksPage() {
   const [newFile, setNewFile] = useState("");
   const [newAmount, setNewAmount] = useState("");
   const [remarkText, setRemarkText] = useState("");
-  const [resolveTarget, setResolveTarget] = useState<FileRemark | null>(null);
+  const [decideTarget, setDecideTarget] = useState<FileRemark | null>(null);
+  const [decision, setDecision] = useState<"approved" | "rejected">("approved");
 
   const openRemarks = remarks.filter((r) => r.status === "open");
 
@@ -200,14 +221,22 @@ export default function FileRemarksPage() {
     }
   };
 
-  const doResolve = async (note: string) => {
-    if (!resolveTarget) return;
+  const doDecide = async (note: string) => {
+    if (!decideTarget) return;
     try {
-      await resolveRemark.mutateAsync({ id: resolveTarget.id, responseNote: note || undefined });
-      toast.success("Remark resolved — the merchandiser has been notified.");
-      setResolveTarget(null);
+      await decideRemark.mutateAsync({
+        id: decideTarget.id,
+        decision,
+        responseNote: note || undefined,
+      });
+      toast.success(
+        decision === "approved"
+          ? "Remark approved — the merchandiser has been notified."
+          : "Remark rejected — the merchandiser has been notified.",
+      );
+      setDecideTarget(null);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to resolve the remark.");
+      toast.error(err instanceof Error ? err.message : "Failed to save the decision.");
     }
   };
 
@@ -230,7 +259,7 @@ export default function FileRemarksPage() {
               </div>
               <p className="text-xs text-muted-foreground -mt-2">
                 Only files whose payment is completed can be selected. The Accounts
-                team is notified and resolves the remark once actioned.
+                team is notified and approves or rejects the remark once actioned.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -435,12 +464,16 @@ export default function FileRemarksPage() {
         {(isDecider || user?.role === "finance_admin") && (
           <Card>
             <CardContent className="p-5 md:p-6">
-              <div className="flex items-center gap-2 mb-4">
+              <div className="flex items-center gap-2 mb-1">
                 <Inbox className="h-4 w-4 text-muted-foreground" />
                 <h2 className="font-semibold text-foreground text-sm">
                   Open Remarks{openRemarks.length > 0 ? ` (${openRemarks.length})` : ""}
                 </h2>
               </div>
+              <p className="text-xs text-muted-foreground mb-4">
+                Summary of each requested change — action it manually, then mark it
+                Processed/Approve or Reject. The merchandiser is notified either way.
+              </p>
               {isLoading ? (
                 <Table><TableBody><TableSkeleton rows={2} cols={6} /></TableBody></Table>
               ) : openRemarks.length === 0 ? (
@@ -481,14 +514,25 @@ export default function FileRemarksPage() {
                           </TableCell>
                           {isDecider && (
                             <TableCell>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setResolveTarget(r)}
-                                disabled={resolveRemark.isPending}
-                              >
-                                Resolve
-                              </Button>
+                              <div className="flex gap-2 whitespace-nowrap">
+                                <Button
+                                  size="sm"
+                                  onClick={() => { setDecision("approved"); setDecideTarget(r); }}
+                                  disabled={decideRemark.isPending}
+                                  className="gap-1"
+                                >
+                                  <Check className="h-3.5 w-3.5" /> Processed / Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => { setDecision("rejected"); setDecideTarget(r); }}
+                                  disabled={decideRemark.isPending}
+                                  className="gap-1"
+                                >
+                                  <X className="h-3.5 w-3.5" /> Reject
+                                </Button>
+                              </div>
                             </TableCell>
                           )}
                         </TableRow>
@@ -511,7 +555,7 @@ export default function FileRemarksPage() {
               <EmptyState
                 icon={MessageSquarePlus}
                 title="No file remarks yet"
-                description="Raised remarks and their resolutions will appear here."
+                description="Raised remarks and their decisions will appear here."
               />
             ) : (
               <div className="overflow-x-auto">
@@ -560,11 +604,12 @@ export default function FileRemarksPage() {
         </Card>
       </main>
 
-      <ResolveDialog
-        remark={resolveTarget}
-        onClose={() => setResolveTarget(null)}
-        onConfirm={doResolve}
-        busy={resolveRemark.isPending}
+      <DecideDialog
+        remark={decideTarget}
+        decision={decision}
+        onClose={() => setDecideTarget(null)}
+        onConfirm={doDecide}
+        busy={decideRemark.isPending}
       />
     </RoleGuard>
   );

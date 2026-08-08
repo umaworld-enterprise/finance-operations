@@ -30,6 +30,7 @@ from app.services.deposit_request_service import DepositRequestService
 from app.services.notification_service import (
     notify_hom_decision,
     notify_request_created,
+    notify_request_rejected_by_accounts,
     notify_status_change,
 )
 
@@ -72,11 +73,17 @@ async def list_requests(
         customer_id=customer_id, vertical_id=vertical_id,
         created_by=created_by, search=search,
     )
+    responses = [DepositRequestResponse.model_validate(r) for r in items]
+    # Who acted last — so hold/cancel/reject rows carry the person's name
+    # (UAT Aug 2026, item 6).
+    actors = await DepositRequestService(db).get_last_status_actors([r.id for r in items])
+    for resp in responses:
+        resp.last_status_change_by = actors.get(resp.id)
     return PaginatedResponse(
         total=total,
         page=page,
         page_size=page_size,
-        items=[DepositRequestResponse.model_validate(r) for r in items],
+        items=responses,
     )
 
 
@@ -118,6 +125,18 @@ async def pending_payment_queue(
     created_by_filter = current_user.id if current_user.role == UserRole.MERCHANDISER else None
     requests = await svc.get_pending_payment_queue(created_by=created_by_filter)
     return [DepositRequestResponse.model_validate(r) for r in requests]
+
+
+@router.get("/queue-kpis")
+async def queue_kpis(current_user: User, db: DB) -> dict:
+    """Financial-year-to-date KPI counts for the Accounts payment queue
+    (UAT Aug 2026, items 5/17/19): pending / awaiting HoM / on hold /
+    processed / rejected / cancelled / total, counted by created date
+    within the current April–March financial year."""
+    _ALLOWED = {UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN}
+    if current_user.role not in _ALLOWED:
+        raise AuthorizationError("Access to the payment queue KPIs is not permitted for your role.")
+    return await DepositRequestService(db).get_queue_kpis()
 
 
 @router.get("/my-field-visibility")
@@ -193,7 +212,10 @@ async def get_request(
     request = await svc.get_detail(request_id, current_user.id, current_user.role)
     if current_user.role == UserRole.MERCHANDISER and request.created_by != current_user.id:
         raise NotFoundError(f"Deposit request {request_id} not found.")
-    return DepositRequestDetailResponse.model_validate(request)
+    response = DepositRequestDetailResponse.model_validate(request)
+    actors = await svc.get_last_status_actors([request.id])
+    response.last_status_change_by = actors.get(request.id)
+    return response
 
 
 @router.patch("/{request_id}", response_model=DepositRequestResponse)
@@ -317,6 +339,34 @@ async def cancel_request(
     background_tasks.add_task(
         notify_status_change, request_id, target.value, current_user.role.value, body.remarks
     )
+    return DepositRequestResponse.model_validate(req)
+
+
+@router.post("/{request_id}/reject", response_model=DepositRequestResponse)
+async def reject_request(
+    request_id: UUID,
+    body: HomDecisionRequest,
+    current_user: User,
+    request: Request,
+    db: DB,
+    background_tasks: BackgroundTasks,
+) -> DepositRequestResponse:
+    """Accounts reject the whole request — terminal (UAT Aug 2026, items
+    12/17/18). The reason is mandatory (HomDecisionRequest enforces it);
+    the raising merchandiser AND Head of Merchandiser are notified. The
+    invoice numbers become reusable and the merchandiser can no longer
+    edit anything on the request."""
+    _ALLOWED = {UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN}
+    if current_user.role not in _ALLOWED:
+        raise AuthorizationError("Only Accounts Team or Super Admin can reject requests.")
+    svc = DepositRequestService(db)
+    req = await svc.transition_status(
+        request_id, RequestStatus.REJECTED_BY_ACCOUNTS,
+        current_user.id, current_user.role, body.remarks,
+        ip_address=_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    background_tasks.add_task(notify_request_rejected_by_accounts, request_id, body.remarks)
     return DepositRequestResponse.model_validate(req)
 
 

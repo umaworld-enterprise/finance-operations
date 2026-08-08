@@ -6,6 +6,7 @@ import type {
   InvoiceAdjustment,
   PaymentDetails,
   PaymentTranche,
+  QueueKpis,
   RequestAuditEntry,
 } from "@/types";
 
@@ -69,6 +70,13 @@ const requestService = {
 
   pendingQueue: async (): Promise<DepositRequest[]> => {
     const { data } = await api.get<DepositRequest[]>("/requests/pending-payment-queue");
+    return data;
+  },
+
+  // FY-to-date (April–March) KPI counts for the payment queue
+  // (UAT Aug 2026, items 5/17/19).
+  queueKpis: async (): Promise<QueueKpis> => {
+    const { data } = await api.get<QueueKpis>("/requests/queue-kpis");
     return data;
   },
 
@@ -151,6 +159,12 @@ const requestService = {
 
   homReject: async (id: string, remarks: string): Promise<void> => {
     await api.post(`/requests/${id}/hom-reject`, { remarks });
+  },
+
+  // Accounts reject the whole request — terminal, reason mandatory
+  // (UAT Aug 2026, items 12/17/18).
+  rejectRequest: async (id: string, remarks: string): Promise<void> => {
+    await api.post(`/requests/${id}/reject`, { remarks });
   },
 
   myActivity: async (limit = 50): Promise<ActivityItem[]> => {

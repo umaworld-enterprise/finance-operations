@@ -125,6 +125,17 @@ export function useSupplierDefaultHistory(supplierId: string | null) {
   });
 }
 
+// Whole live exposure for one supplier (UAT Aug 2026, item 2).
+export function useSupplierExposure(supplierId: string | null) {
+  return useQuery({
+    queryKey: ["supplier-exposure", supplierId],
+    queryFn: () => masterService.getSupplierExposure(supplierId!),
+    enabled: !!supplierId,
+    staleTime: STALE,
+    gcTime: GC,
+  });
+}
+
 export function useDefaultedSuppliers() {
   return useQuery({
     queryKey: ["defaulted-suppliers"],

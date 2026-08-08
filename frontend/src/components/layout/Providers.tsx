@@ -20,19 +20,20 @@ export function Providers({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            // Keep cached data for 5 minutes before considering it stale.
-            // Prevents background refetches during normal navigation.
-            staleTime: 5 * 60 * 1000,
+            // 60 s before data counts as stale (was 5 min) — the UAT change
+            // note (Aug 2026, item 4) asked for auto-reload across the app;
+            // workflow queries additionally poll every 30 s in their hooks.
+            staleTime: 60 * 1000,
             // Keep data in memory for 30 minutes after all components unmount.
-            // Navigating back to a page is instant — no re-fetch needed.
+            // Navigating back to a page is instant — stale data shows first,
+            // then refreshes in the background.
             gcTime: 30 * 60 * 1000,
-            // Never re-fetch just because the user switched browser windows.
-            // This was the biggest source of spurious network calls.
-            refetchOnWindowFocus: false,
-            // Don't re-fetch on component mount if data is within staleTime.
-            // The data shown on navigation is always the most recently fetched
-            // version; a manual invalidation or mutation triggers the next fetch.
-            refetchOnMount: false,
+            // Returning to the app window re-fetches stale queries — the
+            // cheapest way to make cross-user changes visible (item 4).
+            refetchOnWindowFocus: true,
+            // Re-fetch on mount when stale so navigating to a page shows
+            // fresh data (previously never re-fetched on mount).
+            refetchOnMount: true,
             retry: 1,
           },
         },

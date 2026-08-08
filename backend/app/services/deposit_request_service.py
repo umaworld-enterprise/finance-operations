@@ -36,7 +36,12 @@ _DUPLICATE_EXEMPT_STATUSES = {
     RequestStatus.CANCELLED_BY_MERCHANDISER,
     RequestStatus.CANCELLED_BY_ACCOUNTS,
     RequestStatus.REJECTED_BY_HOM,
+    RequestStatus.REJECTED_BY_ACCOUNTS,
 }
+
+# Terminal statuses on which a merchandiser may no longer edit the request
+# at all (UAT change note Aug 2026, item 18).
+_MERCHANDISER_EDIT_BLOCKED_STATUSES = _DUPLICATE_EXEMPT_STATUSES
 
 _INVOICE_FIELDS = {
     "sunshine_invoice_number": "Sunshine Invoice No.",
@@ -271,6 +276,16 @@ class DepositRequestService:
         request = await self._get_scalar_or_404(request_id)
         if role == UserRole.MERCHANDISER and request.created_by != user_id:
             raise AuthorizationError("You can only add remarks to your own requests.")
+        # Rejected/cancelled requests are closed to the merchandiser entirely
+        # (UAT Aug 2026, item 18) — remarks included.
+        if (
+            role == UserRole.MERCHANDISER
+            and request.current_status in _MERCHANDISER_EDIT_BLOCKED_STATUSES
+        ):
+            raise BusinessRuleError(
+                "This request can no longer be edited "
+                f"(current status: {request.current_status.value})."
+            )
         await self._repo.update(request, remarks=remarks)
         loaded = await self._repo.get_with_core_relations(request_id)
         return loaded  # type: ignore[return-value]
@@ -289,6 +304,16 @@ class DepositRequestService:
 
         if role == UserRole.MERCHANDISER and request.created_by != user_id:
             raise AuthorizationError("You can only edit your own requests.")
+        # Once a request is rejected or cancelled, the merchandiser can no
+        # longer change anything on it (UAT Aug 2026, item 18).
+        if (
+            role == UserRole.MERCHANDISER
+            and request.current_status in _MERCHANDISER_EDIT_BLOCKED_STATUSES
+        ):
+            raise BusinessRuleError(
+                "This request can no longer be edited "
+                f"(current status: {request.current_status.value})."
+            )
 
         changes = data.model_dump(exclude_unset=True)
 
@@ -362,6 +387,7 @@ class DepositRequestService:
                 RequestStatus.HOLD_BY_ACCOUNTS: AccountsActionType.HOLD,
                 RequestStatus.CANCELLED_BY_ACCOUNTS: AccountsActionType.CANCEL,
                 RequestStatus.REOPENED: AccountsActionType.REOPEN,
+                RequestStatus.REJECTED_BY_ACCOUNTS: AccountsActionType.REJECT,
             }
             if target in action_map_acc:
                 self._session.add(
@@ -420,6 +446,87 @@ class DepositRequestService:
 
     async def get_pending_payment_queue(self, created_by: UUID | None = None) -> list[DepositRequest]:
         return await self._repo.get_pending_payment_queue(created_by=created_by)
+
+    async def get_last_status_actors(self, request_ids: list[UUID]) -> dict[UUID, str]:
+        """Full name of the user who made each request's most recent status
+        change — lets the queue say WHO held/cancelled/rejected, not just
+        which side (UAT Aug 2026, item 6). One batch query."""
+        if not request_ids:
+            return {}
+        from sqlalchemy import and_
+        from sqlalchemy import func as sa_func
+
+        from app.models.masters import User as UserModel
+        from app.models.workflow import StatusHistory
+
+        latest = (
+            select(
+                StatusHistory.deposit_request_id,
+                sa_func.max(StatusHistory.changed_at).label("last_at"),
+            )
+            .where(StatusHistory.deposit_request_id.in_(request_ids))
+            .group_by(StatusHistory.deposit_request_id)
+            .subquery()
+        )
+        stmt = (
+            select(StatusHistory.deposit_request_id, UserModel.full_name)
+            .join(
+                latest,
+                and_(
+                    StatusHistory.deposit_request_id == latest.c.deposit_request_id,
+                    StatusHistory.changed_at == latest.c.last_at,
+                ),
+            )
+            .join(UserModel, StatusHistory.changed_by == UserModel.id)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {request_id: full_name for request_id, full_name in rows}
+
+    async def get_queue_kpis(self) -> dict:
+        """Financial-year-to-date counts for the payment-queue KPI cards
+        (UAT Aug 2026, items 5/17/19). Every bucket counts requests CREATED
+        between 1 April (India FY) and now, grouped by current status."""
+        from datetime import datetime, timezone
+
+        from sqlalchemy import func as sa_func
+
+        now = datetime.now(timezone.utc)
+        fy_start_year = now.year if now.month >= 4 else now.year - 1
+        fy_start = datetime(fy_start_year, 4, 1, tzinfo=timezone.utc)
+
+        stmt = (
+            select(DepositRequest.current_status, sa_func.count())
+            .where(
+                DepositRequest.is_deleted.is_(False),
+                DepositRequest.created_at >= fy_start,
+            )
+            .group_by(DepositRequest.current_status)
+        )
+        counts: dict[RequestStatus, int] = {
+            status: n for status, n in (await self._session.execute(stmt)).all()
+        }
+
+        def bucket(*statuses: RequestStatus) -> int:
+            return sum(counts.get(s, 0) for s in statuses)
+
+        return {
+            "fy_start": fy_start.date().isoformat(),
+            "fy_label": f"FY {fy_start_year}–{(fy_start_year + 1) % 100:02d}",
+            "pending_payment": bucket(RequestStatus.PENDING_PAYMENT),
+            "awaiting_hom": bucket(RequestStatus.PENDING_HOM_APPROVAL),
+            "on_hold": bucket(
+                RequestStatus.HOLD_BY_MERCHANDISER, RequestStatus.HOLD_BY_ACCOUNTS
+            ),
+            "processed": bucket(RequestStatus.PAYMENT_PROCESSED),
+            "rejected": bucket(
+                RequestStatus.REJECTED_BY_ACCOUNTS, RequestStatus.REJECTED_BY_HOM
+            ),
+            "cancelled": bucket(
+                RequestStatus.CANCELLED_BY_MERCHANDISER,
+                RequestStatus.CANCELLED_BY_ACCOUNTS,
+            ),
+            "total": sum(counts.values()),
+        }
 
     async def get_my_activity(self, user_id: UUID, limit: int = 50) -> list[ActivityItemResponse]:
         from sqlalchemy import desc, select

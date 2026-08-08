@@ -3,9 +3,11 @@
 
 Raise: merchandiser on their OWN request (any status — locked/processed files
 are the whole point), or Accounts/Super Admin on any request.
-Decide: Accounts/Super Admin resolve with an optional response note.
-A file remark moves no money — Accounts act manually (e.g. via the
-super-admin invoice editor); Adjust Invoices remains the financial mechanism.
+Decide (UAT Aug 2026, item 14): Accounts/Super Admin APPROVE (processed) with
+an optional note, or REJECT with a mandatory reason — the raiser is notified
+either way. A file remark moves no money — Accounts act manually (e.g. via
+the super-admin invoice editor); Adjust Invoices remains the financial
+mechanism.
 """
 
 from datetime import datetime, timezone
@@ -20,6 +22,7 @@ from app.core.exceptions import (
     BusinessRuleError,
     ConflictError,
     NotFoundError,
+    ValidationError,
 )
 from app.models.deposit_request import DepositRequest
 from app.models.enums import RequestStatus, UserRole
@@ -132,27 +135,36 @@ class FileRemarkService:
         )
         return remark
 
-    async def resolve(
+    async def decide(
         self,
         remark_id: UUID,
+        decision: str,
         user_id: UUID,
         role: UserRole,
         response_note: str | None = None,
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> FileRemark:
+        """Accounts approve (processed) or reject an open remark (UAT Aug
+        2026, item 14). A rejection requires a reason; an approval note is
+        optional. The raiser is notified by the caller either way."""
         if role not in _DECIDER_ROLES:
-            raise AuthorizationError("Only Accounts Team or Super Admin can resolve file remarks.")
+            raise AuthorizationError("Only Accounts Team or Super Admin can decide file remarks.")
+        if decision not in (FileRemarkStatus.APPROVED.value, FileRemarkStatus.REJECTED.value):
+            raise ValidationError("Decision must be 'approved' or 'rejected'.")
+        note = (response_note or "").strip() or None
+        if decision == FileRemarkStatus.REJECTED.value and not note:
+            raise ValidationError("A reason is mandatory when rejecting a file remark.")
         remark = await self._session.get(FileRemark, remark_id)
         if not remark:
             raise NotFoundError("File remark not found.")
         if remark.status != FileRemarkStatus.OPEN.value:
-            raise ConflictError("This file remark is already resolved.")
+            raise ConflictError("This file remark has already been decided.")
 
-        remark.status = FileRemarkStatus.RESOLVED.value
+        remark.status = decision
         remark.resolved_by = user_id
         remark.resolved_at = datetime.now(timezone.utc)
-        remark.response_note = (response_note or "").strip() or None
+        remark.response_note = note
         await self._session.flush()
 
         request = await self._session.get(DepositRequest, remark.deposit_request_id)
@@ -161,16 +173,13 @@ class FileRemarkService:
             "file_remarks", remark.id, user_id,
             field_name="status",
             old_value=FileRemarkStatus.OPEN.value,
-            new_value=(
-                FileRemarkStatus.RESOLVED.value
-                + (f" — {remark.response_note}" if remark.response_note else "")
-            ),
+            new_value=decision + (f" — {note}" if note else ""),
             ip_address=ip_address, user_agent=user_agent,
         )
         if request:
             await self._audit.record_update(
                 "deposit_requests", request.id, user_id,
-                field_name="file_remark_resolved",
+                field_name=f"file_remark_{decision}",
                 old_value=None,
                 new_value=self._summary(remark, request_number),
                 ip_address=ip_address, user_agent=user_agent,

@@ -20,15 +20,20 @@ const STATUS_LABELS: Record<RequestStatus, string> = {
   reopened: "Reopened",
   pending_hom_approval: "Awaiting HoM",
   rejected_by_hom: "Rejected",
+  rejected_by_accounts: "Rejected",
 };
 
+// Viewer-neutral (UAT Aug 2026, item 6): the label names the side that
+// actually acted — previously "by you" showed to every viewer, so accounts
+// saw merchandiser holds attributed to themselves.
 const FULL_LABELS: Partial<Record<RequestStatus, string>> = {
-  hold_by_merchandiser: "On Hold (by you)",
+  hold_by_merchandiser: "On Hold (by Merchandiser)",
   hold_by_accounts: "On Hold (by Accounts)",
-  cancelled_by_merchandiser: "Cancelled (by you)",
+  cancelled_by_merchandiser: "Cancelled (by Merchandiser)",
   cancelled_by_accounts: "Cancelled (by Accounts)",
   pending_hom_approval: "Waiting for HOM Approval",
-  rejected_by_hom: "Rejected by HOD (Merchandiser)",
+  rejected_by_hom: "Rejected by HoM",
+  rejected_by_accounts: "Rejected by Accounts",
 };
 
 type Treatment = "filled" | "outlined" | "dashed" | "strikethrough" | "subtle";
@@ -43,6 +48,7 @@ const STATUS_TREATMENT: Record<RequestStatus, Treatment> = {
   reopened: "subtle",
   pending_hom_approval: "dashed",
   rejected_by_hom: "strikethrough",
+  rejected_by_accounts: "strikethrough",
 };
 
 const STATUS_ICONS: Record<RequestStatus, LucideIcon> = {
@@ -55,6 +61,7 @@ const STATUS_ICONS: Record<RequestStatus, LucideIcon> = {
   reopened: RotateCcw,
   pending_hom_approval: Hourglass,
   rejected_by_hom: X,
+  rejected_by_accounts: X,
 };
 
 interface StatusBadgeProps {

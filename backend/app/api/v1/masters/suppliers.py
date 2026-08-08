@@ -1,5 +1,6 @@
 """Supplier and Defaulted Supplier master endpoints."""
 
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -20,6 +21,8 @@ from app.schemas.masters import (
     DefaultedSupplierResponse,
     SupplierCreate,
     SupplierDefaultStatusResponse,
+    SupplierExposureResponse,
+    SupplierExposureRow,
     SupplierResponse,
     SupplierUpdate,
 )
@@ -106,6 +109,77 @@ async def get_supplier_default_status(supplier_id: UUID, db: DB, _: User) -> Sup
             default_reason=flag.default_reason,
         )
     return SupplierDefaultStatusResponse(supplier_id=supplier_id, is_defaulted=False)
+
+
+@router.get("/{supplier_id}/exposure", response_model=SupplierExposureResponse)
+async def get_supplier_exposure(supplier_id: UUID, db: DB, _: User) -> SupplierExposureResponse:
+    """The supplier's whole live exposure (UAT Aug 2026, item 2): every open
+    request — not cancelled/rejected, goods not yet shipped — split into
+    'graced ETD passed' and 'graced ETD not yet passed', with per-currency
+    deposit totals. Rendered on the Supplier Default History panel for HoM
+    approval and the Accounts payment view."""
+    from datetime import date as date_cls
+
+    from app.models.analytics import AnalyticsSnapshot
+    from app.models.deposit_request import DepositRequest
+    from app.models.enums import RequestStatus
+    from app.models.payment import PaymentDetails
+
+    _CLOSED = (
+        RequestStatus.CANCELLED_BY_MERCHANDISER,
+        RequestStatus.CANCELLED_BY_ACCOUNTS,
+        RequestStatus.REJECTED_BY_HOM,
+        RequestStatus.REJECTED_BY_ACCOUNTS,
+    )
+    stmt = (
+        select(DepositRequest, AnalyticsSnapshot)
+        .outerjoin(
+            AnalyticsSnapshot,
+            AnalyticsSnapshot.deposit_request_id == DepositRequest.id,
+        )
+        .outerjoin(
+            PaymentDetails,
+            PaymentDetails.deposit_request_id == DepositRequest.id,
+        )
+        .where(
+            DepositRequest.supplier_id == supplier_id,
+            DepositRequest.is_deleted.is_(False),
+            DepositRequest.current_status.notin_(_CLOSED),
+            # A recorded ship date ends the exposure (goods delivered) —
+            # the outer join keeps requests with no payment row at all.
+            PaymentDetails.ship_date.is_(None),
+        )
+        .order_by(DepositRequest.created_at)
+    )
+    rows = (await db.execute(stmt)).all()
+
+    today = date_cls.today()
+    passed: list[SupplierExposureRow] = []
+    pending: list[SupplierExposureRow] = []
+    totals: dict[str, Decimal] = {}
+    for req, snap in rows:
+        row = SupplierExposureRow(
+            request_id=req.id,
+            request_number=req.request_number,
+            deposit_amount=req.deposit_amount,
+            currency=req.currency.value if req.currency else None,
+            current_status=req.current_status.value,
+            grace_etd=snap.grace_etd if snap else None,
+            etd_grace_overdue_days=snap.etd_grace_overdue_days if snap else None,
+        )
+        if snap and snap.grace_etd and snap.grace_etd < today:
+            passed.append(row)
+        else:
+            pending.append(row)
+        key = row.currency or "—"
+        totals[key] = totals.get(key, Decimal("0")) + Decimal(str(req.deposit_amount))
+
+    return SupplierExposureResponse(
+        supplier_id=supplier_id,
+        graced_etd_passed=passed,
+        graced_etd_pending=pending,
+        totals_by_currency=totals,
+    )
 
 
 @router.get("/{supplier_id}/default-history", response_model=list[DefaultedSupplierResponse])

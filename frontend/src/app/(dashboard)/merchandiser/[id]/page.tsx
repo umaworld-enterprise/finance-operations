@@ -70,6 +70,14 @@ export default function MerchandiserRequestDetail() {
     if (req?.remarks !== undefined) setMerchandiserNote(req.remarks ?? "");
   }, [req?.id, req?.remarks]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Terminal statuses: the request is closed to the merchandiser entirely
+  // (UAT Aug 2026, item 18) — no edits, not even remarks.
+  const requestClosed =
+    req?.current_status === "rejected_by_accounts" ||
+    req?.current_status === "rejected_by_hom" ||
+    req?.current_status === "cancelled_by_merchandiser" ||
+    req?.current_status === "cancelled_by_accounts";
+
   const canHold =
     req?.current_status === "pending_payment" && !req.is_locked;
   const canResume =
@@ -339,13 +347,17 @@ export default function MerchandiserRequestDetail() {
           </Card>
         )}
 
-        {/* Merchandiser remarks — always visible, always editable */}
+        {/* Merchandiser remarks — editable until the request is rejected or
+            cancelled (terminal statuses close the request entirely,
+            UAT Aug 2026 item 18). */}
         <Card>
           <CardContent className="p-5 md:p-6 space-y-3">
             <div>
               <h2 className="text-sm font-semibold text-foreground">Remarks</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Leave a note for the accounts team — visible to all roles. You cannot edit the form fields once submitted.
+                {requestClosed
+                  ? "This request is closed — remarks can no longer be changed."
+                  : "Leave a note for the accounts team — visible to all roles. You cannot edit the form fields once submitted."}
               </p>
             </div>
             <Textarea
@@ -353,15 +365,18 @@ export default function MerchandiserRequestDetail() {
               onChange={(e) => setMerchandiserNote(e.target.value)}
               rows={3}
               placeholder="e.g. Please update the deposit % to 30 — confirmed with supplier."
+              disabled={requestClosed}
             />
-            <Button
-              size="sm"
-              onClick={doSaveRemarks}
-              disabled={savingRemarks}
-              className="w-full sm:w-auto"
-            >
-              {savingRemarks ? "Saving…" : "Save Remark"}
-            </Button>
+            {!requestClosed && (
+              <Button
+                size="sm"
+                onClick={doSaveRemarks}
+                disabled={savingRemarks}
+                className="w-full sm:w-auto"
+              >
+                {savingRemarks ? "Saving…" : "Save Remark"}
+              </Button>
+            )}
           </CardContent>
         </Card>
 

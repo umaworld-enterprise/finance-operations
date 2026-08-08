@@ -65,6 +65,7 @@ TYPE_REQUEST_PENDING_HOM = "request_pending_hom"
 TYPE_STATUS_CHANGED = "status_changed"
 TYPE_FILE_REMARK_RAISED = "file_remark_raised"
 TYPE_FILE_REMARK_RESOLVED = "file_remark_resolved"
+TYPE_REQUEST_REJECTED = "request_rejected"
 
 _EMAIL_ROLES = (UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN)
 
@@ -696,6 +697,68 @@ async def notify_status_change(
         )
 
 
+async def notify_request_rejected_by_accounts(request_id: UUID, reason: str) -> None:
+    """After Accounts reject a whole request (terminal, UAT Aug 2026
+    item 12) — bell + push to the merchandiser who raised it AND every
+    active Head of Merchandiser, so HoM sees their approved request bounce.
+
+    Own session; failures logged and swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+
+    try:
+        async with AsyncSessionFactory() as session:
+            request = await _load_request(session, request_id)
+            if request is None:
+                return
+            body = (
+                f"Request {request.request_number} was rejected by the Accounts "
+                f"team. Reason: {reason}. The request is now closed and can no "
+                "longer be edited."
+            )
+            # Same content, but each audience's link opens their own view.
+            target = await _find_target_user(session, request)
+            if target is not None:
+                await _deliver_to_users(
+                    session, [target], TYPE_REQUEST_REJECTED,
+                    {
+                        "title": "Request rejected by Accounts",
+                        "body": body,
+                        "url": f"/merchandiser/{request_id}",
+                        "attachment_url": None,
+                    },
+                    request.id,
+                )
+            homs = [
+                u
+                for u in await _active_users_with_role(
+                    session, UserRole.HEAD_OF_MERCHANDISER
+                )
+                if target is None or u.id != target.id
+            ]
+            if homs:
+                await _deliver_to_users(
+                    session, homs, TYPE_REQUEST_REJECTED,
+                    {
+                        "title": "Request rejected by Accounts",
+                        "body": body,
+                        "url": f"/hom/{request_id}",
+                        "attachment_url": None,
+                    },
+                    request.id,
+                )
+            if target is None and not homs:
+                logger.info(
+                    "No recipients for request-rejected notification — skipping",
+                    request_id=str(request_id),
+                )
+    except Exception as exc:
+        logger.error(
+            "notify_request_rejected_by_accounts failed",
+            request_id=str(request_id), error=str(exc),
+        )
+
+
 async def notify_tranche_rejected(request_id: UUID, tranche_id: UUID, reason: str) -> None:
     """After Accounts/HoM reject a tranche — bell + push to the merchandiser
     who raised the request, including the mandatory reason and a prompt to add
@@ -954,9 +1017,11 @@ async def notify_file_remark_raised(remark_id: UUID) -> None:
         )
 
 
-async def notify_file_remark_resolved(remark_id: UUID) -> None:
-    """After Accounts resolve a file remark — bell + push back to the user who
-    raised it, including the response note when given.
+async def notify_file_remark_decided(remark_id: UUID) -> None:
+    """After Accounts approve or reject a file remark (UAT Aug 2026,
+    item 14) — bell + push back to the user who raised it, naming the
+    decision and including the note/reason when given. Also handles legacy
+    'resolved' rows, worded as resolved.
 
     Own session; failures logged and swallowed (BackgroundTasks contract).
     """
@@ -967,14 +1032,18 @@ async def notify_file_remark_resolved(remark_id: UUID) -> None:
             remark, request = await _load_file_remark_context(session, remark_id)
             if remark is None or request is None:
                 return
+            wording = {
+                "approved": "approved and processed",
+                "rejected": "rejected",
+            }.get(remark.status, "resolved")
             body = (
-                f"Your file remark on {request.request_number} was resolved by the "
-                "Accounts team."
+                f"Your file remark on {request.request_number} was {wording} by "
+                "the Accounts team."
             )
             if remark.response_note:
                 body += f" Response: {remark.response_note}"
             message = {
-                "title": "File remark resolved",
+                "title": f"File remark {wording.split()[0]}",
                 "body": body,
                 "url": "/file-remarks",
                 "attachment_url": None,
@@ -987,7 +1056,7 @@ async def notify_file_remark_resolved(remark_id: UUID) -> None:
             )
     except Exception as exc:
         logger.error(
-            "notify_file_remark_resolved failed", remark_id=str(remark_id), error=str(exc)
+            "notify_file_remark_decided failed", remark_id=str(remark_id), error=str(exc)
         )
 
 

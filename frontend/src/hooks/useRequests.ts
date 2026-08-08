@@ -20,6 +20,7 @@ export const REQUESTS_KEY = ["requests"] as const;
 function invalidateRequestLists(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, "paginated"] });
   qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, "pending-queue"] });
+  qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, "queue-kpis"] });
   qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, "hom-queue"] });
   qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, "my-activity"] });
   // The unpaginated list (useRequests) keys are ["requests", <params-object|undefined>]
@@ -46,13 +47,17 @@ async function optimisticStatusFlip(
   return { previous };
 }
 
+// Request lists auto-reload (UAT Aug 2026, item 4): a 30 s poll plus
+// refetch-on-focus so other users' actions (a payment processed, a hold)
+// appear without a manual page reload. keepPreviousData prevents flicker.
 export function useRequests(params?: Record<string, string>) {
   return useQuery({
     queryKey: [...REQUESTS_KEY, params],
     queryFn: () => requestService.list(params),
     staleTime: STALE,
     gcTime: GC,
-    refetchOnWindowFocus: false,
+    refetchInterval: POLL,
+    refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
   });
 }
@@ -67,7 +72,8 @@ export function useRequestsPaginated(
     queryFn: () => requestService.listPaginated(page, pageSize, params),
     staleTime: STALE_PAGED,
     gcTime: GC,
-    refetchOnWindowFocus: false,
+    refetchInterval: POLL,
+    refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
   });
 }
@@ -83,6 +89,18 @@ export function usePendingQueue() {
   });
 }
 
+// FY-to-date KPI counts for the payment queue (UAT Aug 2026, items 5/17/19).
+export function useQueueKpis() {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, "queue-kpis"],
+    queryFn: requestService.queueKpis,
+    staleTime: STALE,
+    gcTime: GC,
+    refetchInterval: POLL,
+    refetchOnWindowFocus: true,
+  });
+}
+
 export function useRequest(id: string) {
   return useQuery({
     queryKey: [...REQUESTS_KEY, id],
@@ -90,6 +108,10 @@ export function useRequest(id: string) {
     enabled: !!id,
     staleTime: 0,
     gcTime: GC,
+    // Detail pages stay live too — another user's tranche payment or hold
+    // shows up without a reload (UAT Aug 2026, item 4).
+    refetchInterval: POLL,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -311,11 +333,11 @@ export function useRequestAuditTrail(requestId: string) {
   });
 }
 
-export function useRequestAdjustments(requestId: string) {
+export function useRequestAdjustments(requestId: string, enabled = true) {
   return useQuery({
     queryKey: [...REQUESTS_KEY, requestId, "adjustments"],
     queryFn: () => requestService.adjustments(requestId),
-    enabled: !!requestId,
+    enabled: !!requestId && enabled,
     staleTime: STALE,
     gcTime: GC,
   });
@@ -327,6 +349,32 @@ export function useFieldVisibility() {
     queryFn: () => requestService.myFieldVisibility(),
     staleTime: 5 * 60 * 1000,
     gcTime: GC,
+  });
+}
+
+// Accounts reject the whole request — terminal (UAT Aug 2026, items 12/17/18).
+export function useRejectRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, remarks }: { id: string; remarks: string }) =>
+      requestService.rejectRequest(id, remarks),
+    onMutate: async ({ id }) => {
+      await qc.cancelQueries({ queryKey: [...REQUESTS_KEY, id] });
+      const previous = qc.getQueryData<DepositRequest>([...REQUESTS_KEY, id]);
+      qc.setQueryData<DepositRequest>([...REQUESTS_KEY, id], (old) =>
+        old ? { ...old, current_status: "rejected_by_accounts" } : old
+      );
+      return { previous, id };
+    },
+    onError: (_err, { id }, context) => {
+      if (context?.previous !== undefined) {
+        qc.setQueryData([...REQUESTS_KEY, id], context.previous);
+      }
+    },
+    onSettled: (_data, _err, { id }) => {
+      invalidateRequestLists(qc);
+      qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, id] });
+    },
   });
 }
 

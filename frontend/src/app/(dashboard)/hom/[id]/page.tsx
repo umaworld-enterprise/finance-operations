@@ -10,9 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { useRequest, useHomApprove, useHomReject, useFieldVisibility } from "@/hooks/useRequests";
+import { useRequest, useHomApprove, useHomReject, useFieldVisibility, usePayment } from "@/hooks/useRequests";
 import { DecisionDialog } from "@/components/hom/DecisionDialog";
 import { SupplierDefaultHistory } from "@/components/forms/SupplierDefaultHistory";
+import { TrancheList } from "@/components/tranches/TrancheList";
+import { RequestAuditTrail } from "@/components/tranches/RequestAuditTrail";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { ArrowLeft, Lock, FileQuestion, Check, X } from "lucide-react";
 import Link from "next/link";
@@ -20,6 +22,7 @@ import Link from "next/link";
 export default function HomRequestDetail() {
   const { id } = useParams<{ id: string }>();
   const { data: req, isLoading, isFetching } = useRequest(id);
+  const { data: payment } = usePayment(id);
   const { data: fv = {} } = useFieldVisibility();
   const homApprove = useHomApprove();
   const homReject = useHomReject();
@@ -142,6 +145,8 @@ export default function HomRequestDetail() {
               {req.payment_terms && field("Payment Terms", req.payment_terms)}
               {field("Submitted", formatDate(req.created_at))}
               {fv.creator_info !== false && field("Submitted By", req.creator ? `${req.creator.full_name} (${req.creator.email})` : req.submitter_email ?? null)}
+              {payment?.ship_date && field("Ship Date", formatDate(payment.ship_date))}
+              {fv.accounts_timestamp !== false && payment && field("Payment Last Updated", formatDate(payment.updated_at))}
             </dl>
             {req.remarks && (
               <div className="mt-4 pt-4 border-t border-border">
@@ -161,14 +166,36 @@ export default function HomRequestDetail() {
                 {fv.grace_etd !== false && field("Grace ETD", formatDate(snap.grace_etd))}
                 {fv.etd_grace_overdue_days !== false && field("ETD Grace Overdue Days", snap.etd_grace_overdue_days != null ? `${snap.etd_grace_overdue_days}d` : null)}
                 {fv.actual_etd_overdue_days !== false && field("Actual ETD Overdue Days", snap.actual_etd_overdue_days != null ? `${snap.actual_etd_overdue_days}d` : null)}
+                {fv.cost_of_fund !== false && field("Cost of Fund", snap.cost_of_fund_amount != null ? formatCurrency(Number(snap.cost_of_fund_amount), req.currency ?? undefined) : null)}
                 {fv.default_status !== false && field("Risk Status", snap.default_status)}
               </dl>
             </CardContent>
           </Card>
         )}
 
+        {/* Advance Payment Tranches — the same particulars Accounts see,
+            read-only (UAT Aug 2026, item 3). */}
+        {(req.tranches?.length ?? 0) > 0 && (
+          <Card>
+            <CardContent className="p-5 md:p-6">
+              <h2 className="text-sm font-semibold text-foreground mb-1">Advance Payment Tranches</h2>
+              <p className="text-xs text-muted-foreground mb-4">
+                Amounts, tentative dates and payment progress — exactly what the Accounts team works from.
+              </p>
+              <TrancheList
+                requestId={id}
+                tranches={req.tranches ?? []}
+                currency={req.currency}
+                mode="readonly"
+              />
+            </CardContent>
+          </Card>
+        )}
+
         {/* Supplier default track record — decisive context for approval */}
         <SupplierDefaultHistory supplierId={req.supplier.id} supplierName={req.supplier.name} />
+
+        <RequestAuditTrail requestId={id} />
 
         {/* Status history */}
         {fv.status_history !== false && req.status_history && req.status_history.length > 0 && (

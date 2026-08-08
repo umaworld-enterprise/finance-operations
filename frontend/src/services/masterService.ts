@@ -1,5 +1,5 @@
 import { api } from "@/lib/api";
-import type { AppUser, Bank, Customer, DefaultedSupplier, PaymentTerm, Supplier, SupplierDefaultStatus, UserRole, Vertical } from "@/types";
+import type { AppUser, Bank, Customer, DefaultedSupplier, PaymentTerm, Supplier, SupplierDefaultStatus, SupplierExposure, UserRole, Vertical } from "@/types";
 
 export interface FlagSupplierPayload {
   supplier_id: string;
@@ -107,6 +107,15 @@ const masterService = {
   getSupplierDefaultHistory: async (supplierId: string): Promise<DefaultedSupplier[]> => {
     const { data } = await api.get<DefaultedSupplier[]>(
       `/masters/suppliers/${supplierId}/default-history`,
+    );
+    return data;
+  },
+
+  // Whole live exposure — open requests split by graced-ETD passed vs not
+  // yet passed (UAT Aug 2026, item 2).
+  getSupplierExposure: async (supplierId: string): Promise<SupplierExposure> => {
+    const { data } = await api.get<SupplierExposure>(
+      `/masters/suppliers/${supplierId}/exposure`,
     );
     return data;
   },

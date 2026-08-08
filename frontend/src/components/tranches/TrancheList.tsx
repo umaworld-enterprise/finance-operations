@@ -37,6 +37,10 @@ interface Props {
   /** merchandiser mode: adding replacement tranches stays allowed while a
    * rejected tranche exists, even when canModify is false (Aug 2026). */
   canAdd?: boolean;
+  /** accounts mode: called after the FINAL unpaid tranche is marked paid —
+   * the request just completed and locked (UAT Aug 2026, item 10: return
+   * to the queue automatically). */
+  onRequestCompleted?: () => void;
 }
 
 // Accounts: per-tranche payment details entry (payment date + bank required
@@ -190,6 +194,7 @@ export function TrancheList({
   canModify = true,
   modifyBlockedReason = null,
   canAdd,
+  onRequestCompleted,
 }: Props) {
   const updateTranche = useUpdateTranche(requestId);
   const uploadTt = useUploadTrancheTtCopy(requestId);
@@ -288,9 +293,16 @@ export function TrancheList({
 
   const doPay = async (trancheId: string) => {
     const t = tranches.find((x) => x.id === trancheId);
+    // Is this the last unpaid live tranche? Paying it completes the request.
+    const wasFinal = tranches.filter((x) => x.status === "unpaid").length === 1;
     try {
       await payTranche.mutateAsync(trancheId);
-      toast.success(`${t?.label ?? "Tranche"} marked as paid — the merchandiser has been notified.`);
+      if (wasFinal) {
+        toast.success("Final tranche paid — payment completed and the request is locked.");
+        onRequestCompleted?.();
+      } else {
+        toast.success(`${t?.label ?? "Tranche"} marked as paid — the merchandiser has been notified.`);
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to mark the tranche paid.");
     } finally {

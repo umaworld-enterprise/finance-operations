@@ -2,9 +2,10 @@
 
 Merchandisers raise structured remarks against their own files — including
 paid & processed (locked) ones — for invoice-number changes and invoice
-splits; Accounts get notified, act manually, and resolve with an optional
-response. Bypasses the Adjust Invoices module for the time being; moves no
-money.
+splits; Accounts get notified, act manually, and decide with Approve
+(processed) or Reject (UAT Aug 2026, item 14) — the raiser is notified of
+either outcome. Bypasses the Adjust Invoices module for the time being;
+moves no money.
 """
 
 from typing import Annotated
@@ -15,11 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.dependencies import CurrentUser, get_current_user
-from app.schemas.file_remark import FileRemarkCreate, FileRemarkResolve, FileRemarkResponse
+from app.models.file_remark import FileRemarkStatus
+from app.schemas.file_remark import FileRemarkCreate, FileRemarkDecide, FileRemarkResponse
 from app.services.file_remark_service import FileRemarkService
 from app.services.notification_service import (
+    notify_file_remark_decided,
     notify_file_remark_raised,
-    notify_file_remark_resolved,
 )
 
 router = APIRouter(prefix="/file-remarks", tags=["file-remarks"])
@@ -37,7 +39,7 @@ def _ip(req: Request) -> str | None:
 async def list_file_remarks(
     current_user: User,
     db: DB,
-    status: str | None = Query(None, pattern="^(open|resolved)$"),
+    status: str | None = Query(None, pattern="^(open|approved|rejected|resolved)$"),
     request_id: UUID | None = Query(None),
     limit: int = Query(200, ge=1, le=500),
 ) -> list[FileRemarkResponse]:
@@ -71,25 +73,57 @@ async def create_file_remark(
     return next(r for r in results if r.id == remark.id)
 
 
-@router.post("/{remark_id}/resolve", response_model=FileRemarkResponse)
-async def resolve_file_remark(
+async def _decide(
     remark_id: UUID,
-    body: FileRemarkResolve,
+    decision: str,
+    body: FileRemarkDecide,
+    current_user: CurrentUser,
+    request: Request,
+    db: AsyncSession,
+    background_tasks: BackgroundTasks,
+) -> FileRemarkResponse:
+    svc = FileRemarkService(db)
+    remark = await svc.decide(
+        remark_id, decision, current_user.id, current_user.role, body.response_note,
+        ip_address=_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    background_tasks.add_task(notify_file_remark_decided, remark.id)
+    results = await svc.list(
+        current_user.id, current_user.role, deposit_request_id=remark.deposit_request_id
+    )
+    return next(r for r in results if r.id == remark.id)
+
+
+@router.post("/{remark_id}/approve", response_model=FileRemarkResponse)
+async def approve_file_remark(
+    remark_id: UUID,
+    body: FileRemarkDecide,
     current_user: User,
     request: Request,
     db: DB,
     background_tasks: BackgroundTasks,
 ) -> FileRemarkResponse:
-    """Accounts resolve a remark; the raiser is notified (response note
-    included when given)."""
-    svc = FileRemarkService(db)
-    remark = await svc.resolve(
-        remark_id, current_user.id, current_user.role, body.response_note,
-        ip_address=_ip(request),
-        user_agent=request.headers.get("user-agent"),
+    """Accounts approve (mark processed) a remark — optional note; the
+    raising merchandiser is notified (UAT Aug 2026, item 14)."""
+    return await _decide(
+        remark_id, FileRemarkStatus.APPROVED.value, body,
+        current_user, request, db, background_tasks,
     )
-    background_tasks.add_task(notify_file_remark_resolved, remark.id)
-    results = await svc.list(
-        current_user.id, current_user.role, deposit_request_id=remark.deposit_request_id
+
+
+@router.post("/{remark_id}/reject", response_model=FileRemarkResponse)
+async def reject_file_remark(
+    remark_id: UUID,
+    body: FileRemarkDecide,
+    current_user: User,
+    request: Request,
+    db: DB,
+    background_tasks: BackgroundTasks,
+) -> FileRemarkResponse:
+    """Accounts reject a remark — the reason is mandatory; the raising
+    merchandiser is notified (UAT Aug 2026, item 14)."""
+    return await _decide(
+        remark_id, FileRemarkStatus.REJECTED.value, body,
+        current_user, request, db, background_tasks,
     )
-    return next(r for r in results if r.id == remark.id)

@@ -40,13 +40,24 @@ export function currencyDisplayLabel(c: string | null | undefined): string {
 }
 
 
+// DD/MM/YYYY across the entire PWA (UAT change note, Aug 2026 item 9).
 export function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "—";
   return new Date(dateStr).toLocaleDateString("en-GB", {
     day: "2-digit",
-    month: "short",
+    month: "2-digit",
     year: "numeric",
   });
+}
+
+// DD/MM/YYYY, HH:MM — for the few places that show a full timestamp.
+export function formatDateTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr);
+  return `${formatDate(dateStr)}, ${d.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
 }
 
 export function timeAgo(dateStr: string): string {
