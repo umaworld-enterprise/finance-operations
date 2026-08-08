@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { TopNav } from "@/components/layout/TopNav";
 import { RoleGuard } from "@/components/layout/RoleGuard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -15,7 +15,8 @@ import { TrancheList } from "@/components/tranches/TrancheList";
 import { SupplierDefaultHistory } from "@/components/forms/SupplierDefaultHistory";
 import { RequestAuditTrail } from "@/components/tranches/RequestAuditTrail";
 import { RequestAdjustments } from "@/components/tranches/RequestAdjustments";
-import { useRequest, usePayment, useRequestAction, useFieldVisibility, useUpdateRequest } from "@/hooks/useRequests";
+import { useRequest, usePayment, useRequestAction, useFieldVisibility, useUpdateRequest, useRejectRequest } from "@/hooks/useRequests";
+import { DecisionDialog } from "@/components/hom/DecisionDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { ArrowLeft, Lock, FileQuestion } from "lucide-react";
@@ -25,10 +26,13 @@ import { toast } from "sonner";
 
 export default function AccountsPaymentPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { data: req, isLoading } = useRequest(id);
   const { data: payment } = usePayment(id);
   const { data: fv = {} } = useFieldVisibility();
   const { mutateAsync: performAction, isPending } = useRequestAction();
+  const rejectRequest = useRejectRequest();
+  const [rejectOpen, setRejectOpen] = useState(false);
   const [holdRemarks, setHoldRemarks] = useState("");
   const { user } = useAuth();
   // Finance Admin may only record the ship date — everything else read-only.
@@ -72,12 +76,35 @@ export default function AccountsPaymentPage() {
     .filter((h) => h.old_status === "pending_hom_approval")
     .sort((a, b) => b.changed_at.localeCompare(a.changed_at))[0];
 
+  // Frozen for Accounts while the merchandiser has it on hold or has
+  // cancelled it (UAT Aug 2026, item 7) — every panel goes read-only and
+  // the backend refuses accounts writes regardless.
+  const frozenByMerchandiser =
+    req?.current_status === "hold_by_merchandiser" ||
+    req?.current_status === "cancelled_by_merchandiser";
+
   const canHold   = req?.current_status === "pending_payment"      && !req.is_locked && !isFinance;
   // "reopened" must also offer Resume — otherwise a reopened request is
   // stranded with no path back to the payment queue.
   const canResume = (req?.current_status === "hold_by_accounts" || req?.current_status === "reopened") && !req.is_locked && !isFinance;
   const canCancel = req?.current_status === "hold_by_accounts"     && !req.is_locked && !isFinance;
   const canReopen = req?.current_status === "cancelled_by_accounts" && !req.is_locked && !isFinance;
+  // Terminal rejection of the whole request (UAT Aug 2026, items 12/17/18) —
+  // allowed while pending or on accounts hold; reason is mandatory.
+  const canReject =
+    (req?.current_status === "pending_payment" || req?.current_status === "hold_by_accounts") &&
+    !req.is_locked && !isFinance;
+
+  const doReject = async (remarks: string) => {
+    try {
+      await rejectRequest.mutateAsync({ id, remarks });
+      toast.success("Request rejected — the merchandiser and HoM have been notified.");
+      // Straight back to the queue (UAT item 10) — no manual Back click.
+      router.push("/accounts");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to reject the request.");
+    }
+  };
 
   const doAction = async (action: "hold" | "resume" | "cancel" | "reopen") => {
     // Optimistic status: the UI flips immediately; the server reconciles.
@@ -90,6 +117,8 @@ export default function AccountsPaymentPage() {
     try {
       await performAction({ id, action, remarks: holdRemarks, optimisticStatus: optimistic[action] });
       toast.success("Action completed.");
+      // Terminal outcome — straight back to the queue (UAT item 10).
+      if (action === "cancel") router.push("/accounts");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Action failed.");
     }
@@ -167,7 +196,13 @@ export default function AccountsPaymentPage() {
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div className="flex flex-wrap items-center gap-3">
                 <h2 className="font-semibold text-foreground">{req.request_number}</h2>
-                <StatusBadge status={req.current_status} />
+                <StatusBadge status={req.current_status} showFull />
+                {/* WHO acted — the holder/canceller/rejecter by name (item 6). */}
+                {req.last_status_change_by &&
+                  ["hold_by_merchandiser", "hold_by_accounts", "cancelled_by_merchandiser",
+                    "cancelled_by_accounts", "rejected_by_hom", "rejected_by_accounts"].includes(req.current_status) && (
+                  <span className="text-xs text-muted-foreground">by {req.last_status_change_by}</span>
+                )}
                 {req.is_locked && (
                   <span className="inline-flex items-center gap-1 text-xs text-foreground bg-muted border border-border px-2 py-0.5 rounded-full">
                     <Lock className="h-3 w-3" /> Locked
@@ -175,6 +210,13 @@ export default function AccountsPaymentPage() {
                 )}
               </div>
             </div>
+            {frozenByMerchandiser && (
+              <div className="mb-4 rounded-lg bg-muted border border-border text-sm text-foreground p-3">
+                This request was {req.current_status === "hold_by_merchandiser" ? "put on hold" : "cancelled"} by
+                the merchandiser{req.last_status_change_by ? ` (${req.last_status_change_by})` : ""} — Accounts
+                cannot act on it{req.current_status === "hold_by_merchandiser" ? " until they resume it" : ""}. Shown for information only.
+              </div>
+            )}
             <dl className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
               {field("Supplier", req.supplier.name)}
               {field("Customer", req.customer.name)}
@@ -291,12 +333,18 @@ export default function AccountsPaymentPage() {
               currency={req.currency}
               mode={
                 isFinance ||
-                ["cancelled_by_merchandiser", "cancelled_by_accounts", "rejected_by_hom"].includes(
-                  req.current_status,
-                )
+                [
+                  "cancelled_by_merchandiser",
+                  "cancelled_by_accounts",
+                  "rejected_by_hom",
+                  "rejected_by_accounts",
+                  // Frozen while the merchandiser has it on hold (item 7).
+                  "hold_by_merchandiser",
+                ].includes(req.current_status)
                   ? "readonly"
                   : "accounts"
               }
+              onRequestCompleted={() => router.push("/accounts")}
             />
           </CardContent>
         </Card>
@@ -363,7 +411,7 @@ export default function AccountsPaymentPage() {
           </Card>
         )}
 
-        {(canHold || canResume || canCancel || canReopen) && (
+        {(canHold || canResume || canCancel || canReopen || canReject) && (
           <Card>
             <CardContent className="p-5 md:p-6 space-y-4">
               <h2 className="font-semibold text-foreground">Actions</h2>
@@ -392,6 +440,16 @@ export default function AccountsPaymentPage() {
                     Cancel Request
                   </Button>
                 )}
+                {canReject && (
+                  <Button
+                    variant="destructive"
+                    onClick={() => setRejectOpen(true)}
+                    disabled={isPending || rejectRequest.isPending}
+                    className="w-full sm:w-auto"
+                  >
+                    Reject Request
+                  </Button>
+                )}
                 {canReopen && (
                   <Button onClick={() => doAction("reopen")} disabled={isPending} className="w-full sm:w-auto">
                     Reopen
@@ -402,6 +460,18 @@ export default function AccountsPaymentPage() {
           </Card>
         )}
       </main>
+
+      <DecisionDialog
+        open={rejectOpen}
+        title="Reject Request"
+        description="Rejecting is final — the request closes permanently, the merchandiser can no longer edit it, and its invoice numbers become reusable. A reason is mandatory; the merchandiser and Head of Merchandiser will be notified."
+        placeholder="Reason for rejection"
+        confirmLabel="Confirm Reject"
+        destructive
+        busy={rejectRequest.isPending}
+        onClose={() => setRejectOpen(false)}
+        onConfirm={doReject}
+      />
     </RoleGuard>
   );
 }

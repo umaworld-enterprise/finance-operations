@@ -137,6 +137,30 @@ class DefaultedSupplierResponse(OrmBase):
         )
 
 
+# ── Supplier exposure (UAT Aug 2026, item 2) ──────────────────────────────────
+
+class SupplierExposureRow(BaseModel):
+    request_id: UUID
+    request_number: str
+    deposit_amount: Decimal
+    currency: str | None = None
+    current_status: str
+    grace_etd: date | None = None
+    etd_grace_overdue_days: int | None = None
+
+
+class SupplierExposureResponse(BaseModel):
+    """The supplier's whole live exposure — every open request (not
+    cancelled/rejected, goods not yet shipped), split by whether its graced
+    ETD has already passed. Shown on the Supplier Default History panel so
+    HoM and Accounts decide with the full picture."""
+
+    supplier_id: UUID
+    graced_etd_passed: list[SupplierExposureRow] = []
+    graced_etd_pending: list[SupplierExposureRow] = []
+    totals_by_currency: dict[str, Decimal] = {}
+
+
 # ── Supplier Default Status (for form validation) ─────────────────────────────
 
 class SupplierDefaultStatusResponse(BaseModel):

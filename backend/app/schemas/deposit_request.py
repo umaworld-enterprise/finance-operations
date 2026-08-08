@@ -30,7 +30,7 @@ class DepositRequestCreate(BaseModel):
     payment_terms: str | None = None
     remarks: str | None = None
     override_flagged_supplier: bool = False
-    # Advance Payment Tranches (Tranche I, II, …). When omitted, a single
+    # Advance Payment Tranches (Tranche 1, 2, …). When omitted, a single
     # tranche covering deposit_amount is created for compatibility.
     tranches: list[TrancheCreate] | None = None
 
@@ -127,6 +127,10 @@ class DepositRequestResponse(OrmBase):
     created_at: datetime
     updated_at: datetime
     tranches: list[TrancheResponse] = []
+    # Full name of the user who performed the most recent status change —
+    # so hold/cancel/reject rows can say WHO acted, not just which side
+    # (UAT Aug 2026, item 6). Populated by the list/detail endpoints.
+    last_status_change_by: str | None = None
 
     @model_validator(mode="after")
     def compute_tranche_percentages(self) -> "DepositRequestResponse":

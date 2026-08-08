@@ -9,7 +9,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
-  ArrowLeftRight,
   BarChart3,
   BrainCircuit,
   ClipboardList,
@@ -34,14 +33,17 @@ interface NavItem {
   group: "main" | "admin";
 }
 
+// Order fixes the left-panel chronology for every role (UAT change note,
+// Aug 2026 item 16): the role's own dashboard first, then File Remarks,
+// Analytics, Reports, Settings. Adjust Invoices is hidden from the UI for
+// now (item 15) — the backend module stays intact pending further discussion.
 const NAV_ITEMS: NavItem[] = [
   { href: "/admin",         label: "Admin Overview", icon: LayoutDashboard, roles: ["super_admin"],                                                                      group: "main"  },
   { href: "/accounts",      label: "Payment Queue",  icon: CreditCard,      roles: ["accounts_team", "super_admin"],                                                     group: "main"  },
-  { href: "/adjust-invoices", label: "Adjust Invoices", icon: ArrowLeftRight, roles: ["accounts_team", "super_admin", "finance_admin", "merchandiser"],                     group: "main"  },
-  { href: "/file-remarks",  label: "File Remarks",   icon: MessageSquarePlus, roles: ["merchandiser", "accounts_team", "super_admin", "finance_admin"],                     group: "main"  },
   { href: "/merchandiser",  label: "My Requests",    icon: ClipboardList,   roles: ["merchandiser"],                                                                     group: "main"  },
   { href: "/hom",           label: "HoM Dashboard",  icon: UserCog,         roles: ["head_of_merchandiser", "super_admin"],                                              group: "main"  },
   { href: "/finance",       label: "Supplier Risk",  icon: ShieldAlert,     roles: ["finance_admin", "super_admin"],                                                     group: "main"  },
+  { href: "/file-remarks",  label: "File Remarks",   icon: MessageSquarePlus, roles: ["merchandiser", "accounts_team", "super_admin", "finance_admin"],                     group: "main"  },
   { href: "/analytics",     label: "Analytics",      icon: BarChart3,       roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
   { href: "/reports",       label: "Reports",        icon: FileText,        roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
   { href: "/settings",      label: "Settings",       icon: Settings,        roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },

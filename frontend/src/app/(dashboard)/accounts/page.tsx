@@ -20,14 +20,14 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
-import { useRequestsPaginated, usePendingQueue } from "@/hooks/useRequests";
+import { useRequestsPaginated, usePendingQueue, useQueueKpis } from "@/hooks/useRequests";
 import { ShipmentsTable } from "@/components/analytics/ShipmentsTable";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
 import { currencyDisplayLabel, formatCurrency, formatDate, cn, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
 import { differenceInDays } from "date-fns";
-import { Clock, CheckCircle, AlertTriangle, ClipboardList, ArrowRight } from "lucide-react";
+import { Clock, CheckCircle, AlertTriangle, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
 import Link from "next/link";
 import type { DepositRequest } from "@/types";
 
@@ -46,13 +46,40 @@ function agingBadge(createdAt: string) {
   );
 }
 
-function PendingTable({ rows, loading }: { rows: DepositRequest[]; loading: boolean }) {
+// Earliest tentative payment date among a request's UNPAID tranches — the
+// next money actually going out. Basis for the 0–10 / >10 day split
+// (UAT Aug 2026, item 13); undated requests sort as "later".
+function nextTentativeDate(req: DepositRequest): string | null {
+  const dates = (req.tranches ?? [])
+    .filter((t) => t.status === "unpaid" && t.tentative_payment_date)
+    .map((t) => t.tentative_payment_date as string)
+    .sort();
+  return dates[0] ?? null;
+}
+
+function isDueWithin10Days(req: DepositRequest): boolean {
+  const next = nextTentativeDate(req);
+  if (!next) return false;
+  return differenceInDays(new Date(next), new Date()) <= 10;
+}
+
+function PendingTable({
+  rows,
+  loading,
+  title,
+  subtitle,
+}: {
+  rows: DepositRequest[];
+  loading: boolean;
+  title: string;
+  subtitle: string;
+}) {
   return (
     <Card className="overflow-hidden">
       <div className="px-5 py-4 border-b border-border flex items-center justify-between">
         <div>
-          <h3 className="font-semibold text-foreground text-sm">Pending Payment</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">Sorted oldest first — process in order</p>
+          <h3 className="font-semibold text-foreground text-sm">{title}</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
         </div>
         {rows.length > 0 && (
           <span className="text-xs text-muted-foreground font-medium">{rows.length} awaiting</span>
@@ -79,7 +106,7 @@ function PendingTable({ rows, loading }: { rows: DepositRequest[]; loading: bool
             ))}
           </>
         ) : rows.length === 0 ? (
-          <EmptyState icon={CheckCircle} title="Queue is clear" description="All pending payments have been processed." />
+          <EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." />
         ) : rows.map((req) => (
           <div key={req.id} className="p-4 space-y-2.5">
             <div className="flex items-start justify-between gap-3">
@@ -89,6 +116,12 @@ function PendingTable({ rows, loading }: { rows: DepositRequest[]; loading: bool
             <div className="text-xs text-muted-foreground font-mono">Invoice # {req.sunshine_invoice_number || "—"}</div>
             <div className="text-sm font-semibold text-foreground">{req.supplier.name}</div>
             <div className="text-xs text-muted-foreground">{req.customer.name}</div>
+            <div className="text-xs text-muted-foreground">
+              {req.vertical?.name ?? "—"} · {req.creator?.full_name ?? "—"}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Tentative payment: {formatDate(nextTentativeDate(req))}
+            </div>
             <div className="flex items-center justify-between">
               <span className="font-bold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</span>
               <Button size="sm" asChild>
@@ -110,25 +143,31 @@ function PendingTable({ rows, loading }: { rows: DepositRequest[]; loading: bool
               <TableHead>Invoice #</TableHead>
               <TableHead>Supplier</TableHead>
               <TableHead>Customer</TableHead>
+              <TableHead>Vertical/Category</TableHead>
+              <TableHead>Merchandiser</TableHead>
               <TableHead className="text-right">Deposit</TableHead>
               <TableHead>Currency</TableHead>
+              <TableHead>Tentative Payment</TableHead>
               <TableHead>Waiting</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableSkeleton rows={5} cols={8} />
+              <TableSkeleton rows={5} cols={11} />
             ) : rows.length === 0 ? (
-              <tr><td colSpan={8}><EmptyState icon={CheckCircle} title="Queue is clear" description="All pending payments have been processed." /></td></tr>
+              <tr><td colSpan={11}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id}>
                 <TableCell><span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span></TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
                 <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
+                <TableCell className="text-muted-foreground text-xs">{req.vertical?.name ?? "—"}</TableCell>
+                <TableCell className="text-muted-foreground text-xs">{req.creator?.full_name ?? "—"}</TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs font-medium">{currencyDisplayLabel(req.currency)}</TableCell>
+                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDate(nextTentativeDate(req))}</TableCell>
                 <TableCell>{agingBadge(req.created_at)}</TableCell>
                 <TableCell>
                   <Button size="sm" asChild>
@@ -144,20 +183,43 @@ function PendingTable({ rows, loading }: { rows: DepositRequest[]; loading: bool
   );
 }
 
-function HoldTable({ rows }: { rows: DepositRequest[] }) {
+// A merchandiser-held or merchandiser-cancelled request is frozen for
+// Accounts (UAT Aug 2026, item 7): greyed, non-clickable, notification
+// purposes only. The backend refuses accounts writes on them regardless.
+function frozenForAccounts(req: DepositRequest): boolean {
+  return (
+    req.current_status === "hold_by_merchandiser" ||
+    req.current_status === "cancelled_by_merchandiser"
+  );
+}
+
+// Shared table for the status-scoped tabs (On Hold / Rejected / Cancelled —
+// UAT Aug 2026, items 17 & 19: rejected and cancelled requests live under
+// their own heads, never in Pending).
+function StatusTable({
+  rows,
+  title,
+  subtitle,
+  emptyTitle,
+}: {
+  rows: DepositRequest[];
+  title: string;
+  subtitle: string;
+  emptyTitle: string;
+}) {
   return (
     <Card className="overflow-hidden">
       <div className="px-5 py-4 border-b border-border">
-        <h3 className="font-semibold text-foreground text-sm">On Hold</h3>
-        <p className="text-xs text-muted-foreground mt-0.5">Requests placed on hold</p>
+        <h3 className="font-semibold text-foreground text-sm">{title}</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
       </div>
 
       {/* Mobile card list */}
       <div className="md:hidden divide-y divide-border">
         {rows.length === 0 ? (
-          <EmptyState icon={AlertTriangle} title="No requests on hold" />
+          <EmptyState icon={AlertTriangle} title={emptyTitle} />
         ) : rows.map((req) => (
-          <div key={req.id} className="p-4 space-y-2.5">
+          <div key={req.id} className={cn("p-4 space-y-2.5", frozenForAccounts(req) && "opacity-50")}>
             <div className="flex items-start justify-between gap-3">
               <span className="font-mono text-xs font-bold text-foreground">{requestDisplayNumber(req)}</span>
               <StatusBadge status={req.current_status} showFull />
@@ -165,11 +227,18 @@ function HoldTable({ rows }: { rows: DepositRequest[] }) {
             <div className="text-xs text-muted-foreground font-mono">Invoice # {req.sunshine_invoice_number || "—"}</div>
             <div className="text-sm font-semibold text-foreground">{req.supplier.name}</div>
             <div className="text-xs text-muted-foreground">{req.customer.name}</div>
+            {req.last_status_change_by && (
+              <div className="text-xs text-muted-foreground">By {req.last_status_change_by}</div>
+            )}
             <div className="flex items-center justify-between">
               <span className="font-bold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</span>
-              <Button size="sm" variant="outline" asChild>
-                <Link href={`/accounts/${req.id}`}>View</Link>
-              </Button>
+              {frozenForAccounts(req) ? (
+                <span className="text-xs text-muted-foreground italic">Locked by merchandiser</span>
+              ) : (
+                <Button size="sm" variant="outline" asChild>
+                  <Link href={`/accounts/${req.id}`}>View</Link>
+                </Button>
+              )}
             </div>
           </div>
         ))}
@@ -186,23 +255,31 @@ function HoldTable({ rows }: { rows: DepositRequest[] }) {
               <TableHead>Customer</TableHead>
               <TableHead className="text-right">Deposit</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>By</TableHead>
               <TableHead className="hidden lg:table-cell">Submitted</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <tr><td colSpan={8}><EmptyState icon={AlertTriangle} title="No requests on hold" /></td></tr>
+              <tr><td colSpan={9}><EmptyState icon={AlertTriangle} title={emptyTitle} /></td></tr>
             ) : rows.map((req) => (
-              <TableRow key={req.id}>
+              <TableRow key={req.id} className={cn(frozenForAccounts(req) && "opacity-50 pointer-events-none select-none")}>
                 <TableCell><span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span></TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
                 <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
                 <TableCell><StatusBadge status={req.current_status} showFull /></TableCell>
+                <TableCell className="text-muted-foreground text-xs">{req.last_status_change_by ?? "—"}</TableCell>
                 <TableCell className="hidden lg:table-cell text-muted-foreground text-xs">{formatDate(req.created_at)}</TableCell>
-                <TableCell><Button size="sm" variant="outline" asChild><Link href={`/accounts/${req.id}`}>View</Link></Button></TableCell>
+                <TableCell>
+                  {frozenForAccounts(req) ? (
+                    <span className="text-xs text-muted-foreground italic whitespace-nowrap">Locked</span>
+                  ) : (
+                    <Button size="sm" variant="outline" asChild><Link href={`/accounts/${req.id}`}>View</Link></Button>
+                  )}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -224,7 +301,7 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
         {rows.length === 0 ? (
           <EmptyState icon={ClipboardList} title="No requests yet" />
         ) : rows.map((req) => (
-          <div key={req.id} className="p-4 space-y-2.5">
+          <div key={req.id} className={cn("p-4 space-y-2.5", frozenForAccounts(req) && "opacity-50")}>
             <div className="flex items-start justify-between gap-3">
               <span className="font-mono text-xs font-bold text-foreground">{requestDisplayNumber(req)}</span>
               <StatusBadge status={req.current_status} showFull />
@@ -233,9 +310,13 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
             <div className="text-xs text-muted-foreground">{req.customer.name}</div>
             <div className="flex items-center justify-between">
               <span className="font-bold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</span>
-              <Button size="sm" variant="ghost" asChild>
-                <Link href={`/accounts/${req.id}`}>View</Link>
-              </Button>
+              {frozenForAccounts(req) ? (
+                <span className="text-xs text-muted-foreground italic">Locked by merchandiser</span>
+              ) : (
+                <Button size="sm" variant="ghost" asChild>
+                  <Link href={`/accounts/${req.id}`}>View</Link>
+                </Button>
+              )}
             </div>
           </div>
         ))}
@@ -260,7 +341,7 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
             {rows.length === 0 ? (
               <tr><td colSpan={8}><EmptyState icon={ClipboardList} title="No requests yet" /></td></tr>
             ) : rows.map((req) => (
-              <TableRow key={req.id}>
+              <TableRow key={req.id} className={cn(frozenForAccounts(req) && "opacity-50 pointer-events-none select-none")}>
                 <TableCell><span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span></TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
@@ -268,7 +349,13 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
                 <TableCell><StatusBadge status={req.current_status} showFull /></TableCell>
                 <TableCell className="hidden lg:table-cell text-muted-foreground text-xs">{formatDate(req.created_at)}</TableCell>
-                <TableCell><Button size="sm" variant="ghost" asChild><Link href={`/accounts/${req.id}`}>View</Link></Button></TableCell>
+                <TableCell>
+                  {frozenForAccounts(req) ? (
+                    <span className="text-xs text-muted-foreground italic whitespace-nowrap">Locked</span>
+                  ) : (
+                    <Button size="sm" variant="ghost" asChild><Link href={`/accounts/${req.id}`}>View</Link></Button>
+                  )}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -280,6 +367,8 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
 
 export default function AccountsDashboard() {
   const [holdPage, setHoldPage] = useState(1);
+  const [rejectedPage, setRejectedPage] = useState(1);
+  const [cancelledPage, setCancelledPage] = useState(1);
   const [allPage, setAllPage]   = useState(1);
   const [activeTab, setActiveTab] = useState("pending");
   const [search, setSearch]     = useState("");
@@ -298,27 +387,44 @@ export default function AccountsDashboard() {
   const term = search.trim();
   let filteredQueue = term ? queue.filter((r) => requestMatchesSearch(r, term)) : queue;
   if (sort) filteredQueue = sortRequests(filteredQueue, sort);
+  // Bifurcated by the earliest unpaid tranche's tentative payment date
+  // (UAT Aug 2026, item 13) — undated requests fall in the later bucket.
+  const dueSoon = filteredQueue.filter(isDueWithin10Days);
+  const dueLater = filteredQueue.filter((r) => !isDueWithin10Days(r));
 
   const { data: holdData, isLoading: holdLoading } = useRequestsPaginated(holdPage, PAGE_SIZE, {
     status: ["hold_by_accounts", "hold_by_merchandiser"],
     ...listParams,
   });
+  // Rejected and cancelled get their own heads — never mixed into Pending
+  // (UAT Aug 2026, items 17 & 19).
+  const { data: rejectedData, isLoading: rejectedLoading } = useRequestsPaginated(rejectedPage, PAGE_SIZE, {
+    status: ["rejected_by_accounts", "rejected_by_hom"],
+    ...listParams,
+  });
+  const { data: cancelledData, isLoading: cancelledLoading } = useRequestsPaginated(cancelledPage, PAGE_SIZE, {
+    status: ["cancelled_by_merchandiser", "cancelled_by_accounts"],
+    ...listParams,
+  });
   const { data: allData, isLoading: allLoading } = useRequestsPaginated(allPage, PAGE_SIZE, listParams);
 
-  // Pre-fetch for stat card counts (always global — unaffected by search)
-  const { data: processedData } = useRequestsPaginated(1, 1, { status: "payment_processed" });
-  const { data: statHoldData }  = useRequestsPaginated(1, 1, { status: ["hold_by_accounts", "hold_by_merchandiser"] });
-  const { data: statAllData }   = useRequestsPaginated(1, 1, {});
+  // KPI cards: financial-year-to-date (April–March), one backend query
+  // (UAT Aug 2026, item 5).
+  const { data: kpis } = useQueueKpis();
 
   function changeSearch(value: string) {
     setSearch(value);
     setHoldPage(1);
+    setRejectedPage(1);
+    setCancelledPage(1);
     setAllPage(1);
   }
 
   function changeSort(value: RequestSort) {
     setSort(value);
     setHoldPage(1);
+    setRejectedPage(1);
+    setCancelledPage(1);
     setAllPage(1);
   }
 
@@ -326,9 +432,19 @@ export default function AccountsDashboard() {
   const holdTotal = holdData?.total ?? 0;
   const holdTotalPages = Math.ceil(holdTotal / PAGE_SIZE);
 
+  const rejectedItems = rejectedData?.items ?? [];
+  const rejectedTotal = rejectedData?.total ?? 0;
+  const rejectedTotalPages = Math.ceil(rejectedTotal / PAGE_SIZE);
+
+  const cancelledItems = cancelledData?.items ?? [];
+  const cancelledTotal = cancelledData?.total ?? 0;
+  const cancelledTotalPages = Math.ceil(cancelledTotal / PAGE_SIZE);
+
   const allItems = allData?.items ?? [];
   const allTotal = allData?.total ?? 0;
   const allTotalPages = Math.ceil(allTotal / PAGE_SIZE);
+
+  const fySubtext = kpis ? `${kpis.fy_label} to date` : "This financial year";
 
   return (
     <RoleGuard allowedRoles={["accounts_team", "super_admin"]}>
@@ -337,29 +453,44 @@ export default function AccountsDashboard() {
         subtitle="Process advance deposit payments in order of submission"
       />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* FY-to-date KPIs (April–March), incl. Rejected and Cancelled heads
+            (UAT Aug 2026, items 5, 17, 19). */}
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           <StatCard
             label="Pending Payment"
-            value={queue.length}
+            value={kpis?.pending_payment ?? queue.length}
             icon={Clock}
-            subtext="Awaiting processing"
+            subtext={fySubtext}
           />
           <StatCard
             label="On Hold"
-            value={statHoldData?.total ?? "—"}
+            value={kpis?.on_hold ?? "—"}
             icon={AlertTriangle}
-            subtext="Needs attention"
+            subtext={fySubtext}
           />
           <StatCard
             label="Processed"
-            value={processedData?.total ?? "—"}
+            value={kpis?.processed ?? "—"}
             icon={CheckCircle}
-            subtext="This period"
+            subtext={fySubtext}
+          />
+          <StatCard
+            label="Rejected"
+            value={kpis?.rejected ?? "—"}
+            icon={XCircle}
+            subtext={fySubtext}
+          />
+          <StatCard
+            label="Cancelled"
+            value={kpis?.cancelled ?? "—"}
+            icon={Ban}
+            subtext={fySubtext}
           />
           <StatCard
             label="Total Requests"
-            value={statAllData?.total ?? "—"}
+            value={kpis?.total ?? "—"}
             icon={ClipboardList}
+            subtext={fySubtext}
           />
         </div>
 
@@ -397,11 +528,38 @@ export default function AccountsDashboard() {
                 </span>
               )}
             </TabsTrigger>
+            <TabsTrigger value="rejected">
+              Rejected
+              {rejectedTotal > 0 && (
+                <span className="ml-1.5 bg-secondary text-secondary-foreground border border-border text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                  {rejectedTotal}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="cancelled">
+              Cancelled
+              {cancelledTotal > 0 && (
+                <span className="ml-1.5 bg-secondary text-secondary-foreground border border-border text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                  {cancelledTotal}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="all">All Requests</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="pending">
-            <PendingTable rows={filteredQueue} loading={queueLoading} />
+          <TabsContent value="pending" className="space-y-6">
+            <PendingTable
+              rows={dueSoon}
+              loading={queueLoading}
+              title="Tentative Payment in 0–10 Days"
+              subtitle="Earliest unpaid tranche due within 10 days — sorted oldest first"
+            />
+            <PendingTable
+              rows={dueLater}
+              loading={queueLoading}
+              title="Tentative Payment in > 10 Days"
+              subtitle="Due later than 10 days (or no tentative date recorded)"
+            />
           </TabsContent>
 
           <TabsContent value="hold">
@@ -420,13 +578,84 @@ export default function AccountsDashboard() {
               </Card>
             ) : (
               <>
-                <HoldTable rows={holdItems} />
+                <StatusTable
+                  rows={holdItems}
+                  title="On Hold"
+                  subtitle="Requests placed on hold"
+                  emptyTitle="No requests on hold"
+                />
                 <Pagination
                   page={holdPage}
                   totalPages={holdTotalPages}
                   total={holdTotal}
                   pageSize={PAGE_SIZE}
                   onChange={setHoldPage}
+                />
+              </>
+            )}
+          </TabsContent>
+
+          <TabsContent value="rejected">
+            {rejectedLoading ? (
+              <Card className="overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Request #</TableHead><TableHead>Invoice #</TableHead>
+                      <TableHead>Supplier</TableHead><TableHead>Customer</TableHead>
+                      <TableHead>Deposit</TableHead><TableHead>Status</TableHead><TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody><TableSkeleton rows={5} cols={7} /></TableBody>
+                </Table>
+              </Card>
+            ) : (
+              <>
+                <StatusTable
+                  rows={rejectedItems}
+                  title="Rejected"
+                  subtitle="Rejected by Accounts or Head of Merchandiser — terminal; invoice numbers are reusable"
+                  emptyTitle="No rejected requests"
+                />
+                <Pagination
+                  page={rejectedPage}
+                  totalPages={rejectedTotalPages}
+                  total={rejectedTotal}
+                  pageSize={PAGE_SIZE}
+                  onChange={setRejectedPage}
+                />
+              </>
+            )}
+          </TabsContent>
+
+          <TabsContent value="cancelled">
+            {cancelledLoading ? (
+              <Card className="overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Request #</TableHead><TableHead>Invoice #</TableHead>
+                      <TableHead>Supplier</TableHead><TableHead>Customer</TableHead>
+                      <TableHead>Deposit</TableHead><TableHead>Status</TableHead><TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody><TableSkeleton rows={5} cols={7} /></TableBody>
+                </Table>
+              </Card>
+            ) : (
+              <>
+                <StatusTable
+                  rows={cancelledItems}
+                  title="Cancelled"
+                  subtitle="Cancelled by the merchandiser or Accounts"
+                  emptyTitle="No cancelled requests"
+                />
+                <Pagination
+                  page={cancelledPage}
+                  totalPages={cancelledTotalPages}
+                  total={cancelledTotal}
+                  pageSize={PAGE_SIZE}
+                  onChange={setCancelledPage}
                 />
               </>
             )}

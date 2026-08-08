@@ -58,9 +58,10 @@ class FileRemarkCreate(BaseModel):
         return self
 
 
-class FileRemarkResolve(BaseModel):
-    """Accounts resolve a remark — the response note is optional and travels
-    back to the merchandiser's notification when given."""
+class FileRemarkDecide(BaseModel):
+    """Accounts approve or reject a remark (UAT Aug 2026, item 14). The note
+    is optional on approval and mandatory on rejection (service-enforced);
+    it travels back in the merchandiser's notification when given."""
 
     response_note: str | None = None
 

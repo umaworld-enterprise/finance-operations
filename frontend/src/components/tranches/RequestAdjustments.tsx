@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { useRequestAdjustments } from "@/hooks/useRequests";
+import { ADJUST_INVOICES_ENABLED } from "@/lib/features";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 /** Invoice adjustments touching this request's tranches — reallocations are
  * traceable from both the source request and the destination invoice. Hidden
- * entirely when there are none. */
+ * entirely when there are none, and while the Adjust Invoices module is
+ * hidden from the UI (UAT change note, Aug 2026 item 15). */
 export function RequestAdjustments({
   requestId,
   currency,
@@ -18,8 +20,8 @@ export function RequestAdjustments({
   /** Route prefix for cross-links to the other request, e.g. "/accounts". */
   linkBase: string;
 }) {
-  const { data: adjustments = [] } = useRequestAdjustments(requestId);
-  if (adjustments.length === 0) return null;
+  const { data: adjustments = [] } = useRequestAdjustments(requestId, ADJUST_INVOICES_ENABLED);
+  if (!ADJUST_INVOICES_ENABLED || adjustments.length === 0) return null;
 
   return (
     <Card>

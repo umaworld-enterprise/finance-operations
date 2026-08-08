@@ -13,7 +13,7 @@ import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from "@/components/ui/table";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatDateTime } from "@/lib/utils";
 import { ArrowLeft, Filter, X, Download, Monitor, Globe } from "lucide-react";
 import Link from "next/link";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
@@ -119,7 +119,7 @@ function AuditDetailDialog({
 
         <div className="space-y-4 mt-2">
           {/* Timestamp */}
-          <Row label="Timestamp" value={new Date(log.changed_at).toLocaleString()} />
+          <Row label="Timestamp" value={formatDateTime(log.changed_at)} />
 
           {/* Entity */}
           <Row label="Entity" value={log.entity_name} />

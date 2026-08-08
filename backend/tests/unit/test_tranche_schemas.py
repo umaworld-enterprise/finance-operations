@@ -22,12 +22,13 @@ def _tranche(amount: str, day: int = 1) -> dict:
     return {"amount": Decimal(amount), "tentative_payment_date": date(2026, 8, day)}
 
 
-def test_tranche_labels_are_roman():
-    assert tranche_label(1) == "Deposit - Tranche I"
-    assert tranche_label(2) == "Deposit - Tranche II"
-    assert tranche_label(3) == "Deposit - Tranche III"
-    assert tranche_label(4) == "Deposit - Tranche IV"
-    assert tranche_label(9) == "Deposit - Tranche IX"
+def test_tranche_labels_are_arithmetic():
+    """UAT change note (Aug 2026, item 11): plain numbers, not Roman."""
+    assert tranche_label(1) == "Deposit - Tranche 1"
+    assert tranche_label(2) == "Deposit - Tranche 2"
+    assert tranche_label(3) == "Deposit - Tranche 3"
+    assert tranche_label(4) == "Deposit - Tranche 4"
+    assert tranche_label(9) == "Deposit - Tranche 9"
 
 
 def test_tranche_requires_positive_amount():

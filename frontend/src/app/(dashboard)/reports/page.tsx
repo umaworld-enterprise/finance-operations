@@ -20,6 +20,14 @@ const REPORT_TYPES = [
     columns: ["Key", "Request Date", "Select Supplier", "Select Customer", "Vertical/Category", "Currency", "Deposit Amount", "Deposit (%)", "Total Supplier Proforma Invoice Amount", "Estimated ETD", "Payment Terms", "Payment Status", "Staff", "Supplier Invoice Number", "Sunshine Invoice Number", "Rate", "Remarks", "Staff Email", "Payment Date", "Bank", "Payment Ref #", "Bank Payment Status", "Ship Date", "Actual ETD", "Accounts Remarks", "ETD (Grace) Overdue Days", "Cost of Fund"],
   },
   {
+    // UAT Aug 2026, item 1 — the exact columns Accounts paste into the bank
+    // ledger sheet (deposit tracker columns G–K + N).
+    value: "bank-ledger",
+    label: "Bank Ledger",
+    desc: "Bank ledger extract — the exact columns used on the bank ledger sheet",
+    columns: ["Supplier", "Supplier Proforma Invoice No.", "Sunshine Invoice No.", "Selected Customer", "Currency", "Deposit Amount"],
+  },
+  {
     value: "payments",
     label: "Payments",
     desc: "Payment details and processing status",

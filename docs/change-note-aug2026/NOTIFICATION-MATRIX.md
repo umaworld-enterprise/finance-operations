@@ -46,7 +46,13 @@ fan-outs go to every **active** user of that role.
 | Event | Recipient(s) | Type | Trigger point |
 |---|---|---|---|
 | File remark raised | Accounts Team (excl. actor) | `file_remark_raised` | `POST /file-remarks` |
-| File remark resolved | The raiser (response note included) | `file_remark_resolved` | `POST /file-remarks/{id}/resolve` |
+| File remark approved / rejected (UAT item 14 — was a single "resolve") | The raiser (decision + note/reason included) | `file_remark_resolved` (type value kept for continuity) | `POST /file-remarks/{id}/approve` · `POST /file-remarks/{id}/reject` |
+
+## UAT batch (Aug 2026)
+
+| Event | Recipient(s) | Type | Trigger point |
+|---|---|---|---|
+| Request rejected by Accounts (terminal) | Raising merchandiser AND all active HoMs (reason included; per-audience deep links `/merchandiser/{id}` vs `/hom/{id}`) | `request_rejected` | `POST /{id}/reject` |
 
 Routing rule for `status_changed`: the actor's counterpart is notified —
 merchandiser actions fan out to Accounts (deep-link `/accounts/{id}`),

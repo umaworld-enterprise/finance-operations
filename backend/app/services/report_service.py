@@ -117,6 +117,51 @@ class ReportService:
                             col_widths=[6, 5, 9, 8, 7, 5, 6, 4, 6, 6, 6, 8, 8, 8, 8, 5, 10, 10,
                                         6, 8, 8, 8, 6, 6, 10, 5, 6])
 
+    async def bank_ledger_report(
+        self,
+        role: UserRole,
+        user_id: UUID,
+        fmt: ReportFormat,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> tuple[bytes, str]:
+        """Bank Ledger extract (UAT Aug 2026, item 1) — exactly the columns
+        the Accounts team paste into the bank ledger sheet (deposit tracker
+        columns G–K + N): Supplier, Supplier Proforma Invoice No., Sunshine
+        Invoice No., Selected Customer, Currency, Deposit Amount."""
+        stmt = (
+            select(DepositRequest)
+            .where(DepositRequest.is_deleted == False)  # noqa: E712
+            .options(
+                selectinload(DepositRequest.supplier),
+                selectinload(DepositRequest.customer),
+            )
+            .order_by(DepositRequest.created_at.desc())
+        )
+        if role == UserRole.MERCHANDISER:
+            stmt = stmt.where(DepositRequest.created_by == user_id)
+        stmt = self._apply_date_range(stmt, DepositRequest.created_at, date_from, date_to)
+        result = await self._session.execute(stmt)
+        requests = list(result.scalars().all())
+
+        headers = [
+            "Supplier", "Supplier Proforma Invoice No.", "Sunshine Invoice No.",
+            "Selected Customer", "Currency", "Deposit Amount",
+        ]
+        rows = [
+            [
+                r.supplier.name if r.supplier else "—",
+                r.supplier_invoice_number or "—",
+                r.sunshine_invoice_number or "—",
+                r.customer.name if r.customer else "—",
+                r.currency.value if r.currency else "—",
+                r.deposit_amount,
+            ]
+            for r in requests
+        ]
+        return self._render("Bank Ledger Report", headers, rows, fmt,
+                            col_widths=[10, 8, 8, 10, 4, 6])
+
     async def payment_report(
         self, fmt: ReportFormat, date_from: str | None = None, date_to: str | None = None
     ) -> tuple[bytes, str]:

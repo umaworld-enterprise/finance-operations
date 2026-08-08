@@ -1,6 +1,6 @@
 """ORM models for Advance Payment Tranches and Invoice Adjustments.
 
-A deposit request carries one or more payment tranches (Tranche I, II, …).
+A deposit request carries one or more payment tranches (Tranche 1, 2, …).
 Accounts pays tranche-by-tranche; a paid tranche is immutable. Value from a
 paid tranche can be reallocated to a tranche on another invoice of the same
 supplier through an InvoiceAdjustment — an additive, linked record that never
@@ -30,28 +30,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.enums import AdjustmentStatus, TrancheStatus, pg_enum
 
-# Roman numerals for tranche labels — supports far more tranches than any
-# realistic request will carry; falls back to the plain number beyond that.
-_ROMAN = [
-    (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
-    (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
-]
-
-
 def tranche_label(number: int) -> str:
-    """1 → 'Deposit - Tranche I', 2 → 'Deposit - Tranche II', …
+    """1 → 'Deposit - Tranche 1', 2 → 'Deposit - Tranche 2', …
 
-    Single source for the display label (4 Aug 2026 rename, applied
-    everywhere): API responses, notifications, audit wording and the
-    adjustment pickers all derive from this."""
-    if number < 1:
-        return f"Deposit - Tranche {number}"
-    n, out = number, ""
-    for value, numeral in _ROMAN:
-        while n >= value:
-            out += numeral
-            n -= value
-    return f"Deposit - Tranche {out}"
+    Single source for the display label: API responses, notifications, audit
+    wording and the adjustment pickers all derive from this. Arithmetic
+    numbers per the UAT change note (Aug 2026, item 11) — previously Roman."""
+    return f"Deposit - Tranche {number}"
 
 
 class PaymentTranche(UUIDPrimaryKeyMixin, TimestampMixin, Base):

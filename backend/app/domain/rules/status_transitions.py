@@ -26,6 +26,14 @@ _ALLOWED_TRANSITIONS: dict[tuple[RequestStatus, RequestStatus], frozenset[UserRo
     (RequestStatus.PENDING_PAYMENT, RequestStatus.PAYMENT_PROCESSED): frozenset({
         UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN,
     }),
+    # Accounts rejects the whole request — terminal (UAT Aug 2026, item 12/17/18)
+    (RequestStatus.PENDING_PAYMENT, RequestStatus.REJECTED_BY_ACCOUNTS): frozenset({
+        UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN,
+    }),
+    # Accounts may also reject after first placing the request on hold
+    (RequestStatus.HOLD_BY_ACCOUNTS, RequestStatus.REJECTED_BY_ACCOUNTS): frozenset({
+        UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN,
+    }),
     # Merchandiser resumes from own hold
     (RequestStatus.HOLD_BY_MERCHANDISER, RequestStatus.PENDING_PAYMENT): frozenset({
         UserRole.MERCHANDISER, UserRole.SUPER_ADMIN,

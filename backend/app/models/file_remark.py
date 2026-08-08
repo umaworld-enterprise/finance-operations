@@ -35,6 +35,11 @@ class FileRemarkCategory(str, enum.Enum):
 
 class FileRemarkStatus(str, enum.Enum):
     OPEN = "open"
+    # UAT change note Aug 2026 (item 14): Accounts decide with Approve or
+    # Reject instead of a single Resolve. RESOLVED remains valid for rows
+    # decided before the rework (displayed as a legacy "Resolved").
+    APPROVED = "approved"
+    REJECTED = "rejected"
     RESOLVED = "resolved"
 
 
@@ -80,7 +85,10 @@ class FileRemark(UUIDPrimaryKeyMixin, Base):
             "category IN ('invoice_split', 'invoice_amount_change')",
             name="ck_file_remarks_category",
         ),
-        CheckConstraint("status IN ('open', 'resolved')", name="ck_file_remarks_status"),
+        CheckConstraint(
+            "status IN ('open', 'approved', 'rejected', 'resolved')",
+            name="ck_file_remarks_status",
+        ),
         Index("idx_file_remarks_status", "status"),
         Index("idx_file_remarks_request", "deposit_request_id"),
         Index("idx_file_remarks_created_by", "created_by"),

@@ -63,22 +63,6 @@ const DEFAULT_VALUES = {
   tranches: [{ amount: undefined as unknown as number, tentative_payment_date: "" }],
 };
 
-// 1 → "I", 2 → "II", … for tranche labels.
-function roman(n: number): string {
-  const map: [number, string][] = [
-    [1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"],
-    [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"],
-  ];
-  let out = "";
-  for (const [v, s] of map) {
-    while (n >= v) {
-      out += s;
-      n -= v;
-    }
-  }
-  return out;
-}
-
 interface Props {
   onSuccess?: (created: DepositRequest) => void;
   onCancel?: () => void;
@@ -154,7 +138,7 @@ export function NewRequestForm({ onSuccess, onCancel }: Props) {
   const selectedSupplier = suppliers.find((s) => s.id === selectedSupplierId);
   const hasFixedDeposit = selectedSupplier?.fixed_deposit_amount != null;
 
-  // Fixed-deposit suppliers: prefill Tranche I with the fixed advance amount.
+  // Fixed-deposit suppliers: prefill Tranche 1 with the fixed advance amount.
   useEffect(() => {
     if (hasFixedDeposit && selectedSupplier?.fixed_deposit_amount != null) {
       setValue("tranches.0.amount", selectedSupplier.fixed_deposit_amount);
@@ -346,12 +330,12 @@ export function NewRequestForm({ onSuccess, onCancel }: Props) {
               {fields.map((f, i) => (
                 <div key={f.id} className="rounded-lg border border-border p-3 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-foreground">Deposit - Tranche {roman(i + 1)}</span>
+                    <span className="text-sm font-semibold text-foreground">Deposit - Tranche {i + 1}</span>
                     {fields.length > 1 && (
                       <button
                         type="button"
                         onClick={() => remove(i)}
-                        aria-label={`Remove Deposit - Tranche ${roman(i + 1)}`}
+                        aria-label={`Remove Deposit - Tranche ${i + 1}`}
                         className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-muted transition-colors"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -420,7 +404,7 @@ export function NewRequestForm({ onSuccess, onCancel }: Props) {
                   size="sm"
                   onClick={() => append({ amount: undefined as unknown as number, tentative_payment_date: todayLocalISO() })}
                 >
-                  <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Tranche {roman(fields.length + 1)}
+                  <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Tranche {fields.length + 1}
                 </Button>
                 <p className="text-xs text-muted-foreground">
                   Total advance: <span className="font-medium text-foreground">{formatCurrency(trancheTotal, currency)}</span>
@@ -433,7 +417,7 @@ export function NewRequestForm({ onSuccess, onCancel }: Props) {
 
             {hasFixedDeposit && (
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                This supplier has a fixed advance amount of {formatCurrency(selectedSupplier!.fixed_deposit_amount!, currency)} — Tranche I has been pre-filled with it.
+                This supplier has a fixed advance amount of {formatCurrency(selectedSupplier!.fixed_deposit_amount!, currency)} — Tranche 1 has been pre-filled with it.
               </p>
             )}
 

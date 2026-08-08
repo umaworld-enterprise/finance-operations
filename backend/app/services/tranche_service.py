@@ -42,6 +42,7 @@ _TERMINAL_STATUSES = {
     RequestStatus.CANCELLED_BY_MERCHANDISER,
     RequestStatus.CANCELLED_BY_ACCOUNTS,
     RequestStatus.REJECTED_BY_HOM,
+    RequestStatus.REJECTED_BY_ACCOUNTS,
 }
 
 _ACCOUNTS_ROLES = {UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN}
@@ -60,6 +61,17 @@ class TrancheService:
         self._repo = TrancheRepository(session)
         self._request_repo = DepositRequestRepository(session)
         self._audit = AuditService(session)
+
+    @staticmethod
+    def _assert_not_held_by_merchandiser(request) -> None:  # type: ignore[no-untyped-def]
+        """While the merchandiser has the request on hold, Accounts must not
+        act on it in any way (UAT Aug 2026, item 7) — the request exists for
+        notification purposes only until they resume."""
+        if request.current_status == RequestStatus.HOLD_BY_MERCHANDISER:
+            raise ConflictError(
+                "This request is on hold by the merchandiser — Accounts cannot "
+                "act on it until the merchandiser resumes it."
+            )
 
     # ── Reads ─────────────────────────────────────────────────────────────────
 
@@ -262,6 +274,14 @@ class TrancheService:
             raise ConflictError(f"{tranche.label} is already paid.")
         if tranche.status == TrancheStatus.REJECTED:
             raise ConflictError(f"{tranche.label} was rejected and cannot be paid.")
+        # Status first — a merchandiser-held request must fail with "held",
+        # not a misleading readiness message (UAT Aug 2026, item 7).
+        self._assert_not_held_by_merchandiser(request)
+        if request.current_status != RequestStatus.PENDING_PAYMENT:
+            raise ConflictError(
+                "Tranches can only be paid while the request is pending payment "
+                f"(current status: {request.current_status.value})."
+            )
         # Readiness gate (Aug 2026, item 3.1): a tranche becomes PAID only via
         # this explicit action, and only once its TT copy AND payment details
         # (payment date + bank; reference number optional) are recorded.
@@ -278,11 +298,6 @@ class TrancheService:
             raise ConflictError(
                 f"{tranche.label} cannot be marked paid until its "
                 f"{' and '.join(missing)} {'are' if len(missing) > 1 else 'is'} recorded."
-            )
-        if request.current_status != RequestStatus.PENDING_PAYMENT:
-            raise ConflictError(
-                "Tranches can only be paid while the request is pending payment "
-                f"(current status: {request.current_status.value})."
             )
 
         remaining_unpaid = await self._repo.count_unpaid_for_request(request_id)
@@ -391,6 +406,7 @@ class TrancheService:
         request = await self._get_request_or_404(request_id)
         if request.current_status in _TERMINAL_STATUSES:
             raise ConflictError("Tranches cannot be rejected on a cancelled or rejected request.")
+        self._assert_not_held_by_merchandiser(request)
         assert_record_not_locked(request.is_locked, role)
 
         tranche = await self._get_tranche_locked(request_id, tranche_id)
@@ -446,7 +462,12 @@ class TrancheService:
         if role not in _ACCOUNTS_ROLES:
             raise AuthorizationError("Only Accounts Team can attach the TT copy.")
 
-        await self._get_request_or_404(request_id)
+        request = await self._get_request_or_404(request_id)
+        if request.current_status in _TERMINAL_STATUSES:
+            raise ConflictError(
+                "A TT copy cannot be attached on a cancelled or rejected request."
+            )
+        self._assert_not_held_by_merchandiser(request)
         tranche = await self._get_tranche_locked(request_id, tranche_id)
 
         if tranche.status == TrancheStatus.REJECTED:
@@ -493,6 +514,7 @@ class TrancheService:
             raise ConflictError(
                 "Payment details cannot be recorded on a cancelled or rejected request."
             )
+        self._assert_not_held_by_merchandiser(request)
         tranche = await self._get_tranche_locked(request_id, tranche_id)
         if tranche.status == TrancheStatus.PAID:
             raise ConflictError(

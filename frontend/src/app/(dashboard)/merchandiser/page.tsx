@@ -35,6 +35,7 @@ const STATUS_BORDER: Record<RequestStatus, string> = {
   cancelled_by_merchandiser: "border-l-red-500",
   cancelled_by_accounts: "border-l-red-500",
   rejected_by_hom: "border-l-red-500",
+  rejected_by_accounts: "border-l-red-500",
   reopened: "border-l-blue-500",
 };
 

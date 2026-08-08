@@ -36,6 +36,12 @@ class RequestStatus(str, enum.Enum):
     REOPENED = "reopened"
     PENDING_HOM_APPROVAL = "pending_hom_approval"
     REJECTED_BY_HOM = "rejected_by_hom"
+    # Terminal rejection of the whole request by Accounts with a mandatory
+    # reason (UAT change note Aug 2026, items 12/17/18): locks all
+    # merchandiser editing, frees the invoice numbers for reuse, and
+    # notifies both the merchandiser and HoM. Distinct from tranche-level
+    # rejection, which keeps the request live for replacement tranches.
+    REJECTED_BY_ACCOUNTS = "rejected_by_accounts"
 
 
 class CurrencyCode(str, enum.Enum):
@@ -74,6 +80,7 @@ class AccountsActionType(str, enum.Enum):
     HOLD = "hold"
     CANCEL = "cancel"
     REOPEN = "reopen"
+    REJECT = "reject"
 
 
 class PaymentStatus(str, enum.Enum):

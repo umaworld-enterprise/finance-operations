@@ -5,11 +5,18 @@ import fileRemarkService, { type CreateFileRemarkPayload } from "@/services/file
 
 export const FILE_REMARKS_KEY = ["file-remarks"] as const;
 
-export function useFileRemarks(params?: { status?: "open" | "resolved"; request_id?: string }) {
+export function useFileRemarks(params?: {
+  status?: "open" | "approved" | "rejected" | "resolved";
+  request_id?: string;
+}) {
   return useQuery({
     queryKey: [...FILE_REMARKS_KEY, params ?? {}],
     queryFn: () => fileRemarkService.list(params),
     staleTime: 30_000,
+    // Auto-reload (UAT Aug 2026, item 4): new remarks and decisions appear
+    // without a manual refresh.
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -21,11 +28,19 @@ export function useCreateFileRemark() {
   });
 }
 
-export function useResolveFileRemark() {
+// Approve (processed) or reject an open remark (UAT Aug 2026, item 14).
+export function useDecideFileRemark() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, responseNote }: { id: string; responseNote?: string }) =>
-      fileRemarkService.resolve(id, responseNote),
+    mutationFn: ({
+      id,
+      decision,
+      responseNote,
+    }: {
+      id: string;
+      decision: "approved" | "rejected";
+      responseNote?: string;
+    }) => fileRemarkService.decide(id, decision, responseNote),
     onSuccess: () => qc.invalidateQueries({ queryKey: [...FILE_REMARKS_KEY] }),
   });
 }

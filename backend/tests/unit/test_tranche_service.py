@@ -585,7 +585,7 @@ async def test_delete_tranche_syncs_totals(db_session):
     )
     svc = TrancheService(db_session)
     label = await svc.delete_tranche(request.id, t2.id, merch.id, UserRole.MERCHANDISER)
-    assert label == "Deposit - Tranche II"
+    assert label == "Deposit - Tranche 2"
     assert Decimal(str(request.deposit_amount)) == Decimal("600.00")
     remaining = await svc.list_for_request(request.id)
     assert [t.id for t in remaining] == [t1.id]
