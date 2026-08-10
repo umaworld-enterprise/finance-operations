@@ -394,6 +394,16 @@ pages already polled, the rest of the app now follows:
 | 7 | 1 | — |
 | 8 | 4 | — |
 
+## Follow-up (10 Aug 2026) — one-click TT copy upload
+
+The tranche card's two-step upload (Choose File → "No file selected" →
+separate Upload TT Copy button) was replaced with a single always-enabled
+**Upload TT Copy** button: it opens the file picker directly and the upload
+starts the moment a document is chosen (same 10 MB / pdf-png-jpeg
+validation, button shows "Uploading…" while in flight). Applied to both
+upload sites in `TrancheList.tsx` — the unpaid-tranche flow and the
+legacy paid-without-TT flow. Frontend-only; `tsc` clean.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
