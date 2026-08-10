@@ -218,7 +218,6 @@ export function TrancheList({
   // other changes are frozen (Aug 2026 rejection workflow).
   const merchandiserCanAdd = mode === "merchandiser" && (canAdd ?? canModify);
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
-  const [selectedFiles, setSelectedFiles] = useState<Record<string, File | null>>({});
 
   const startEdit = (t: PaymentTranche) => {
     setEditingId(t.id);
@@ -310,9 +309,10 @@ export function TrancheList({
     }
   };
 
-  const doUpload = async (t: PaymentTranche) => {
-    const file = selectedFiles[t.id];
-    if (!file) return;
+  // One-click flow (10 Aug follow-up): the Upload TT Copy button opens the
+  // file picker directly and the upload starts the moment a file is chosen —
+  // no separate Choose File step, no "No file selected" state.
+  const doUpload = async (t: PaymentTranche, file: File) => {
     if (file.size > 10 * 1024 * 1024) {
       toast.error("TT copy file must be 10 MB or smaller.");
       return;
@@ -320,9 +320,6 @@ export function TrancheList({
     setUploadingId(t.id);
     try {
       await uploadTt.mutateAsync({ trancheId: t.id, file });
-      setSelectedFiles((prev) => ({ ...prev, [t.id]: null }));
-      const input = fileInputs.current[t.id];
-      if (input) input.value = "";
       // No notification fires on upload (4 Aug fix) — the merchandiser is
       // notified once, when the tranche is explicitly marked paid.
       toast.success(
@@ -333,6 +330,8 @@ export function TrancheList({
       toast.error(err instanceof Error ? err.message : "TT copy upload failed.");
     } finally {
       setUploadingId(null);
+      const input = fileInputs.current[t.id];
+      if (input) input.value = "";
     }
   };
 
@@ -502,34 +501,24 @@ export function TrancheList({
                   <TranchePaymentDetailsForm requestId={requestId} tranche={t} currency={currency} />
 
                   {!t.tt_copy_url && (
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      {/* Hidden native input — only the button opens the file
-                          picker (the bare input made the whole row clickable
-                          and showed its own "Choose file" text). */}
+                    <div className="flex">
+                      {/* Hidden native input — the single Upload button opens
+                          the picker and the chosen file uploads immediately. */}
                       <input
                         ref={(el) => { fileInputs.current[t.id] = el; }}
                         type="file"
                         accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
-                        onChange={(e) =>
-                          setSelectedFiles((prev) => ({ ...prev, [t.id]: e.target.files?.[0] ?? null }))
-                        }
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) void doUpload(t, file);
+                        }}
                         className="hidden"
                       />
                       <Button
                         size="sm"
-                        variant="outline"
-                        onClick={() => fileInputs.current[t.id]?.click()}
-                      >
-                        Choose File
-                      </Button>
-                      <span className="flex-1 text-xs text-muted-foreground truncate self-center">
-                        {selectedFiles[t.id]?.name ?? "No file selected"}
-                      </span>
-                      <Button
-                        size="sm"
                         variant="secondary"
-                        onClick={() => doUpload(t)}
-                        disabled={!selectedFiles[t.id] || uploadingId === t.id}
+                        onClick={() => fileInputs.current[t.id]?.click()}
+                        disabled={uploadingId === t.id}
                       >
                         {uploadingId === t.id ? "Uploading…" : "Upload TT Copy"}
                       </Button>
@@ -573,34 +562,25 @@ export function TrancheList({
                     Legacy record — this tranche was marked paid before TT copies became
                     mandatory. Upload its TT copy to complete the record.
                   </p>
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  <input
-                    ref={(el) => { fileInputs.current[t.id] = el; }}
-                    type="file"
-                    accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
-                    onChange={(e) =>
-                      setSelectedFiles((prev) => ({ ...prev, [t.id]: e.target.files?.[0] ?? null }))
-                    }
-                    className="hidden"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => fileInputs.current[t.id]?.click()}
-                  >
-                    Choose File
-                  </Button>
-                  <span className="flex-1 text-xs text-muted-foreground truncate self-center">
-                    {selectedFiles[t.id]?.name ?? "No file selected"}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => doUpload(t)}
-                    disabled={!selectedFiles[t.id] || uploadingId === t.id}
-                  >
-                    {uploadingId === t.id ? "Uploading…" : "Upload TT Copy"}
-                  </Button>
+                  <div className="flex">
+                    <input
+                      ref={(el) => { fileInputs.current[t.id] = el; }}
+                      type="file"
+                      accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void doUpload(t, file);
+                      }}
+                      className="hidden"
+                    />
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => fileInputs.current[t.id]?.click()}
+                      disabled={uploadingId === t.id}
+                    >
+                      {uploadingId === t.id ? "Uploading…" : "Upload TT Copy"}
+                    </Button>
                   </div>
                 </div>
               )}
