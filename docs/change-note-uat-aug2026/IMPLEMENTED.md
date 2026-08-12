@@ -404,6 +404,22 @@ validation, button shows "Uploading…" while in flight). Applied to both
 upload sites in `TrancheList.tsx` — the unpaid-tranche flow and the
 legacy paid-without-TT flow. Frontend-only; `tsc` clean.
 
+## Follow-up (10 Aug 2026) — merchandiser dashboard buckets sum to Total
+
+Gap: the merchandiser cards (Total / Pending / Processed / Cancelled) and
+tabs never added up to the Total — **Rejected** had no card or tab, there
+was no On Hold card, and awaiting-HoM / reopened requests were counted in
+Total but appeared in no bucket at all. Fixed in `merchandiser/page.tsx`:
+
+- Every status now lives in exactly one bucket (single source:
+  `TAB_PARAMS`, reused verbatim for the card counts so cards and tabs
+  always agree): **Pending** (pending_payment + pending_hom_approval +
+  reopened), **On Hold** (both holds), **Processed**, **Rejected**
+  (rejected_by_hom + rejected_by_accounts), **Cancelled** (both cancels).
+- Six cards (Total + the five buckets, accounts-style grid) and six tabs,
+  each tab showing its count — the five bucket figures sum to Total.
+- Frontend-only; `tsc` clean.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
