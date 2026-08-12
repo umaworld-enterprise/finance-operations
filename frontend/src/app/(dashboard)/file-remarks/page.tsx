@@ -138,9 +138,9 @@ function RemarkDetails({ r }: { r: FileRemark }) {
 export default function FileRemarksPage() {
   const { user } = useAuth();
   const isDecider = user?.role === "accounts_team" || user?.role === "super_admin";
-  // UAT Aug 2026 (item 14): Accounts see the decision queue only — the raise
-  // form is the merchandiser's UI. (Super admin keeps both for support.)
-  const canRaise = user?.role === "merchandiser" || user?.role === "super_admin";
+  // UAT Aug 2026 item 14 + 10 Aug refinement: ONLY merchandisers see the New
+  // File Remark form — every decider role sees just open remarks + history.
+  const canRaise = user?.role === "merchandiser";
 
   // Role-scoped server-side; only payment-completed files are eligible.
   const { data: requests = [] } = useRequests();

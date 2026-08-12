@@ -43,52 +43,45 @@ interface Props {
   onRequestCompleted?: () => void;
 }
 
+// Per-tranche payment-details draft — held by the parent so the single Mark
+// Paid action can save the details and pay in one step (10 Aug refinement:
+// the separate Save Details button was removed).
+export interface PaymentDraft {
+  payment_date: string;
+  bank: string;
+  payment_reference_number: string;
+  accounts_remarks: string;
+}
+
+export function draftFromTranche(t: PaymentTranche): PaymentDraft {
+  return {
+    payment_date: t.payment_date ?? "",
+    bank: t.bank ?? "",
+    payment_reference_number: t.payment_reference_number ?? "",
+    accounts_remarks: t.accounts_remarks ?? "",
+  };
+}
+
 // Accounts: per-tranche payment details entry (payment date + bank required
-// before Mark Paid; reference number optional). Own component so each tranche
-// keeps its own draft state.
+// before Mark Paid; reference number optional). Fully controlled — the
+// parent holds the draft; Mark Paid saves it and pays in one action.
 function TranchePaymentDetailsForm({
-  requestId,
-  tranche,
   currency,
+  draft,
+  onChange,
 }: {
-  requestId: string;
-  tranche: PaymentTranche;
   currency: string | null;
+  draft: PaymentDraft;
+  onChange: (draft: PaymentDraft) => void;
 }) {
-  const updateDetails = useUpdateTranchePaymentDetails(requestId);
   // Bank master (Aug 2026): the master stores names only — options are
   // composed with the REQUEST currency ("DBS (EUR)", sign shown in front).
   // Dropdown-only by client decision: no free-text fallback.
   const { data: banks = [] } = useBanks();
   const composeBank = (name: string) => (currency ? `${name} (${currency})` : name);
-  const [paymentDate, setPaymentDate] = useState(tranche.payment_date ?? "");
-  const [bank, setBank] = useState(tranche.bank ?? "");
-  const [reference, setReference] = useState(tranche.payment_reference_number ?? "");
-  const [remarks, setRemarks] = useState(tranche.accounts_remarks ?? "");
 
   const inputCls =
     "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring";
-
-  const save = async () => {
-    if (!paymentDate || !bank.trim()) {
-      toast.error("Payment date and bank are required.");
-      return;
-    }
-    try {
-      await updateDetails.mutateAsync({
-        trancheId: tranche.id,
-        data: {
-          payment_date: paymentDate,
-          bank: bank.trim(),
-          payment_reference_number: reference.trim() || undefined,
-          accounts_remarks: remarks.trim() || undefined,
-        },
-      });
-      toast.success(`Payment details saved for ${tranche.label}.`);
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to save payment details.");
-    }
-  };
 
   return (
     <div className="space-y-3">
@@ -97,15 +90,20 @@ function TranchePaymentDetailsForm({
           <p className="text-xs text-muted-foreground mb-1">
             Payment date<span className="text-foreground ml-0.5" aria-hidden="true">*</span>
           </p>
-          <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className={inputCls} />
+          <input
+            type="date"
+            value={draft.payment_date}
+            onChange={(e) => onChange({ ...draft, payment_date: e.target.value })}
+            className={inputCls}
+          />
         </div>
         <div>
           <p className="text-xs text-muted-foreground mb-1">
             Bank<span className="text-foreground ml-0.5" aria-hidden="true">*</span>
           </p>
           <select
-            value={bank}
-            onChange={(e) => setBank(e.target.value)}
+            value={draft.bank}
+            onChange={(e) => onChange({ ...draft, bank: e.target.value })}
             disabled={banks.length === 0}
             className={inputCls}
           >
@@ -113,8 +111,8 @@ function TranchePaymentDetailsForm({
               {banks.length === 0 ? "No banks configured" : "Select bank"}
             </option>
             {/* Legacy free-text value from before the master — keep visible */}
-            {bank && !banks.some((b) => composeBank(b.name) === bank) && (
-              <option value={bank} disabled>{bank} (legacy)</option>
+            {draft.bank && !banks.some((b) => composeBank(b.name) === draft.bank) && (
+              <option value={draft.bank} disabled>{draft.bank} (legacy)</option>
             )}
             {banks.map((b) => (
               <option key={b.id} value={composeBank(b.name)}>
@@ -131,25 +129,23 @@ function TranchePaymentDetailsForm({
         </div>
         <div>
           <p className="text-xs text-muted-foreground mb-1">Payment ref. # (optional)</p>
-          <input type="text" value={reference} onChange={(e) => setReference(e.target.value)} className={inputCls} />
-        </div>
-      </div>
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="flex-1">
-          <p className="text-xs text-muted-foreground mb-1">Accounts remarks (optional)</p>
           <input
             type="text"
-            value={remarks}
-            onChange={(e) => setRemarks(e.target.value)}
-            placeholder="Internal note for this tranche payment"
+            value={draft.payment_reference_number}
+            onChange={(e) => onChange({ ...draft, payment_reference_number: e.target.value })}
             className={inputCls}
           />
         </div>
-        <div className="flex items-end">
-          <Button size="sm" variant="secondary" onClick={save} disabled={updateDetails.isPending}>
-            {updateDetails.isPending ? "Saving…" : "Save Details"}
-          </Button>
-        </div>
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground mb-1">Accounts remarks (optional)</p>
+        <input
+          type="text"
+          value={draft.accounts_remarks}
+          onChange={(e) => onChange({ ...draft, accounts_remarks: e.target.value })}
+          placeholder="Internal note for this tranche payment"
+          className={inputCls}
+        />
       </div>
     </div>
   );
@@ -202,8 +198,13 @@ export function TrancheList({
   const deleteTranche = useDeleteTranche(requestId);
   const payTranche = usePayTranche(requestId);
   const rejectTranche = useRejectTranche(requestId);
+  const updateDetails = useUpdateTranchePaymentDetails(requestId);
   const [payConfirmId, setPayConfirmId] = useState<string | null>(null);
   const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
+  // Payment-details drafts per tranche — saved together with Mark Paid
+  // (10 Aug refinement: no separate Save Details button).
+  const [drafts, setDrafts] = useState<Record<string, PaymentDraft>>({});
+  const draftFor = (t: PaymentTranche): PaymentDraft => drafts[t.id] ?? draftFromTranche(t);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState("");
@@ -292,15 +293,33 @@ export function TrancheList({
 
   const doPay = async (trancheId: string) => {
     const t = tranches.find((x) => x.id === trancheId);
+    if (!t) return;
     // Is this the last unpaid live tranche? Paying it completes the request.
     const wasFinal = tranches.filter((x) => x.status === "unpaid").length === 1;
+    const draft = draftFor(t);
+    if (!draft.payment_date || !draft.bank.trim()) {
+      toast.error("Payment date and bank are required before marking paid.");
+      setPayConfirmId(null);
+      return;
+    }
     try {
+      // Single action (10 Aug refinement): Mark Paid saves the filled
+      // payment details first, then pays — no separate Save Details step.
+      await updateDetails.mutateAsync({
+        trancheId: t.id,
+        data: {
+          payment_date: draft.payment_date,
+          bank: draft.bank.trim(),
+          payment_reference_number: draft.payment_reference_number.trim() || undefined,
+          accounts_remarks: draft.accounts_remarks.trim() || undefined,
+        },
+      });
       await payTranche.mutateAsync(trancheId);
       if (wasFinal) {
         toast.success("Final tranche paid — payment completed and the request is locked.");
         onRequestCompleted?.();
       } else {
-        toast.success(`${t?.label ?? "Tranche"} marked as paid — the merchandiser has been notified.`);
+        toast.success(`${t.label} marked as paid — the merchandiser has been notified.`);
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to mark the tranche paid.");
@@ -324,7 +343,7 @@ export function TrancheList({
       // notified once, when the tranche is explicitly marked paid.
       toast.success(
         `TT copy uploaded for ${t.label}.` +
-          (t.status === "unpaid" ? " Click Mark Paid once payment details are also recorded." : ""),
+          (t.status === "unpaid" ? " Fill the payment details and click Mark Paid." : ""),
       );
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "TT copy upload failed.");
@@ -498,7 +517,11 @@ export function TrancheList({
                   item 3.1 — uploads never auto-pay). */}
               {mode === "accounts" && t.status === "unpaid" && (
                 <div className="space-y-3 pt-2 mt-1 border-t border-border">
-                  <TranchePaymentDetailsForm requestId={requestId} tranche={t} currency={currency} />
+                  <TranchePaymentDetailsForm
+                    currency={currency}
+                    draft={draftFor(t)}
+                    onChange={(draft) => setDrafts((prev) => ({ ...prev, [t.id]: draft }))}
+                  />
 
                   {!t.tt_copy_url && (
                     <div className="flex">
@@ -529,8 +552,8 @@ export function TrancheList({
                     <div className="flex items-center gap-3 flex-wrap">
                       <ReadinessItem done={!!t.tt_copy_url} label="TT copy uploaded" />
                       <ReadinessItem
-                        done={!!t.payment_date && !!t.bank}
-                        label="Payment details recorded"
+                        done={!!draftFor(t).payment_date && !!draftFor(t).bank.trim()}
+                        label="Payment details filled"
                       />
                     </div>
                     <div className="flex items-center gap-2">
@@ -543,14 +566,22 @@ export function TrancheList({
                       >
                         Reject {t.label}
                       </Button>
+                      {/* One action (10 Aug refinement): saves the filled
+                          details AND marks the tranche paid. */}
                       <Button
                         size="sm"
                         onClick={() => setPayConfirmId(t.id)}
                         disabled={
-                          !t.tt_copy_url || !t.payment_date || !t.bank || payTranche.isPending
+                          !t.tt_copy_url ||
+                          !draftFor(t).payment_date ||
+                          !draftFor(t).bank.trim() ||
+                          payTranche.isPending ||
+                          updateDetails.isPending
                         }
                       >
-                        Mark {t.label} Paid
+                        {payTranche.isPending || updateDetails.isPending
+                          ? "Processing…"
+                          : `Mark ${t.label} Paid`}
                       </Button>
                     </div>
                   </div>
@@ -649,7 +680,7 @@ export function TrancheList({
         open={payConfirmId !== null}
         onOpenChange={(open) => !open && setPayConfirmId(null)}
         title="Mark this tranche as paid?"
-        description="Its TT copy and payment details are recorded. The merchandiser will be notified and the tranche will be locked against edits. Paying the final unpaid tranche completes the request and locks the record."
+        description="The payment details you filled will be saved and the tranche marked paid in one step. The merchandiser will be notified and the tranche will be locked against edits. Paying the final unpaid tranche completes the request and locks the record."
         confirmLabel="Yes, mark paid"
         onConfirm={() => payConfirmId && doPay(payConfirmId)}
       />
