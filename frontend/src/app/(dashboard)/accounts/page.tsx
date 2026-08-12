@@ -444,7 +444,8 @@ export default function AccountsDashboard() {
   const allTotal = allData?.total ?? 0;
   const allTotalPages = Math.ceil(allTotal / PAGE_SIZE);
 
-  const fySubtext = kpis ? `${kpis.fy_label} to date` : "This financial year";
+  // Label refinement (10 Aug): plain "YTD", not "FY 2026–27 to date".
+  const fySubtext = "YTD";
 
   return (
     <RoleGuard allowedRoles={["accounts_team", "super_admin"]}>

@@ -420,6 +420,29 @@ Total but appeared in no bucket at all. Fixed in `merchandiser/page.tsx`:
   each tab showing its count — the five bucket figures sum to Total.
 - Frontend-only; `tsc` clean.
 
+## Refinements (10 Aug 2026) — five follow-ups on delivered items
+
+1. **Item 5 (KPIs):** card subtext is now plain **"YTD"** (was
+   "FY 2026–27 to date"). The FY window itself is unchanged.
+2. **Item 3.x (tranche payment flow):** the **Save Details button is
+   gone** — the payment-details form is a draft held by `TrancheList`, and
+   **Mark Paid saves the filled details and pays in one action** (details
+   PATCH then pay, sequentially). Mark Paid enables once the TT copy is
+   uploaded and date + bank are filled; readiness item reworded to
+   "Payment details filled"; confirm-dialog and toast wording updated.
+3. **Item 14 (file remarks):** the New File Remark form is now visible to
+   **merchandisers only** — super admin also lost it (previously kept for
+   support); every decider role sees just Open Remarks + History.
+4. **Merchandiser buckets:** verified cards and tabs carry the identical
+   six buckets with counts (Total/All, Pending, On Hold, Processed,
+   Rejected, Cancelled) — delivered by the 10 Aug bucket fix above.
+5. **Merchandiser Pending card:** subtext removed entirely (was
+   "Awaiting accounts", then "Approval or payment awaited").
+
+Frontend-only; `tsc` clean; backend flow unchanged (the pay endpoint's
+server-side readiness gate still requires saved details + TT copy — Mark
+Paid now performs the save itself).
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

@@ -138,7 +138,7 @@ export default function MerchandiserDashboard() {
         {/* One card per bucket — together they sum to Total Requests. */}
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           <StatCard label="Total Requests"   value={allData?.total ?? "—"}       icon={ClipboardList} />
-          <StatCard label="Pending"          value={pendingData?.total ?? "—"}   icon={Clock}         subtext="Approval or payment awaited" />
+          <StatCard label="Pending"          value={pendingData?.total ?? "—"}   icon={Clock} />
           <StatCard label="On Hold"          value={holdData?.total ?? "—"}      icon={PauseCircle} />
           <StatCard label="Processed"        value={processedData?.total ?? "—"} icon={CheckCircle} />
           <StatCard label="Rejected"         value={rejectedData?.total ?? "—"}  icon={XCircle}       subtext="By HoM or Accounts" />
