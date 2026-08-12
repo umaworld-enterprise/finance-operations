@@ -18,7 +18,7 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   Table, TableHeader, TableBody, TableRow, TableHead,
 } from "@/components/ui/table";
-import { ClipboardList, Clock, CheckCircle, XCircle, Bell, ArrowRight, Plus, ChevronDown } from "lucide-react";
+import { ClipboardList, Clock, CheckCircle, XCircle, Ban, PauseCircle, Bell, ArrowRight, Plus, ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { timeAgo } from "@/lib/utils";
@@ -39,11 +39,15 @@ const STATUS_BORDER: Record<RequestStatus, string> = {
   reopened: "border-l-blue-500",
 };
 
+// Every status lives in exactly one bucket so the cards and tabs sum to the
+// All/Total figure (10 Aug fix — Rejected was missing entirely, and
+// awaiting-HoM/reopened requests were counted in Total but shown nowhere).
 const TAB_PARAMS: Record<string, Record<string, string | string[]>> = {
   all:       {},
-  pending:   { status: "pending_payment" },
+  pending:   { status: ["pending_payment", "pending_hom_approval", "reopened"] },
   hold:      { status: ["hold_by_merchandiser", "hold_by_accounts"] },
   processed: { status: "payment_processed" },
+  rejected:  { status: ["rejected_by_hom", "rejected_by_accounts"] },
   cancelled: { status: ["cancelled_by_merchandiser", "cancelled_by_accounts"] },
 };
 
@@ -73,11 +77,14 @@ export default function MerchandiserDashboard() {
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
-  // Pre-fetch counts for stat cards (page 1 only, just to get totals)
+  // Pre-fetch counts for stat cards (page 1 only, just to get totals) —
+  // one query per bucket, same status sets as the tabs so both agree.
   const { data: allData }       = useRequestsPaginated(1, 1, {});
-  const { data: pendingData }   = useRequestsPaginated(1, 1, { status: "pending_payment" });
-  const { data: processedData } = useRequestsPaginated(1, 1, { status: "payment_processed" });
-  const { data: cancelledData } = useRequestsPaginated(1, 1, { status: ["cancelled_by_merchandiser", "cancelled_by_accounts"] });
+  const { data: pendingData }   = useRequestsPaginated(1, 1, TAB_PARAMS.pending);
+  const { data: holdData }      = useRequestsPaginated(1, 1, TAB_PARAMS.hold);
+  const { data: processedData } = useRequestsPaginated(1, 1, TAB_PARAMS.processed);
+  const { data: rejectedData }  = useRequestsPaginated(1, 1, TAB_PARAMS.rejected);
+  const { data: cancelledData } = useRequestsPaginated(1, 1, TAB_PARAMS.cancelled);
 
   function changeTab(tab: string) {
     setActiveTab(tab);
@@ -128,11 +135,14 @@ export default function MerchandiserDashboard() {
           )}
         </Card>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* One card per bucket — together they sum to Total Requests. */}
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           <StatCard label="Total Requests"   value={allData?.total ?? "—"}       icon={ClipboardList} />
-          <StatCard label="Pending Payment"  value={pendingData?.total ?? "—"}   icon={Clock}         subtext="Awaiting accounts" />
+          <StatCard label="Pending"          value={pendingData?.total ?? "—"}   icon={Clock}         subtext="Approval or payment awaited" />
+          <StatCard label="On Hold"          value={holdData?.total ?? "—"}      icon={PauseCircle} />
           <StatCard label="Processed"        value={processedData?.total ?? "—"} icon={CheckCircle} />
-          <StatCard label="Cancelled"        value={cancelledData?.total ?? "—"} icon={XCircle} />
+          <StatCard label="Rejected"         value={rejectedData?.total ?? "—"}  icon={XCircle}       subtext="By HoM or Accounts" />
+          <StatCard label="Cancelled"        value={cancelledData?.total ?? "—"} icon={Ban} />
         </div>
 
         {activity.length > 0 && (
@@ -205,12 +215,13 @@ export default function MerchandiserDashboard() {
           <TabsList className="w-full">
             <TabsTrigger value="all">All {allData ? `(${allData.total})` : ""}</TabsTrigger>
             <TabsTrigger value="pending">Pending {pendingData ? `(${pendingData.total})` : ""}</TabsTrigger>
-            <TabsTrigger value="hold">On Hold</TabsTrigger>
+            <TabsTrigger value="hold">On Hold {holdData ? `(${holdData.total})` : ""}</TabsTrigger>
             <TabsTrigger value="processed">Processed {processedData ? `(${processedData.total})` : ""}</TabsTrigger>
+            <TabsTrigger value="rejected">Rejected {rejectedData ? `(${rejectedData.total})` : ""}</TabsTrigger>
             <TabsTrigger value="cancelled">Cancelled {cancelledData ? `(${cancelledData.total})` : ""}</TabsTrigger>
           </TabsList>
 
-          {(["all", "pending", "hold", "processed", "cancelled"] as const).map((tab) => (
+          {(["all", "pending", "hold", "processed", "rejected", "cancelled"] as const).map((tab) => (
             <TabsContent key={tab} value={tab}>
               {isLoading ? (
                 <Card className="overflow-hidden">
