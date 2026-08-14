@@ -105,10 +105,15 @@ export function SupplierDefaultHistory({ supplierId, supplierName, currentReques
   const active = history.find((f) => f.is_active);
   const hasGracedPassed = (exposure?.graced_etd_passed.length ?? 0) > 0;
 
-  // Exposure KPIs (10 Aug 2026), per currency:
-  //   Existing  = every open file (overdue + in process), EXCLUDING the
-  //               request currently being viewed;
-  //   Potential = Existing + this request's deposit (i.e. after approval).
+  // Exposure KPIs (10 Aug 2026; refined 11 Aug), per currency:
+  //   Existing  = PROCESSED files only — money actually paid out and not
+  //               yet shipped. Pending/held files are commitments, not
+  //               exposure, so they don't count (they stay visible in the
+  //               breakdown tables below). Excludes the request being
+  //               viewed.
+  //   Potential = Existing + this request's deposit (i.e. once approved
+  //               and paid). A currency column appears only when it has
+  //               processed exposure or this request would add it.
   const allExposure = [
     ...(exposure?.graced_etd_passed ?? []),
     ...(exposure?.graced_etd_pending ?? []),
@@ -116,6 +121,7 @@ export function SupplierDefaultHistory({ supplierId, supplierName, currentReques
   const existingByCurrency: Record<string, number> = {};
   for (const row of allExposure) {
     if (currentRequest && row.request_id === currentRequest.id) continue;
+    if (row.current_status !== "payment_processed") continue;
     const key = row.currency ?? "—";
     existingByCurrency[key] = (existingByCurrency[key] ?? 0) + Number(row.deposit_amount);
   }
