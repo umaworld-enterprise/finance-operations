@@ -585,6 +585,18 @@ no controls. Frontend-only; `tsc` clean.
 
 Backend tests green; `tsc` clean.
 
+## Follow-up (11 Aug 2026) — exposure KPIs count processed files only
+
+Live Exposure refinement: **Existing Exposure** now sums only
+`payment_processed` files (money actually paid out, goods not shipped) —
+pending/held files are commitments, not exposure, and no longer inflate the
+figure (they remain visible in the graced-ETD breakdown tables).
+**Potential Exposure** stays Existing + the viewed request's deposit. A
+currency column appears only when it has processed exposure or the viewed
+request would add that currency — e.g. a supplier with only a PENDING GBP
+file shows no GBP column at all unless the request being approved is GBP.
+Frontend-only; `tsc` clean.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
