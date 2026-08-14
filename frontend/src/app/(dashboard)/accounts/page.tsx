@@ -63,16 +63,40 @@ function isDueWithin10Days(req: DepositRequest): boolean {
   return differenceInDays(new Date(next), new Date()) <= 10;
 }
 
+// Bucket-scoped payable (11 Aug refinement): each pending table shows only
+// the unpaid amount whose tentative date falls in ITS window — the 0–10 day
+// table sums tranches due within 10 days (past-due included), the later
+// table sums tranches due after that (undated ones included).
+function trancheDueSoon(dateStr: string | null): boolean {
+  if (!dateStr) return false;
+  return differenceInDays(new Date(dateStr), new Date()) <= 10;
+}
+
+function payableInBucket(req: DepositRequest, bucket: "soon" | "later"): number {
+  return (req.tranches ?? [])
+    .filter((t) => t.status === "unpaid")
+    .filter((t) =>
+      bucket === "soon"
+        ? trancheDueSoon(t.tentative_payment_date)
+        : !trancheDueSoon(t.tentative_payment_date),
+    )
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+}
+
 function PendingTable({
   rows: allRows,
   loading,
   title,
   subtitle,
+  bucket,
 }: {
   rows: DepositRequest[];
   loading: boolean;
   title: string;
   subtitle: string;
+  /** Which tentative-date window this table represents — drives the
+   * bucket-scoped Amount Payable column. */
+  bucket: "soon" | "later";
 }) {
   // Each bucket paginates client-side (10 Aug 2026, app-wide table
   // controls) — the page-level search/sort apply before the split.
@@ -129,7 +153,8 @@ function PendingTable({
               Tentative payment: {formatDate(nextTentativeDate(req))}
             </div>
             <div className="text-xs text-muted-foreground">
-              Payable: <span className="font-semibold text-foreground">{formatCurrency(amountPayable(req), req.currency)}</span>
+              Payable{bucket === "soon" ? " (0–10 days)" : " (later)"}:{" "}
+              <span className="font-semibold text-foreground">{formatCurrency(payableInBucket(req, bucket), req.currency)}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="font-bold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</span>
@@ -175,7 +200,7 @@ function PendingTable({
                 <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
                 <TableCell className="text-muted-foreground text-xs">{req.vertical?.name ?? "—"}</TableCell>
                 <TableCell className="text-muted-foreground text-xs">{req.creator?.full_name ?? "—"}</TableCell>
-                <TableCell className="text-right font-semibold text-foreground">{formatCurrency(amountPayable(req), req.currency)}</TableCell>
+                <TableCell className="text-right font-semibold text-foreground">{formatCurrency(payableInBucket(req, bucket), req.currency)}</TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs font-medium">{currencyDisplayLabel(req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDate(nextTentativeDate(req))}</TableCell>
@@ -593,13 +618,15 @@ export default function AccountsDashboard() {
               rows={dueSoon}
               loading={queueLoading}
               title="Tentative Payment in 0–10 Days"
-              subtitle="Earliest unpaid tranche due within 10 days — sorted oldest first"
+              subtitle="Earliest unpaid tranche due within 10 days — Amount Payable counts only the tranches due in this window"
+              bucket="soon"
             />
             <PendingTable
               rows={dueLater}
               loading={queueLoading}
               title="Tentative Payment in > 10 Days"
-              subtitle="Due later than 10 days (or no tentative date recorded)"
+              subtitle="Due later than 10 days (or no tentative date recorded) — Amount Payable counts only the tranches due after the window"
+              bucket="later"
             />
           </TabsContent>
 

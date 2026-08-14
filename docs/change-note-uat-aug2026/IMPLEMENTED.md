@@ -597,6 +597,18 @@ request would add that currency — e.g. a supplier with only a PENDING GBP
 file shows no GBP column at all unless the request being approved is GBP.
 Frontend-only; `tsc` clean.
 
+## Follow-up (11 Aug 2026) — bucket-scoped Amount Payable in the pending tables
+
+The two pending tables' Amount Payable column is now scoped to each
+table's own tentative-date window instead of the request's total unpaid:
+- **0–10 days table**: sums only the unpaid tranches whose tentative date
+  falls within the next 10 days (past-due dates included).
+- **> 10 days table**: sums only the unpaid tranches due after the window
+  (undated tranches included).
+So a request with one tranche due tomorrow and one due next month shows
+just tomorrow's amount in the 0–10 table. The On Hold / All / merchandiser
+tables keep the total-unpaid figure. Frontend-only; `tsc` clean.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
