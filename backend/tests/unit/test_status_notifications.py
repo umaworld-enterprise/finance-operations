@@ -151,8 +151,11 @@ async def test_accounts_cancel_notifies_raising_merchandiser(db_session, engine,
 
 
 @pytest.mark.asyncio
-async def test_tranche_rejected_notifies_raising_merchandiser(db_session, engine, monkeypatch):
-    merch, _, _, _, request = await _seed(db_session)
+async def test_tranche_rejected_notifies_merchandiser_and_hom(db_session, engine, monkeypatch):
+    """10 Aug 2026 follow-up: HoM hears about tranche rejections too — the
+    raising merchandiser AND every active HoM, each with the reason and
+    their own deep link."""
+    merch, _, _, hom, request = await _seed(db_session)
     tranche = await make_tranche(db_session, request)
     await db_session.commit()
     _patch_factory(engine, monkeypatch)
@@ -160,12 +163,15 @@ async def test_tranche_rejected_notifies_raising_merchandiser(db_session, engine
     await notify_tranche_rejected(request.id, tranche.id, "Wrong amount entered")
 
     rows = await _rows(db_session, TYPE_TRANCHE_REJECTED)
-    assert len(rows) == 1
-    assert rows[0].user_id == merch.id
-    assert "Wrong amount entered" in rows[0].body
-    assert tranche.label in rows[0].body
-    assert "replacement" in rows[0].body
-    assert rows[0].url == f"/merchandiser/{request.id}"
+    assert {n.user_id for n in rows} == {merch.id, hom.id}
+    by_user = {n.user_id: n for n in rows}
+    for n in rows:
+        assert "Wrong amount entered" in n.body
+        assert tranche.label in n.body
+    # The merchandiser is prompted to add replacements; HoM gets their view.
+    assert "replacement" in by_user[merch.id].body
+    assert by_user[merch.id].url == f"/merchandiser/{request.id}"
+    assert by_user[hom.id].url == f"/hom/{request.id}"
 
 
 @pytest.mark.asyncio

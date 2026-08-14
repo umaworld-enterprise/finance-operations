@@ -25,7 +25,7 @@ import { ShipmentsTable } from "@/components/analytics/ShipmentsTable";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
-import { currencyDisplayLabel, formatCurrency, formatDate, cn, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
+import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, cn, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
 import { differenceInDays } from "date-fns";
 import { Clock, CheckCircle, AlertTriangle, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
 import Link from "next/link";
@@ -64,7 +64,7 @@ function isDueWithin10Days(req: DepositRequest): boolean {
 }
 
 function PendingTable({
-  rows,
+  rows: allRows,
   loading,
   title,
   subtitle,
@@ -74,6 +74,12 @@ function PendingTable({
   title: string;
   subtitle: string;
 }) {
+  // Each bucket paginates client-side (10 Aug 2026, app-wide table
+  // controls) — the page-level search/sort apply before the split.
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const rows = allRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   return (
     <Card className="overflow-hidden">
       <div className="px-5 py-4 border-b border-border flex items-center justify-between">
@@ -81,8 +87,8 @@ function PendingTable({
           <h3 className="font-semibold text-foreground text-sm">{title}</h3>
           <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
         </div>
-        {rows.length > 0 && (
-          <span className="text-xs text-muted-foreground font-medium">{rows.length} awaiting</span>
+        {allRows.length > 0 && (
+          <span className="text-xs text-muted-foreground font-medium">{allRows.length} awaiting</span>
         )}
       </div>
 
@@ -122,6 +128,9 @@ function PendingTable({
             <div className="text-xs text-muted-foreground">
               Tentative payment: {formatDate(nextTentativeDate(req))}
             </div>
+            <div className="text-xs text-muted-foreground">
+              Payable: <span className="font-semibold text-foreground">{formatCurrency(amountPayable(req), req.currency)}</span>
+            </div>
             <div className="flex items-center justify-between">
               <span className="font-bold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</span>
               <Button size="sm" asChild>
@@ -145,6 +154,7 @@ function PendingTable({
               <TableHead>Customer</TableHead>
               <TableHead>Vertical/Category</TableHead>
               <TableHead>Merchandiser</TableHead>
+              <TableHead className="text-right">Amount Payable</TableHead>
               <TableHead className="text-right">Deposit</TableHead>
               <TableHead>Currency</TableHead>
               <TableHead>Tentative Payment</TableHead>
@@ -154,9 +164,9 @@ function PendingTable({
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableSkeleton rows={5} cols={11} />
+              <TableSkeleton rows={5} cols={12} />
             ) : rows.length === 0 ? (
-              <tr><td colSpan={11}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
+              <tr><td colSpan={12}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id}>
                 <TableCell><span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span></TableCell>
@@ -165,6 +175,7 @@ function PendingTable({
                 <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
                 <TableCell className="text-muted-foreground text-xs">{req.vertical?.name ?? "—"}</TableCell>
                 <TableCell className="text-muted-foreground text-xs">{req.creator?.full_name ?? "—"}</TableCell>
+                <TableCell className="text-right font-semibold text-foreground">{formatCurrency(amountPayable(req), req.currency)}</TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs font-medium">{currencyDisplayLabel(req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDate(nextTentativeDate(req))}</TableCell>
@@ -179,6 +190,17 @@ function PendingTable({
           </TableBody>
         </Table>
       </div>
+      {allRows.length > PAGE_SIZE && (
+        <div className="px-5">
+          <Pagination
+            page={safePage}
+            totalPages={totalPages}
+            total={allRows.length}
+            pageSize={PAGE_SIZE}
+            onChange={setPage}
+          />
+        </div>
+      )}
     </Card>
   );
 }
@@ -201,11 +223,15 @@ function StatusTable({
   title,
   subtitle,
   emptyTitle,
+  showPayable = false,
 }: {
   rows: DepositRequest[];
   title: string;
   subtitle: string;
   emptyTitle: string;
+  /** Show the Amount Payable column — meaningful for live requests (On
+   * Hold), noise for closed ones (Rejected/Cancelled). */
+  showPayable?: boolean;
 }) {
   return (
     <Card className="overflow-hidden">
@@ -230,6 +256,11 @@ function StatusTable({
             {req.last_status_change_by && (
               <div className="text-xs text-muted-foreground">By {req.last_status_change_by}</div>
             )}
+            {showPayable && (
+              <div className="text-xs text-muted-foreground">
+                Payable: <span className="font-semibold text-foreground">{formatCurrency(amountPayable(req), req.currency)}</span>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <span className="font-bold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</span>
               {frozenForAccounts(req) ? (
@@ -253,6 +284,7 @@ function StatusTable({
               <TableHead>Invoice #</TableHead>
               <TableHead>Supplier</TableHead>
               <TableHead>Customer</TableHead>
+              {showPayable && <TableHead className="text-right">Amount Payable</TableHead>}
               <TableHead className="text-right">Deposit</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>By</TableHead>
@@ -262,13 +294,16 @@ function StatusTable({
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <tr><td colSpan={9}><EmptyState icon={AlertTriangle} title={emptyTitle} /></td></tr>
+              <tr><td colSpan={showPayable ? 10 : 9}><EmptyState icon={AlertTriangle} title={emptyTitle} /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id} className={cn(frozenForAccounts(req) && "opacity-50 pointer-events-none select-none")}>
                 <TableCell><span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span></TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
                 <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
+                {showPayable && (
+                  <TableCell className="text-right font-semibold text-foreground">{formatCurrency(amountPayable(req), req.currency)}</TableCell>
+                )}
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
                 <TableCell><StatusBadge status={req.current_status} showFull /></TableCell>
                 <TableCell className="text-muted-foreground text-xs">{req.last_status_change_by ?? "—"}</TableCell>
@@ -308,6 +343,9 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
             </div>
             <div className="text-sm font-semibold text-foreground">{req.supplier.name}</div>
             <div className="text-xs text-muted-foreground">{req.customer.name}</div>
+            <div className="text-xs text-muted-foreground">
+              Payable: <span className="font-semibold text-foreground">{formatCurrency(amountPayable(req), req.currency)}</span>
+            </div>
             <div className="flex items-center justify-between">
               <span className="font-bold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</span>
               {frozenForAccounts(req) ? (
@@ -331,6 +369,7 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
               <TableHead>Invoice #</TableHead>
               <TableHead>Supplier</TableHead>
               <TableHead>Customer</TableHead>
+              <TableHead className="text-right">Amount Payable</TableHead>
               <TableHead className="text-right">Deposit</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="hidden lg:table-cell">Submitted</TableHead>
@@ -339,13 +378,14 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <tr><td colSpan={8}><EmptyState icon={ClipboardList} title="No requests yet" /></td></tr>
+              <tr><td colSpan={9}><EmptyState icon={ClipboardList} title="No requests yet" /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id} className={cn(frozenForAccounts(req) && "opacity-50 pointer-events-none select-none")}>
                 <TableCell><span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span></TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
                 <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
+                <TableCell className="text-right font-semibold text-foreground">{formatCurrency(amountPayable(req), req.currency)}</TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
                 <TableCell><StatusBadge status={req.current_status} showFull /></TableCell>
                 <TableCell className="hidden lg:table-cell text-muted-foreground text-xs">{formatDate(req.created_at)}</TableCell>
@@ -584,6 +624,7 @@ export default function AccountsDashboard() {
                   title="On Hold"
                   subtitle="Requests placed on hold"
                   emptyTitle="No requests on hold"
+                  showPayable
                 />
                 <Pagination
                   page={holdPage}

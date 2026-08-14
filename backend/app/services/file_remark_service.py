@@ -95,10 +95,20 @@ class FileRemarkService:
                     f"deposit amount of {deposit}."
                 )
 
+        # Server-derived parent reference (10 Aug rework): the "old file" is
+        # always the selected request itself — its sunshine invoice number
+        # when present, else the proforma number, else the request number.
+        # Never accepted from the client; recorded for BOTH categories so a
+        # split's history shows which file it split from.
+        parent_file = (
+            (request.sunshine_invoice_number or "").strip()
+            or (request.supplier_invoice_number or "").strip()
+            or request.request_number
+        )
         remark = FileRemark(
             deposit_request_id=request.id,
             category=data.category,
-            old_file_number=(data.old_file_number or "").strip() or None,
+            old_file_number=parent_file,
             # Server-derived (4 Aug follow-up): the old amount is always the
             # selected file's deposit amount — pre-populated and non-editable
             # in the UI, never accepted from the client.

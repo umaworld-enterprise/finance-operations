@@ -24,6 +24,8 @@ import {
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SearchInput } from "@/components/ui/SearchInput";
+import { Pagination } from "@/components/ui/Pagination";
+import { byString, useClientTable } from "@/hooks/useClientTable";
 import {
   Table,
   TableHeader,
@@ -34,7 +36,7 @@ import {
 } from "@/components/ui/table";
 import { useUsers, useCreateUser, useUpdateUser } from "@/hooks/useMasters";
 import { formatDate, ROLE_LABELS } from "@/lib/utils";
-import type { UserRole } from "@/types";
+import type { AppUser, UserRole } from "@/types";
 import { ArrowLeft, Plus, UserPlus, Copy, Check } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -87,14 +89,20 @@ export default function UsersPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<{ id: string; name: string } | null>(null);
   const [lastInvited, setLastInvited] = useState<{ email: string; role: string } | null>(null);
-  const [search, setSearch] = useState("");
-
+  // Search / sort / pagination (10 Aug 2026, app-wide table controls).
+  const userSorts = [
+    { value: "name", label: "Name (A–Z)", compare: byString<AppUser>((u) => u.full_name) },
+    { value: "role", label: "Role", compare: byString<AppUser>((u) => u.role) },
+    { value: "recent-login", label: "Recent login first", compare: byString<AppUser>((u) => u.last_login_at ?? "", true) },
+  ];
+  const userTable = useClientTable(users, {
+    searchHaystack: (u) => [u.full_name, u.email, ROLE_LABELS[u.role]],
+    sortOptions: userSorts,
+    pageSize: 25,
+  });
+  const { search, setSearch } = userTable;
   const term = search.trim().toLowerCase();
-  const filteredUsers = term
-    ? users.filter((u) =>
-        [u.full_name, u.email, ROLE_LABELS[u.role]].some((v) => v?.toLowerCase().includes(term))
-      )
-    : users;
+  const filteredUsers = userTable.visible;
 
   const {
     register,
@@ -229,12 +237,24 @@ export default function UsersPage() {
                 </DialogContent>
               </Dialog>
             </div>
-            <SearchInput
-              value={search}
-              onChange={setSearch}
-              placeholder="Search by name, email or role…"
-              className="mt-3 sm:max-w-md"
-            />
+            <div className="mt-3 flex flex-col sm:flex-row gap-2">
+              <SearchInput
+                value={search}
+                onChange={setSearch}
+                placeholder="Search by name, email or role…"
+                className="sm:max-w-md flex-1"
+              />
+              <select
+                value={userTable.sort}
+                onChange={(e) => userTable.setSort(e.target.value)}
+                aria-label="Sort users"
+                className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring sm:w-52"
+              >
+                {userSorts.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
           </CardHeader>
           <Table>
             <TableHeader>
@@ -300,6 +320,15 @@ export default function UsersPage() {
               )}
             </TableBody>
           </Table>
+          <div className="px-4">
+            <Pagination
+              page={userTable.page}
+              totalPages={userTable.totalPages}
+              total={userTable.total}
+              pageSize={userTable.pageSize}
+              onChange={userTable.setPage}
+            />
+          </div>
         </Card>
       </main>
 

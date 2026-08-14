@@ -443,6 +443,111 @@ Frontend-only; `tsc` clean; backend flow unchanged (the pay endpoint's
 server-side readiness gate still requires saved details + TT copy — Mark
 Paid now performs the save itself).
 
+## Follow-up (10 Aug 2026) — HOM field visibility + rejection notifications
+
+1. **HOM detail missing amounts (root cause found):**
+   `FIELD_VISIBILITY_DEFAULTS` had NO `head_of_merchandiser` role at all,
+   and `/requests/my-field-visibility` resolves unknown roles to False — so
+   HOM saw none of the gated fields (deposit amount, %, total invoice,
+   creator info, status history, the whole analytics card). Fixed:
+   - `head_of_merchandiser` added to every defaults row (mirrors
+     accounts_team — HOM approves what Accounts pay).
+   - `get_field_visibility` now merges the stored config OVER the defaults,
+     so configs saved before a role/field existed inherit defaults for the
+     missing keys instead of hiding everything.
+   - The admin Field Visibility matrix gained a "Head of Merchandiser"
+     column so admins can manage it.
+2. **Rejections notify HoM at BOTH levels:** request-level already did
+   (Phase 2); `notify_tranche_rejected` now fans out to every active HoM
+   as well as the raising merchandiser — reason included, per-audience
+   deep links (`/merchandiser/{id}` with the add-replacement prompt vs
+   `/hom/{id}`). Web + app parity verified by construction: both notifiers
+   use `_deliver_to_users`, which writes the bell row AND sends the
+   identical payload via Web Push to every subscription of each recipient
+   (dead subscriptions pruned). Matrix updated; test extended
+   (`test_tranche_rejected_notifies_merchandiser_and_hom`).
+
+257 backend tests green; `tsc` clean; no migration.
+
+## Follow-up (10 Aug 2026) — Supplier Default History panel rework
+
+All in `SupplierDefaultHistory.tsx` (shared by HoM, Accounts and
+Merchandiser detail views):
+1. The amber "Active flag: … — outstanding … (flagged …)" box is removed —
+   the flag details remain in the history table below.
+2. Active-flag wording replaced (rendered red): *Red flag: this supplier
+   has been listed under "Default Advance Payment List". Kindly review its
+   history before making any decision.*
+3. Live Exposure's "Every open file… Total: …" line replaced by a
+   currency-segregated KPI table (one column per currency):
+   - **Existing Exposure** (Overdue payments + Payments in process) — all
+     open files EXCLUDING the request currently being viewed;
+   - **Potential Exposure after approving this request** — Existing plus
+     this request's deposit (row shown only when a request context exists).
+   The three detail pages now pass the viewed request (id, deposit amount,
+   currency) into the panel for this computation.
+
+Frontend-only; `tsc` clean.
+
+## Follow-up (10 Aug 2026) — "Amount Payable" column
+
+New shared helper `amountPayable()` in `lib/utils.ts`: the sum of a
+request's UNPAID tranches (paid are out the door, rejected don't count;
+legacy rows without tranches fall back to the full deposit until
+processed). Rendered right before the Deposit column in:
+- Accounts queue: both pending buckets (0–10 / >10 days), the On Hold tab
+  (via `StatusTable`'s new `showPayable` prop) and All Requests — desktop
+  columns + mobile card "Payable:" line.
+- Merchandiser Request History (`RequestsTable`).
+Deliberately NOT shown on Rejected/Cancelled tabs (closed files) or the
+HoM queue (nothing paid yet — payable would always equal the Amount
+column). Frontend-only; `tsc` clean.
+
+## Follow-up (10 Aug 2026) — search, sort & pagination on every table
+
+New reusable kit: `useClientTable` hook (`hooks/useClientTable.ts` —
+case-insensitive substring search over declared fields, pluggable sort
+comparators, client pagination with page-clamping) + `TableControls`
+component (search box + sort dropdown; pairs with the existing
+`Pagination`). Applied to every table that lacked controls:
+- **File Remarks** — Open Remarks and Remark History (search by request #,
+  file numbers, category, raiser, status; sort newest/oldest/request #;
+  20/page).
+- **Supplier Risk (finance)** — defaulted-supplier table (search supplier/
+  reason/status; sort by flag date, supplier, outstanding; 20/page).
+- **Admin Users** — sort (name/role/recent login) + pagination added to the
+  existing search (25/page).
+- **Admin Banks** and **Admin Payment Terms** — search + sort + pagination
+  (20/page; payment-term row numbers stay absolute across pages).
+- **Accounts pending buckets** (0–10 / >10 days) — client pagination per
+  bucket (50/page, shown only when needed); the page-level search and sort
+  already applied before the split.
+
+Already covered (unchanged): merchandiser dashboard, HoM queue, accounts
+status tabs (server pagination + search + sort), audit log (server filters
++ pagination), notifications, analytics tables (ShipmentsTable, drill,
+supplier detail, NPA panel), admin overview. Contextual sub-tables inside
+detail panels (Supplier Default History, tranche list) intentionally keep
+no controls. Frontend-only; `tsc` clean.
+
+## Follow-up (10 Aug 2026) — file-remark parent reference + weekly label format
+
+1. **Old file input removed** from the Invoice amount change form — the old
+   file reference is now server-derived from the selected request (sunshine
+   invoice number → proforma number → request number fallback), exactly
+   like the old amount. `FileRemarkCreate` no longer accepts
+   `old_file_number` at all.
+2. **Splits show their parent**: the derived parent reference is recorded
+   for BOTH categories, so the history's Details cell for a split now reads
+   "From {parent} (amount)" above the "→ target (amount)" rows. Older rows
+   stored without a parent fall back to the request number in the UI.
+3. **Analytics weekly labels** (Outstanding tracker + weekly deposit
+   tracker): `10/08/2026 to 16/08/2026` → **`10-Aug-2026 to 16-Aug-2026`**
+   (`%d-%b-%Y`), removing day/month ambiguity.
+
+257 backend tests green (file-remark + tracker label tests updated);
+`tsc` clean; no migration.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

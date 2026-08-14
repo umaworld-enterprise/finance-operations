@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { formatCurrency, formatDate, requestDisplayNumber } from "@/lib/utils";
+import { amountPayable, formatCurrency, formatDate, requestDisplayNumber } from "@/lib/utils";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,7 @@ export function RequestsTable({
             <TableHead>Supplier</TableHead>
             <TableHead>Customer</TableHead>
             <TableHead className="hidden md:table-cell">Vertical</TableHead>
+            <TableHead className="hidden sm:table-cell text-right">Amount Payable</TableHead>
             <TableHead className="text-right">Deposit</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="hidden lg:table-cell">Submitted</TableHead>
@@ -69,6 +70,9 @@ export function RequestsTable({
               <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
               <TableCell className="hidden md:table-cell text-muted-foreground text-xs">
                 {req.vertical?.name ?? "—"}
+              </TableCell>
+              <TableCell className="hidden sm:table-cell text-right font-semibold text-foreground">
+                {formatCurrency(amountPayable(req), req.currency)}
               </TableCell>
               <TableCell className="text-right font-semibold text-foreground">
                 {formatCurrency(req.deposit_amount, req.currency)}

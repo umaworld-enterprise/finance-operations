@@ -18,6 +18,10 @@ import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { Pagination } from "@/components/ui/Pagination";
+import { TableControls } from "@/components/ui/TableControls";
+import { byString, useClientTable } from "@/hooks/useClientTable";
+import type { Bank } from "@/types";
 import masterService from "@/services/masterService";
 
 const BANKS_KEY = ["banks", "all"] as const;
@@ -47,6 +51,17 @@ export default function BanksAdminPage() {
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+
+  // Search / sort / pagination (10 Aug 2026, app-wide table controls).
+  const bankSorts = [
+    { value: "name", label: "Name (A–Z)", compare: byString<Bank>((b) => b.name) },
+    { value: "status", label: "Active first", compare: (a: Bank, b: Bank) => Number(b.is_active) - Number(a.is_active) },
+  ];
+  const bankTable = useClientTable(banks, {
+    searchHaystack: (b) => [b.name, b.is_active ? "active" : "inactive"],
+    sortOptions: bankSorts,
+    pageSize: 20,
+  });
 
   const doCreate = async () => {
     const name = newName.trim();
@@ -132,6 +147,15 @@ export default function BanksAdminPage() {
                 />
               </div>
             ) : (
+              <div className="p-4">
+              <TableControls
+                search={bankTable.search}
+                onSearch={bankTable.setSearch}
+                sort={bankTable.sort}
+                onSort={bankTable.setSort}
+                sortOptions={bankSorts}
+                placeholder="Search banks…"
+              />
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -141,7 +165,7 @@ export default function BanksAdminPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {banks.map((b) => (
+                  {bankTable.visible.map((b) => (
                     <TableRow key={b.id}>
                       <TableCell>
                         {editingId === b.id ? (
@@ -198,6 +222,14 @@ export default function BanksAdminPage() {
                   ))}
                 </TableBody>
               </Table>
+              <Pagination
+                page={bankTable.page}
+                totalPages={bankTable.totalPages}
+                total={bankTable.total}
+                pageSize={bankTable.pageSize}
+                onChange={bankTable.setPage}
+              />
+              </div>
             )}
           </CardContent>
         </Card>

@@ -27,6 +27,10 @@ import {
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
+import { Pagination } from "@/components/ui/Pagination";
+import { TableControls } from "@/components/ui/TableControls";
+import { byNumber, byString, useClientTable } from "@/hooks/useClientTable";
+import type { DefaultedSupplier } from "@/types";
 import { useDefaultedSuppliers, useFlagSupplier, useResolveDefault, useSuppliers } from "@/hooks/useMasters";
 import { formatDate } from "@/lib/utils";
 import { AlertTriangle, CheckCircle, ShieldOff, Plus, CheckCircle2 } from "lucide-react";
@@ -57,6 +61,19 @@ export default function FinanceDashboard() {
 
   const active = defaulted.filter((d) => d.is_active);
   const resolved = defaulted.filter((d) => !d.is_active);
+
+  // Search / sort / pagination (10 Aug 2026, app-wide table controls).
+  const flagSorts = [
+    { value: "newest", label: "Newest flags first", compare: byString<DefaultedSupplier>((d) => d.flagged_date, true) },
+    { value: "oldest", label: "Oldest flags first", compare: byString<DefaultedSupplier>((d) => d.flagged_date) },
+    { value: "supplier", label: "Supplier (A–Z)", compare: byString<DefaultedSupplier>((d) => d.supplier_name) },
+    { value: "amount", label: "Outstanding (high → low)", compare: byNumber<DefaultedSupplier>((d) => Number(d.outstanding_amount), true) },
+  ];
+  const flagTable = useClientTable(defaulted, {
+    searchHaystack: (d) => [d.supplier_name, d.default_reason, d.currency, d.is_active ? "active" : "resolved"],
+    sortOptions: flagSorts,
+    pageSize: 20,
+  });
 
   const {
     register,
@@ -223,6 +240,15 @@ export default function FinanceDashboard() {
                 <p className="text-sm mt-1">All suppliers are in good standing.</p>
               </div>
             ) : (
+              <div className="p-4 pb-0">
+              <TableControls
+                search={flagTable.search}
+                onSearch={flagTable.setSearch}
+                sort={flagTable.sort}
+                onSort={flagTable.setSort}
+                sortOptions={flagSorts}
+                placeholder="Search by supplier, reason or status…"
+              />
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -235,7 +261,7 @@ export default function FinanceDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {defaulted.map((d) => (
+                  {flagTable.visible.map((d) => (
                     <TableRow
                       key={d.id}
                       onClick={() => router.push(`/analytics/supplier/${d.supplier_id}`)}
@@ -275,6 +301,14 @@ export default function FinanceDashboard() {
                   ))}
                 </TableBody>
               </Table>
+              <Pagination
+                page={flagTable.page}
+                totalPages={flagTable.totalPages}
+                total={flagTable.total}
+                pageSize={flagTable.pageSize}
+                onChange={flagTable.setPage}
+              />
+              </div>
             )}
           </CardContent>
         </Card>

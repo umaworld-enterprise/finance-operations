@@ -316,7 +316,11 @@ export default function MerchandiserRequestDetail() {
         )}
 
         {/* Supplier default track record */}
-        <SupplierDefaultHistory supplierId={req.supplier.id} supplierName={req.supplier.name} />
+        <SupplierDefaultHistory
+          supplierId={req.supplier.id}
+          supplierName={req.supplier.name}
+          currentRequest={{ id: req.id, deposit_amount: Number(req.deposit_amount), currency: req.currency }}
+        />
 
         {fv.status_history !== false && req.status_history && req.status_history.length > 0 && (
           <Card>

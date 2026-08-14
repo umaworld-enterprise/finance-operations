@@ -315,7 +315,11 @@ export default function AccountsPaymentPage() {
         )}
 
         {/* Supplier default track record — context before paying */}
-        <SupplierDefaultHistory supplierId={req.supplier.id} supplierName={req.supplier.name} />
+        <SupplierDefaultHistory
+          supplierId={req.supplier.id}
+          supplierName={req.supplier.name}
+          currentRequest={{ id: req.id, deposit_amount: Number(req.deposit_amount), currency: req.currency }}
+        />
 
         {/* Advance Payment Tranches — Accounts pays tranche-by-tranche and
             uploads the TT copy against the specific tranche it paid. */}
