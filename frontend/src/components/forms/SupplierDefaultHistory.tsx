@@ -152,42 +152,10 @@ export function SupplierDefaultHistory({ supplierId, supplierName, currentReques
           </p>
         )}
 
-        {history.length > 0 && (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Flagged</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead className="text-right">Outstanding</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {history.map((f) => (
-                  <TableRow key={f.id}>
-                    <TableCell className="text-xs whitespace-nowrap">{formatDate(f.flagged_date)}</TableCell>
-                    <TableCell className="text-sm">{f.default_reason}</TableCell>
-                    <TableCell className="text-right tabular-nums text-sm">
-                      {formatCurrency(Number(f.outstanding_amount), f.currency)}
-                    </TableCell>
-                    <TableCell>
-                      {f.is_active ? (
-                        <span className="inline-flex items-center text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full whitespace-nowrap">
-                          Active
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full whitespace-nowrap">
-                          Resolved{f.resolved_date ? ` ${formatDate(f.resolved_date)}` : ""}
-                        </span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+        {/* 10 Aug refinement: the flag-history table (Flagged / Reason /
+            Outstanding / Status) was removed from this card — the red-flag
+            line above carries the warning; the full flag records live on
+            the Supplier Risk page for finance admins. */}
 
         {/* Whole live exposure (UAT Aug 2026, item 2; KPI table 10 Aug) */}
         {exposure && exposureRows > 0 && (

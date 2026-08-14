@@ -4,7 +4,6 @@
 // replacing the old single-shipment view. Shared by the HoM and Accounts
 // dashboards. Days Delayed is server-computed against today's date.
 
-import { useState } from "react";
 import Link from "next/link";
 import { Ship } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,10 +15,11 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { useShipments } from "@/hooks/useAnalytics";
+import { TableControls } from "@/components/ui/TableControls";
+import { byNumber, byString, useClientTable } from "@/hooks/useClientTable";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import type { ShipmentRow } from "@/services/analyticsService";
 import type { RequestStatus } from "@/types";
-
-const PAGE_SIZE = 25;
 
 function DelayCell({ days }: { days: number | null }) {
   if (days == null) return <span className="text-muted-foreground">—</span>;
@@ -31,12 +31,23 @@ function DelayCell({ days }: { days: number | null }) {
   );
 }
 
+const SHIPMENT_SORTS = [
+  { value: "delay", label: "Most delayed first", compare: byNumber<ShipmentRow>((s) => s.days_delayed ?? -1, true) },
+  { value: "etd", label: "Original ETD", compare: byString<ShipmentRow>((s) => s.estimated_etd ?? "") },
+  { value: "amount", label: "Amount (high → low)", compare: byNumber<ShipmentRow>((s) => Number(s.amount), true) },
+  { value: "supplier", label: "Supplier (A–Z)", compare: byString<ShipmentRow>((s) => s.supplier_name) },
+];
+
 export function ShipmentsTable({ linkBase }: { linkBase: "/hom" | "/accounts" }) {
   const { data: shipments = [], isLoading } = useShipments();
-  const [page, setPage] = useState(1);
-
-  const totalPages = Math.ceil(shipments.length / PAGE_SIZE);
-  const pageItems = shipments.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Search / sort / pagination (10 Aug 2026, app-wide table controls).
+  const table = useClientTable(shipments, {
+    searchHaystack: (s) => [
+      s.request_number, s.sunshine_invoice_number, s.supplier_name, s.current_status,
+    ],
+    sortOptions: SHIPMENT_SORTS,
+    pageSize: 25,
+  });
 
   return (
     <Card className="overflow-hidden">
@@ -65,6 +76,16 @@ export function ShipmentsTable({ linkBase }: { linkBase: "/hom" | "/accounts" })
           </div>
         ) : (
           <div className="overflow-x-auto">
+            <div className="px-4 pt-3">
+              <TableControls
+                search={table.search}
+                onSearch={table.setSearch}
+                sort={table.sort}
+                onSort={table.setSort}
+                sortOptions={SHIPMENT_SORTS}
+                placeholder="Search by request #, invoice #, supplier or status…"
+              />
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -78,7 +99,7 @@ export function ShipmentsTable({ linkBase }: { linkBase: "/hom" | "/accounts" })
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pageItems.map((s) => (
+                {table.visible.map((s) => (
                   <TableRow key={s.request_id}>
                     <TableCell>
                       <Link
@@ -106,14 +127,14 @@ export function ShipmentsTable({ linkBase }: { linkBase: "/hom" | "/accounts" })
                 ))}
               </TableBody>
             </Table>
-            {totalPages > 1 && (
+            {table.totalPages > 1 && (
               <div className="p-4 border-t border-border">
                 <Pagination
-                  page={page}
-                  totalPages={totalPages}
-                  total={shipments.length}
-                  pageSize={PAGE_SIZE}
-                  onChange={setPage}
+                  page={table.page}
+                  totalPages={table.totalPages}
+                  total={table.total}
+                  pageSize={table.pageSize}
+                  onChange={table.setPage}
                 />
               </div>
             )}
