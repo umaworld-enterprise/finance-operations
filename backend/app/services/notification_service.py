@@ -761,8 +761,10 @@ async def notify_request_rejected_by_accounts(request_id: UUID, reason: str) -> 
 
 async def notify_tranche_rejected(request_id: UUID, tranche_id: UUID, reason: str) -> None:
     """After Accounts/HoM reject a tranche — bell + push to the merchandiser
-    who raised the request, including the mandatory reason and a prompt to add
-    replacement tranches (Aug 2026 rejection workflow).
+    who raised the request (with a prompt to add replacement tranches) AND
+    to every active Head of Merchandiser (10 Aug 2026 follow-up: HoM hears
+    about BOTH rejection levels, tranche and whole-request), each audience
+    with the mandatory reason and its own deep link.
 
     Own session; failures logged and swallowed (BackgroundTasks contract).
     """
@@ -775,26 +777,49 @@ async def notify_tranche_rejected(request_id: UUID, tranche_id: UUID, reason: st
             tranche = await session.get(PaymentTranche, tranche_id)
             if request is None or tranche is None:
                 return
-            message = {
-                "title": "Tranche rejected",
-                "body": (
-                    f"{tranche.label} of {request.request_number} was rejected by the "
-                    f"Accounts team. Reason: {reason} — add a replacement tranche so "
-                    "the request total matches again."
-                ),
-                "url": f"/merchandiser/{request_id}",
-                "attachment_url": None,
-            }
             target = await _find_target_user(session, request)
-            if target is None:
+            if target is not None:
+                await _deliver_to_users(
+                    session, [target], TYPE_TRANCHE_REJECTED,
+                    {
+                        "title": "Tranche rejected",
+                        "body": (
+                            f"{tranche.label} of {request.request_number} was rejected by the "
+                            f"Accounts team. Reason: {reason} — add a replacement tranche so "
+                            "the request total matches again."
+                        ),
+                        "url": f"/merchandiser/{request_id}",
+                        "attachment_url": None,
+                    },
+                    request.id,
+                )
+            homs = [
+                u
+                for u in await _active_users_with_role(
+                    session, UserRole.HEAD_OF_MERCHANDISER
+                )
+                if target is None or u.id != target.id
+            ]
+            if homs:
+                await _deliver_to_users(
+                    session, homs, TYPE_TRANCHE_REJECTED,
+                    {
+                        "title": "Tranche rejected",
+                        "body": (
+                            f"{tranche.label} of {request.request_number} was rejected by the "
+                            f"Accounts team. Reason: {reason}. The merchandiser has been asked "
+                            "to add replacement tranches."
+                        ),
+                        "url": f"/hom/{request_id}",
+                        "attachment_url": None,
+                    },
+                    request.id,
+                )
+            if target is None and not homs:
                 logger.info(
-                    "No target user for tranche-rejected notification — skipping",
+                    "No recipients for tranche-rejected notification — skipping",
                     request_id=str(request_id),
                 )
-                return
-            await _deliver_to_users(
-                session, [target], TYPE_TRANCHE_REJECTED, message, request.id
-            )
     except Exception as exc:
         logger.error(
             "notify_tranche_rejected failed",

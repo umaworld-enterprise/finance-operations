@@ -25,6 +25,15 @@ import type { SupplierExposureRow } from "@/types";
 interface Props {
   supplierId: string | null | undefined;
   supplierName: string;
+  /** The request currently being viewed — its amount drives the
+   * "Potential Exposure after approving this request" KPI (10 Aug 2026):
+   * Existing Exposure excludes this file; Potential = Existing + this
+   * file's deposit. */
+  currentRequest?: {
+    id: string;
+    deposit_amount: number;
+    currency: string | null;
+  };
 }
 
 function ExposureRows({ rows, overdue }: { rows: SupplierExposureRow[]; overdue: boolean }) {
@@ -85,7 +94,7 @@ function ExposureSection({
   );
 }
 
-export function SupplierDefaultHistory({ supplierId, supplierName }: Props) {
+export function SupplierDefaultHistory({ supplierId, supplierName, currentRequest }: Props) {
   const { data: history = [] } = useSupplierDefaultHistory(supplierId ?? null);
   const { data: exposure } = useSupplierExposure(supplierId ?? null);
 
@@ -96,6 +105,30 @@ export function SupplierDefaultHistory({ supplierId, supplierName }: Props) {
   const active = history.find((f) => f.is_active);
   const hasGracedPassed = (exposure?.graced_etd_passed.length ?? 0) > 0;
 
+  // Exposure KPIs (10 Aug 2026), per currency:
+  //   Existing  = every open file (overdue + in process), EXCLUDING the
+  //               request currently being viewed;
+  //   Potential = Existing + this request's deposit (i.e. after approval).
+  const allExposure = [
+    ...(exposure?.graced_etd_passed ?? []),
+    ...(exposure?.graced_etd_pending ?? []),
+  ];
+  const existingByCurrency: Record<string, number> = {};
+  for (const row of allExposure) {
+    if (currentRequest && row.request_id === currentRequest.id) continue;
+    const key = row.currency ?? "—";
+    existingByCurrency[key] = (existingByCurrency[key] ?? 0) + Number(row.deposit_amount);
+  }
+  const potentialByCurrency: Record<string, number> = { ...existingByCurrency };
+  if (currentRequest) {
+    const key = currentRequest.currency ?? "—";
+    potentialByCurrency[key] =
+      (potentialByCurrency[key] ?? 0) + Number(currentRequest.deposit_amount);
+  }
+  const exposureCurrencies = Array.from(
+    new Set([...Object.keys(existingByCurrency), ...Object.keys(potentialByCurrency)]),
+  ).sort();
+
   return (
     <Card className={active || hasGracedPassed ? "border-amber-300" : undefined}>
       <CardContent className="p-5 md:p-6">
@@ -105,21 +138,18 @@ export function SupplierDefaultHistory({ supplierId, supplierName }: Props) {
           />
           Supplier Default History — {supplierName}
         </h2>
-        <p className="text-xs text-muted-foreground mb-3">
-          {active
-            ? "This supplier is CURRENTLY on the defaulted list. Review the record below before approving or paying."
-            : history.length > 0
+        {/* 10 Aug 2026: red-flag wording; the amber "Active flag" box was removed. */}
+        {active ? (
+          <p className="text-xs font-medium text-red-700 mb-3">
+            Red flag: this supplier has been listed under &ldquo;Default Advance
+            Payment List&rdquo;. Kindly review its history before making any decision.
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground mb-3">
+            {history.length > 0
               ? "This supplier has past default records (all resolved). Shown for context."
               : "No default flags — live exposure shown for context."}
-        </p>
-
-        {active && (
-          <div className="rounded-lg bg-amber-50 border border-amber-300 text-amber-800 p-3 text-sm mb-3">
-            <span className="font-semibold">Active flag:</span>{" "}
-            {active.default_reason} — outstanding{" "}
-            {formatCurrency(Number(active.outstanding_amount), active.currency)}
-            {" "}(flagged {formatDate(active.flagged_date)})
-          </div>
+          </p>
         )}
 
         {history.length > 0 && (
@@ -159,20 +189,53 @@ export function SupplierDefaultHistory({ supplierId, supplierName }: Props) {
           </div>
         )}
 
-        {/* Whole live exposure (UAT Aug 2026, item 2) */}
+        {/* Whole live exposure (UAT Aug 2026, item 2; KPI table 10 Aug) */}
         {exposure && exposureRows > 0 && (
           <div className="mt-5 pt-4 border-t border-border">
             <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <CalendarClock className="h-4 w-4 text-muted-foreground" />
               Live Exposure
             </h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Every open file with this supplier (goods not yet shipped).{" "}
-              Total:{" "}
-              {Object.entries(exposure.totals_by_currency)
-                .map(([cur, amt]) => formatCurrency(Number(amt), cur === "—" ? null : cur))
-                .join(" + ")}
-            </p>
+            {exposureCurrencies.length > 0 && (
+              <div className="overflow-x-auto mt-2">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-56" />
+                      {exposureCurrencies.map((cur) => (
+                        <TableHead key={cur} className="text-right">{cur}</TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell className="text-xs">
+                        <span className="font-medium text-foreground">Existing Exposure</span>{" "}
+                        <span className="text-muted-foreground">(Overdue payments + Payments in process)</span>
+                      </TableCell>
+                      {exposureCurrencies.map((cur) => (
+                        <TableCell key={cur} className="text-right tabular-nums text-sm">
+                          {formatCurrency(existingByCurrency[cur] ?? 0, cur === "—" ? null : cur)}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                    {currentRequest && (
+                      <TableRow>
+                        <TableCell className="text-xs">
+                          <span className="font-medium text-foreground">Potential Exposure</span>{" "}
+                          <span className="text-muted-foreground">after approving this request</span>
+                        </TableCell>
+                        {exposureCurrencies.map((cur) => (
+                          <TableCell key={cur} className="text-right tabular-nums text-sm font-semibold">
+                            {formatCurrency(potentialByCurrency[cur] ?? 0, cur === "—" ? null : cur)}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
             <ExposureSection
               title="Graced ETD passed"
               hint="The grace period has expired and goods have not shipped — defaulting behaviour."

@@ -4,8 +4,8 @@ import type { FileRemark, FileRemarkCategory, SplitTarget } from "@/types";
 export interface CreateFileRemarkPayload {
   deposit_request_id: string;
   category: FileRemarkCategory;
-  old_file_number?: string;
-  old_amount?: number;
+  // The old file reference and old amount are server-derived from the
+  // selected request — never sent by the client (10 Aug rework).
   new_file_number?: string;
   new_amount?: number;
   split_targets?: SplitTarget[];

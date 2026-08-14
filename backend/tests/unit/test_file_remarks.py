@@ -47,12 +47,12 @@ async def _setup(db_session):
 
 
 def _payload(request, category="invoice_amount_change", **extra):
-    """4 Aug rework: two categories only, remark OPTIONAL. The old amount is
-    never sent — the server derives it from the file's deposit amount."""
+    """4 Aug rework: two categories only, remark OPTIONAL. Neither the old
+    amount nor the old file are sent — the server derives both from the
+    selected file (10 Aug rework)."""
     from decimal import Decimal
 
     defaults: dict = {
-        "old_file_number": "INV-OLD-1",
         "new_file_number": "INV-NEW-1", "new_amount": Decimal("1000.00"),
     }
     if category == "invoice_split":
@@ -74,25 +74,25 @@ def _payload(request, category="invoice_amount_change", **extra):
 
 
 def test_amount_change_requires_files_and_new_amount():
-    """The OLD amount is server-derived (pre-populated, disabled in the UI)
-    — only old file, new file and the new amount come from the client."""
+    """The OLD file and OLD amount are both server-derived (10 Aug rework)
+    — only the new file and the new amount come from the client."""
     from decimal import Decimal
     from uuid import uuid4
 
     with pytest.raises(PydanticValidationError, match="New file number"):
         FileRemarkCreate(
             deposit_request_id=uuid4(), category="invoice_amount_change",
-            old_file_number="O-1", new_amount=Decimal("10"),
+            new_amount=Decimal("10"),
         )
     with pytest.raises(PydanticValidationError, match="New file amount"):
         FileRemarkCreate(
             deposit_request_id=uuid4(), category="invoice_amount_change",
-            old_file_number="O-1", new_file_number="N-1",
+            new_file_number="N-1",
         )
-    # No old_amount needed — valid without it.
+    # No old_amount or old_file needed — valid without them.
     FileRemarkCreate(
         deposit_request_id=uuid4(), category="invoice_amount_change",
-        old_file_number="O-1", new_file_number="N-1", new_amount=Decimal("10"),
+        new_file_number="N-1", new_amount=Decimal("10"),
     )
 
 
@@ -122,7 +122,9 @@ async def test_merchandiser_raises_remark_on_own_locked_request(db_session):
     svc = FileRemarkService(db_session)
     remark = await svc.create(_payload(request), merch.id, UserRole.MERCHANDISER)
     assert remark.status == "open"
-    assert remark.old_file_number == "INV-OLD-1"
+    # Parent file reference is server-derived — the factory request carries
+    # no invoice numbers, so it falls back to the request number.
+    assert remark.old_file_number == request.request_number
     assert remark.new_file_number == "INV-NEW-1"
     # Server-derived from the file's deposit amount (factory default 1000).
     assert float(remark.old_amount) == 1000.0
@@ -303,7 +305,7 @@ async def test_raised_fans_out_to_accounts(db_session, engine, monkeypatch):
     body = rows[0].body
     assert "Invoice amount changes" in body
     assert request.request_number in body
-    assert "INV-OLD-1" in body and "INV-NEW-1" in body
+    assert request.request_number in body and "INV-NEW-1" in body
     assert "1000.0" in body  # amounts travel in the notification
 
 

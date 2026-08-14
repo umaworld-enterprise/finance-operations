@@ -24,6 +24,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { Pagination } from "@/components/ui/Pagination";
+import { TableControls } from "@/components/ui/TableControls";
+import { byString, useClientTable } from "@/hooks/useClientTable";
 import { useAuth } from "@/hooks/useAuth";
 import { useRequests } from "@/hooks/useRequests";
 import {
@@ -109,11 +112,20 @@ function DecideDialog({
   );
 }
 
-// Structured details cell — split targets or old→new amounts.
+// Structured details cell — split targets or old→new amounts. Splits show
+// the PARENT file first (10 Aug rework: "from which file to which files") —
+// older rows without a stored parent fall back to the request number.
 function RemarkDetails({ r }: { r: FileRemark }) {
   if (r.category === "invoice_split" && r.split_targets?.length) {
+    const parent = r.old_file_number ?? r.request_number ?? "—";
     return (
       <div className="text-xs text-muted-foreground space-y-0.5">
+        <p className="font-medium text-foreground">
+          From {parent}
+          {r.old_amount != null
+            ? ` (${Number(r.old_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })})`
+            : ""}
+        </p>
         {r.split_targets.map((t, i) => (
           <p key={`${t.file_number}-${i}`}>
             → {t.file_number} · {Number(t.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
@@ -153,7 +165,6 @@ export default function FileRemarksPage() {
   const [category, setCategory] = useState<FileRemarkCategory>("invoice_split");
   const [requestId, setRequestId] = useState("");
   const [splitRows, setSplitRows] = useState<SplitRow[]>([{ file_number: "", amount: "" }]);
-  const [oldFile, setOldFile] = useState("");
   const [newFile, setNewFile] = useState("");
   const [newAmount, setNewAmount] = useState("");
   const [remarkText, setRemarkText] = useState("");
@@ -161,6 +172,24 @@ export default function FileRemarksPage() {
   const [decision, setDecision] = useState<"approved" | "rejected">("approved");
 
   const openRemarks = remarks.filter((r) => r.status === "open");
+
+  // Search / sort / pagination (10 Aug 2026, app-wide table controls).
+  const remarkHaystack = (r: FileRemark) => [
+    r.request_number, CATEGORY_LABELS[r.category], r.old_file_number,
+    r.new_file_number, r.created_by_name, r.remark, r.status,
+    ...(r.split_targets?.map((t) => t.file_number) ?? []),
+  ];
+  const remarkSorts = [
+    { value: "newest", label: "Newest first", compare: byString<FileRemark>((r) => r.created_at, true) },
+    { value: "oldest", label: "Oldest first", compare: byString<FileRemark>((r) => r.created_at) },
+    { value: "request", label: "Request #", compare: byString<FileRemark>((r) => r.request_number ?? "") },
+  ];
+  const openTable = useClientTable(openRemarks, {
+    searchHaystack: remarkHaystack, sortOptions: remarkSorts, pageSize: 20,
+  });
+  const historyTable = useClientTable(remarks, {
+    searchHaystack: remarkHaystack, sortOptions: remarkSorts, pageSize: 20,
+  });
 
   // The old amount pre-populates from the selected file's deposit amount and
   // is NOT editable (4 Aug follow-up) — the server derives it independently.
@@ -179,14 +208,13 @@ export default function FileRemarksPage() {
     splitRows.every((row) => row.file_number.trim() && Number(row.amount) > 0) &&
     !splitOverCeiling;
   const amountChangeValid =
-    Boolean(oldFile.trim() && newFile.trim() && Number(newAmount) > 0) && !newAmountOverCeiling;
+    Boolean(newFile.trim() && Number(newAmount) > 0) && !newAmountOverCeiling;
   const canSubmit =
     !!requestId && (category === "invoice_split" ? splitRowsValid : amountChangeValid);
 
   const resetForm = () => {
     setRequestId("");
     setSplitRows([{ file_number: "", amount: "" }]);
-    setOldFile("");
     setNewFile("");
     setNewAmount("");
     setRemarkText("");
@@ -208,7 +236,8 @@ export default function FileRemarksPage() {
               })),
             }
           : {
-              old_file_number: oldFile.trim(),
+              // The old file reference is server-derived from the selected
+              // request (10 Aug rework) — nothing to type.
               new_file_number: newFile.trim(),
               new_amount: Number(newAmount),
             }),
@@ -380,18 +409,8 @@ export default function FileRemarksPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="fr-old-file">
-                      Old file number<span className="ml-0.5" aria-hidden="true">*</span>
-                    </Label>
-                    <input
-                      id="fr-old-file"
-                      type="text"
-                      value={oldFile}
-                      onChange={(e) => setOldFile(e.target.value)}
-                      className={`mt-1 ${inputCls}`}
-                    />
-                  </div>
+                  {/* The old file reference is the selected file itself —
+                      server-derived, nothing to type (10 Aug rework). */}
                   <div>
                     <Label htmlFor="fr-old-amount">Old file amount</Label>
                     <input
@@ -484,6 +503,14 @@ export default function FileRemarksPage() {
                 />
               ) : (
                 <div className="overflow-x-auto">
+                  <TableControls
+                    search={openTable.search}
+                    onSearch={openTable.setSearch}
+                    sort={openTable.sort}
+                    onSort={openTable.setSort}
+                    sortOptions={remarkSorts}
+                    placeholder="Search by request #, file no., category or raiser…"
+                  />
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -496,7 +523,7 @@ export default function FileRemarksPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {openRemarks.map((r) => (
+                      {openTable.visible.map((r) => (
                         <TableRow key={r.id}>
                           <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                             {formatDate(r.created_at)}
@@ -539,6 +566,13 @@ export default function FileRemarksPage() {
                       ))}
                     </TableBody>
                   </Table>
+                  <Pagination
+                    page={openTable.page}
+                    totalPages={openTable.totalPages}
+                    total={openTable.total}
+                    pageSize={openTable.pageSize}
+                    onChange={openTable.setPage}
+                  />
                 </div>
               )}
             </CardContent>
@@ -559,6 +593,14 @@ export default function FileRemarksPage() {
               />
             ) : (
               <div className="overflow-x-auto">
+                <TableControls
+                  search={historyTable.search}
+                  onSearch={historyTable.setSearch}
+                  sort={historyTable.sort}
+                  onSort={historyTable.setSort}
+                  sortOptions={remarkSorts}
+                  placeholder="Search by request #, file no., category or status…"
+                />
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -571,7 +613,7 @@ export default function FileRemarksPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {remarks.map((r) => (
+                    {historyTable.visible.map((r) => (
                       <TableRow key={r.id}>
                         <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                           {formatDate(r.created_at)}
@@ -598,6 +640,13 @@ export default function FileRemarksPage() {
                     ))}
                   </TableBody>
                 </Table>
+                <Pagination
+                  page={historyTable.page}
+                  totalPages={historyTable.totalPages}
+                  total={historyTable.total}
+                  pageSize={historyTable.pageSize}
+                  onChange={historyTable.setPage}
+                />
               </div>
             )}
           </CardContent>

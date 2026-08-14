@@ -19,6 +19,10 @@ import {
   useUpdatePaymentTerm,
   useDeletePaymentTerm,
 } from "@/hooks/useMasters";
+import { Pagination } from "@/components/ui/Pagination";
+import { TableControls } from "@/components/ui/TableControls";
+import { byString, useClientTable } from "@/hooks/useClientTable";
+import type { PaymentTerm } from "@/types";
 
 export default function PaymentTermsAdminPage() {
   const { data: terms = [], isLoading } = useAllPaymentTerms();
@@ -29,6 +33,17 @@ export default function PaymentTermsAdminPage() {
   const [newLabel, setNewLabel] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState("");
+
+  // Search / sort / pagination (10 Aug 2026, app-wide table controls).
+  const termSorts = [
+    { value: "label", label: "Label (A–Z)", compare: byString<PaymentTerm>((t) => t.label) },
+    { value: "status", label: "Active first", compare: (a: PaymentTerm, b: PaymentTerm) => Number(b.is_active) - Number(a.is_active) },
+  ];
+  const termTable = useClientTable(terms, {
+    searchHaystack: (t) => [t.label, t.is_active ? "active" : "inactive"],
+    sortOptions: termSorts,
+    pageSize: 20,
+  });
 
   async function handleCreate() {
     const label = newLabel.trim();
@@ -122,7 +137,15 @@ export default function PaymentTermsAdminPage() {
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
               ) : (
-                <div className="rounded-md border">
+                <div className="rounded-md border p-3">
+                  <TableControls
+                    search={termTable.search}
+                    onSearch={termTable.setSearch}
+                    sort={termTable.sort}
+                    onSort={termTable.setSort}
+                    sortOptions={termSorts}
+                    placeholder="Search payment terms…"
+                  />
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -133,16 +156,18 @@ export default function PaymentTermsAdminPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {terms.length === 0 && (
+                      {termTable.visible.length === 0 && (
                         <TableRow>
                           <TableCell colSpan={4} className="text-center py-8 text-muted-foreground text-sm">
-                            No payment terms yet. Add one above.
+                            {terms.length === 0 ? "No payment terms yet. Add one above." : "No terms match the search."}
                           </TableCell>
                         </TableRow>
                       )}
-                      {terms.map((term, i) => (
+                      {termTable.visible.map((term, i) => (
                         <TableRow key={term.id} className={!term.is_active ? "opacity-50" : ""}>
-                          <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
+                          <TableCell className="text-muted-foreground text-xs">
+                            {(termTable.page - 1) * termTable.pageSize + i + 1}
+                          </TableCell>
                           <TableCell>
                             {editingId === term.id ? (
                               <div className="flex gap-2 items-center">
@@ -206,6 +231,13 @@ export default function PaymentTermsAdminPage() {
                       ))}
                     </TableBody>
                   </Table>
+                  <Pagination
+                    page={termTable.page}
+                    totalPages={termTable.totalPages}
+                    total={termTable.total}
+                    pageSize={termTable.pageSize}
+                    onChange={termTable.setPage}
+                  />
                 </div>
               )}
 

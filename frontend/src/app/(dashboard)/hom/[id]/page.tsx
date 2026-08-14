@@ -193,7 +193,11 @@ export default function HomRequestDetail() {
         )}
 
         {/* Supplier default track record — decisive context for approval */}
-        <SupplierDefaultHistory supplierId={req.supplier.id} supplierName={req.supplier.name} />
+        <SupplierDefaultHistory
+          supplierId={req.supplier.id}
+          supplierName={req.supplier.name}
+          currentRequest={{ id: req.id, deposit_amount: Number(req.deposit_amount), currency: req.currency }}
+        />
 
         <RequestAuditTrail requestId={id} />
 

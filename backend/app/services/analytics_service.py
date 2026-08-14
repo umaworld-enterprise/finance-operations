@@ -70,37 +70,53 @@ async def save_analytics_permissions(
     )
 
 
+# head_of_merchandiser added 10 Aug 2026 (UAT follow-up): the role was
+# missing entirely, and unknown roles resolve to False — so HOM saw NO gated
+# field (not even the deposit amount they approve). Defaults mirror
+# accounts_team: HOM approves what Accounts pay.
 FIELD_VISIBILITY_DEFAULTS: dict[str, dict[str, bool]] = {
-    "exchange_rate":                 {"merchandiser": False, "accounts_team": False, "finance_admin": True},
-    "deposit_amount":                {"merchandiser": True,  "accounts_team": True,  "finance_admin": True},
-    "deposit_percentage":            {"merchandiser": True,  "accounts_team": True,  "finance_admin": True},
-    "total_supplier_invoice_amount": {"merchandiser": True,  "accounts_team": True,  "finance_admin": True},
-    "payment_date":                  {"merchandiser": False, "accounts_team": True,  "finance_admin": True},
-    "bank":                          {"merchandiser": False, "accounts_team": True,  "finance_admin": True},
-    "payment_reference_number":      {"merchandiser": False, "accounts_team": True,  "finance_admin": True},
-    "ship_date":                     {"merchandiser": False, "accounts_team": True,  "finance_admin": True},
-    "accounts_remarks":              {"merchandiser": False, "accounts_team": True,  "finance_admin": True},
-    "grace_etd":                     {"merchandiser": False, "accounts_team": True,  "finance_admin": True},
-    "etd_grace_overdue_days":        {"merchandiser": False, "accounts_team": True,  "finance_admin": True},
-    "actual_etd_overdue_days":       {"merchandiser": False, "accounts_team": True,  "finance_admin": True},
-    "payment_to_ship_days":          {"merchandiser": False, "accounts_team": True,  "finance_admin": True},
-    "payment_to_request_days":       {"merchandiser": False, "accounts_team": False, "finance_admin": True},
-    "cost_of_fund":                  {"merchandiser": False, "accounts_team": False, "finance_admin": True},
-    "default_status":                {"merchandiser": False, "accounts_team": True,  "finance_admin": True},
-    "creator_info":                  {"merchandiser": True,  "accounts_team": True,  "finance_admin": True},
-    "status_history":                {"merchandiser": True,  "accounts_team": True,  "finance_admin": True},
-    "accounts_timestamp":            {"merchandiser": False, "accounts_team": True,  "finance_admin": True},
+    "exchange_rate":                 {"merchandiser": False, "accounts_team": False, "finance_admin": True, "head_of_merchandiser": False},
+    "deposit_amount":                {"merchandiser": True,  "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "deposit_percentage":            {"merchandiser": True,  "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "total_supplier_invoice_amount": {"merchandiser": True,  "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "payment_date":                  {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "bank":                          {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "payment_reference_number":      {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "ship_date":                     {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "accounts_remarks":              {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "grace_etd":                     {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "etd_grace_overdue_days":        {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "actual_etd_overdue_days":       {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "payment_to_ship_days":          {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "payment_to_request_days":       {"merchandiser": False, "accounts_team": False, "finance_admin": True, "head_of_merchandiser": False},
+    "cost_of_fund":                  {"merchandiser": False, "accounts_team": False, "finance_admin": True, "head_of_merchandiser": False},
+    "default_status":                {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "creator_info":                  {"merchandiser": True,  "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "status_history":                {"merchandiser": True,  "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "accounts_timestamp":            {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
 }
 
 
 async def get_field_visibility(session: AsyncSession) -> dict[str, dict[str, bool]]:
+    """Stored config merged OVER the defaults — a config saved before a new
+    role (or field) existed inherits the defaults for the missing keys
+    instead of silently resolving them to False."""
     row = await session.execute(
         text("SELECT config_value FROM system_config WHERE config_key = 'field_visibility'")
     )
     val = row.scalar_one_or_none()
     if val:
         try:
-            return json.loads(val)
+            stored = json.loads(val)
+            merged: dict[str, dict[str, bool]] = {
+                field: {**roles} for field, roles in FIELD_VISIBILITY_DEFAULTS.items()
+            }
+            for field, roles in stored.items():
+                if not isinstance(roles, dict):
+                    continue
+                merged.setdefault(field, {})
+                merged[field].update(roles)
+            return merged
         except (json.JSONDecodeError, TypeError):
             pass
     return FIELD_VISIBILITY_DEFAULTS
@@ -631,7 +647,9 @@ class AnalyticsService:
                 week_end = week_start + timedelta(days=6)
                 return (
                     week_start.isoformat(),
-                    f"{week_start.strftime('%d/%m/%Y')} to {week_end.strftime('%d/%m/%Y')}",
+                    # 10-Aug-2026 style (10 Aug UAT follow-up) — reads as a
+                    # week range at a glance, no day/month ambiguity.
+                    f"{week_start.strftime('%d-%b-%Y')} to {week_end.strftime('%d-%b-%Y')}",
                 )
             if group_by == "merchandiser":
                 name = r.merchandiser_name or r.submitter_email or "Unassigned"
@@ -723,7 +741,7 @@ class AnalyticsService:
                 week_start = r.estimated_etd - timedelta(days=r.estimated_etd.weekday())
                 week_end = week_start + timedelta(days=6)
                 key: str | None = week_start.isoformat()
-                label = f"{week_start.strftime('%d/%m/%Y')} to {week_end.strftime('%d/%m/%Y')}"
+                label = f"{week_start.strftime('%d-%b-%Y')} to {week_end.strftime('%d-%b-%Y')}"
             else:
                 key, label = None, "No ETD recorded"
             g = groups.setdefault(

@@ -33,6 +33,23 @@ export function todayLocalISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Amount still payable on a request (10 Aug 2026): the sum of its UNPAID
+// tranches — paid tranches are out the door, rejected ones don't count.
+// Legacy rows without tranches fall back to the full deposit until processed.
+export function amountPayable(req: {
+  deposit_amount: number;
+  current_status: string;
+  tranches?: { status: string; amount: number }[] | null;
+}): number {
+  const tranches = req.tranches ?? [];
+  if (tranches.length === 0) {
+    return req.current_status === "payment_processed" ? 0 : Number(req.deposit_amount);
+  }
+  return tranches
+    .filter((t) => t.status === "unpaid")
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+}
+
 // User-facing label for a currency code (RMB is the name finance uses for CNY).
 export function currencyDisplayLabel(c: string | null | undefined): string {
   if (!c) return "—";

@@ -53,6 +53,7 @@ fan-outs go to every **active** user of that role.
 | Event | Recipient(s) | Type | Trigger point |
 |---|---|---|---|
 | Request rejected by Accounts (terminal) | Raising merchandiser AND all active HoMs (reason included; per-audience deep links `/merchandiser/{id}` vs `/hom/{id}`) | `request_rejected` | `POST /{id}/reject` |
+| Tranche rejected (10 Aug: HoM added) | Raising merchandiser (replacement prompt) AND all active HoMs (reason included; per-audience deep links) | `tranche_rejected` | `POST /{id}/tranches/{tid}/reject` |
 
 Routing rule for `status_changed`: the actor's counterpart is notified —
 merchandiser actions fan out to Accounts (deep-link `/accounts/{id}`),

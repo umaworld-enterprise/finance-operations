@@ -101,8 +101,8 @@ async def test_group_by_week_uses_request_created_date(db_session):
     rows = await svc.get_outstanding_tracker("week")
     # Newest week first, with explicit Monday–Sunday boundaries.
     assert [r["group"] for r in rows] == [
-        "13/07/2026 to 19/07/2026",
-        "06/07/2026 to 12/07/2026",
+        "13-Jul-2026 to 19-Jul-2026",
+        "06-Jul-2026 to 12-Jul-2026",
     ]
     assert rows[0]["outstanding"] == {"CNY": 1000.0}
     assert rows[1]["outstanding"] == {"USD": 600.0}
