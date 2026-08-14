@@ -227,6 +227,9 @@ export interface FileRemark {
   resolved_at: string | null;
   response_note: string | null;
   request_number: string | null;
+  /** The parent file's current sunshine invoice number — preferred for the
+   * "From {parent}" display. */
+  sunshine_invoice_number: string | null;
   supplier_name: string | null;
   created_by_name: string | null;
   resolved_by_name: string | null;

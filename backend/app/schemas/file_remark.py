@@ -83,6 +83,10 @@ class FileRemarkResponse(OrmBase):
     response_note: str | None
     # Context — filled by the service from joined rows.
     request_number: str | None = None
+    # The parent file's CURRENT sunshine invoice number — preferred for the
+    # "From {parent}" display (10 Aug: rows created before the derived
+    # parent, or whose invoice number was edited later, still show it).
+    sunshine_invoice_number: str | None = None
     supplier_name: str | None = None
     created_by_name: str | None = None
     resolved_by_name: str | None = None

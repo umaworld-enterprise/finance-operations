@@ -117,7 +117,9 @@ function DecideDialog({
 // older rows without a stored parent fall back to the request number.
 function RemarkDetails({ r }: { r: FileRemark }) {
   if (r.category === "invoice_split" && r.split_targets?.length) {
-    const parent = r.old_file_number ?? r.request_number ?? "—";
+    // Prefer the parent's CURRENT sunshine invoice number — falls back to
+    // the stored parent reference, then the request number (legacy rows).
+    const parent = r.sunshine_invoice_number ?? r.old_file_number ?? r.request_number ?? "—";
     return (
       <div className="text-xs text-muted-foreground space-y-0.5">
         <p className="font-medium text-foreground">
