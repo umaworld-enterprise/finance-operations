@@ -229,6 +229,7 @@ class FileRemarkService:
             resp = FileRemarkResponse.model_validate(r)
             if r.deposit_request:
                 resp.request_number = r.deposit_request.request_number
+                resp.sunshine_invoice_number = r.deposit_request.sunshine_invoice_number
                 supplier = await self._session.get(Supplier, r.deposit_request.supplier_id)
                 resp.supplier_name = supplier.name if supplier else None
             resp.created_by_name = r.creator.full_name if r.creator else None

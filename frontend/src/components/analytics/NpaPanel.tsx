@@ -1,25 +1,49 @@
 "use client";
 
-import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Pagination } from "@/components/ui/Pagination";
+import { TableControls } from "@/components/ui/TableControls";
+import { byNumber, byString, useClientTable } from "@/hooks/useClientTable";
 import { useNpa } from "@/hooks/useAnalytics";
 import { formatDate } from "@/lib/utils";
 import { AlertTriangle, Bot, User, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import type { FlaggedSupplierNpa, MerchandiserNpa } from "@/types";
 
-const SUPPLIER_PAGE_SIZE = 10;
-const MERCH_PAGE_SIZE = 10;
+const SUPPLIER_SORTS = [
+  { value: "overdue", label: "Most overdue first", compare: byNumber<FlaggedSupplierNpa>((s) => s.max_overdue_days, true) },
+  { value: "requests", label: "Overdue requests (high → low)", compare: byNumber<FlaggedSupplierNpa>((s) => s.overdue_request_count, true) },
+  { value: "supplier", label: "Supplier (A–Z)", compare: byString<FlaggedSupplierNpa>((s) => s.supplier_name) },
+];
+
+const MERCH_SORTS = [
+  { value: "overdue", label: "Most overdue first", compare: byNumber<MerchandiserNpa>((m) => m.overdue_count, true) },
+  { value: "requests", label: "Total requests (high → low)", compare: byNumber<MerchandiserNpa>((m) => m.total_requests, true) },
+  { value: "name", label: "Name (A–Z)", compare: byString<MerchandiserNpa>((m) => m.name) },
+];
 
 export function NpaPanel() {
   const { data, isLoading } = useNpa();
-  const [supplierPage, setSupplierPage] = useState(1);
-  const [merchPage, setMerchPage] = useState(1);
+
+  const flaggedSuppliers = data?.flagged_suppliers ?? [];
+  const merchandisers = data?.merchandiser_performance ?? [];
+
+  // Search / sort / pagination (10 Aug 2026, app-wide table controls).
+  const supplierTable = useClientTable(flaggedSuppliers, {
+    searchHaystack: (s) => [s.supplier_name, s.default_reason],
+    sortOptions: SUPPLIER_SORTS,
+    pageSize: 10,
+  });
+  const merchTable = useClientTable(merchandisers, {
+    searchHaystack: (m) => [m.name, m.email],
+    sortOptions: MERCH_SORTS,
+    pageSize: 10,
+  });
 
   if (isLoading) {
     return (
@@ -29,21 +53,6 @@ export function NpaPanel() {
       </div>
     );
   }
-
-  const flaggedSuppliers = data?.flagged_suppliers ?? [];
-  const merchandisers = data?.merchandiser_performance ?? [];
-
-  const supplierTotalPages = Math.ceil(flaggedSuppliers.length / SUPPLIER_PAGE_SIZE);
-  const supplierItems = flaggedSuppliers.slice(
-    (supplierPage - 1) * SUPPLIER_PAGE_SIZE,
-    supplierPage * SUPPLIER_PAGE_SIZE,
-  );
-
-  const merchTotalPages = Math.ceil(merchandisers.length / MERCH_PAGE_SIZE);
-  const merchItems = merchandisers.slice(
-    (merchPage - 1) * MERCH_PAGE_SIZE,
-    merchPage * MERCH_PAGE_SIZE,
-  );
 
   return (
     <div className="space-y-6">
@@ -66,6 +75,16 @@ export function NpaPanel() {
             </div>
           ) : (
             <>
+              <div className="px-4 pt-3">
+                <TableControls
+                  search={supplierTable.search}
+                  onSearch={supplierTable.setSearch}
+                  sort={supplierTable.sort}
+                  onSort={supplierTable.setSort}
+                  sortOptions={SUPPLIER_SORTS}
+                  placeholder="Search by supplier or reason…"
+                />
+              </div>
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -80,7 +99,7 @@ export function NpaPanel() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {supplierItems.map((s) => (
+                    {supplierTable.visible.map((s) => (
                       <TableRow key={s.supplier_id} className="hover:bg-muted/50 cursor-pointer">
                         <TableCell className="font-medium">{s.supplier_name}</TableCell>
                         <TableCell className="text-right font-semibold text-destructive">
@@ -128,14 +147,14 @@ export function NpaPanel() {
                   </TableBody>
                 </Table>
               </div>
-              {supplierTotalPages > 1 && (
+              {supplierTable.totalPages > 1 && (
                 <div className="p-4 border-t border-border">
                   <Pagination
-                    page={supplierPage}
-                    totalPages={supplierTotalPages}
-                    total={flaggedSuppliers.length}
-                    pageSize={SUPPLIER_PAGE_SIZE}
-                    onChange={setSupplierPage}
+                    page={supplierTable.page}
+                    totalPages={supplierTable.totalPages}
+                    total={supplierTable.total}
+                    pageSize={supplierTable.pageSize}
+                    onChange={supplierTable.setPage}
                   />
                 </div>
               )}
@@ -163,6 +182,16 @@ export function NpaPanel() {
             </div>
           ) : (
             <>
+              <div className="px-4 pt-3">
+                <TableControls
+                  search={merchTable.search}
+                  onSearch={merchTable.setSearch}
+                  sort={merchTable.sort}
+                  onSort={merchTable.setSort}
+                  sortOptions={MERCH_SORTS}
+                  placeholder="Search by name or email…"
+                />
+              </div>
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -175,7 +204,7 @@ export function NpaPanel() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {merchItems.map((m) => (
+                    {merchTable.visible.map((m) => (
                       <TableRow key={m.merchandiser_id} className="hover:bg-muted/50 cursor-pointer">
                         <TableCell>
                           <div>
@@ -205,14 +234,14 @@ export function NpaPanel() {
                   </TableBody>
                 </Table>
               </div>
-              {merchTotalPages > 1 && (
+              {merchTable.totalPages > 1 && (
                 <div className="p-4 border-t border-border">
                   <Pagination
-                    page={merchPage}
-                    totalPages={merchTotalPages}
-                    total={merchandisers.length}
-                    pageSize={MERCH_PAGE_SIZE}
-                    onChange={setMerchPage}
+                    page={merchTable.page}
+                    totalPages={merchTable.totalPages}
+                    total={merchTable.total}
+                    pageSize={merchTable.pageSize}
+                    onChange={merchTable.setPage}
                   />
                 </div>
               )}

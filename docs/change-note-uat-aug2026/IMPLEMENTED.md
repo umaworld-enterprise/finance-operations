@@ -570,6 +570,21 @@ no controls. Frontend-only; `tsc` clean.
 
 257 backend tests green; `tsc` clean.
 
+## Follow-up (10 Aug 2026) — NPA table controls + split parent shows invoice no.
+
+1. **Non-Performing Assets** panel: both tables gained search + sort —
+   Overdue Suppliers (search supplier/reason; sort by max overdue, overdue
+   requests, supplier) and Merchandiser Performance (search name/email;
+   sort by overdue count, total requests, name). Pagination they had.
+2. **Split parent = sunshine invoice number**: `FileRemarkResponse` now
+   carries the parent request's CURRENT `sunshine_invoice_number`, and the
+   "From {parent}" line prefers it over the stored parent reference (which
+   itself falls back to the request number only for legacy rows or files
+   without an invoice number). Covers remarks created before the derived
+   parent existed and invoice numbers edited after the remark was raised.
+
+Backend tests green; `tsc` clean.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
