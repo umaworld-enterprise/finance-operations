@@ -8,6 +8,7 @@ import { Pagination } from "@/components/ui/Pagination";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SearchInput } from "@/components/ui/SearchInput";
 import { useMarkNotificationsRead, useNotificationsPaginated } from "@/hooks/useNotifications";
 import { cn, timeAgo } from "@/lib/utils";
 import type { AppNotification } from "@/types";
@@ -16,6 +17,7 @@ const PAGE_SIZE = 20;
 
 export default function NotificationsPage() {
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
   const router = useRouter();
   const { data, isLoading } = useNotificationsPaginated(page, PAGE_SIZE);
   const markRead = useMarkNotificationsRead();
@@ -23,6 +25,12 @@ export default function NotificationsPage() {
   const unread = data?.unread_count ?? 0;
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // Client-side filter over the loaded page (the feed is server-paginated).
+  const term = search.trim().toLowerCase();
+  const visibleItems = (data?.items ?? []).filter(
+    (n) => !term || [n.title, n.body].some((v) => v?.toLowerCase().includes(term)),
+  );
 
   const handleRowClick = useCallback(
     (n: AppNotification) => {
@@ -53,7 +61,13 @@ export default function NotificationsPage() {
       />
 
       <main className="flex-1 overflow-y-auto p-4 sm:p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-3xl mx-auto space-y-3">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search notifications on this page…"
+            className="sm:max-w-md"
+          />
           <Card>
             <CardContent className="p-0">
               {isLoading ? (
@@ -64,9 +78,15 @@ export default function NotificationsPage() {
                   title="No notifications"
                   description="Payment updates for your requests will appear here."
                 />
+              ) : visibleItems.length === 0 ? (
+                <EmptyState
+                  icon={BellOff}
+                  title="No matches on this page"
+                  description="Try another search term or move to the next page."
+                />
               ) : (
                 <ul>
-                  {data.items.map((n) => (
+                  {visibleItems.map((n) => (
                     <li key={n.id}>
                       <button
                         type="button"

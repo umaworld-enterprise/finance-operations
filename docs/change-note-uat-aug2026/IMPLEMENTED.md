@@ -548,6 +548,28 @@ no controls. Frontend-only; `tsc` clean.
 257 backend tests green (file-remark + tracker label tests updated);
 `tsc` clean; no migration.
 
+## Follow-up (10 Aug 2026) — refinements: flag table removed + remaining table controls
+
+1. **Supplier Default History card**: the flag-history table
+   (Flagged / Reason / Outstanding / Status) is removed — the card now
+   carries only the red-flag line and the Live Exposure section. Full flag
+   records remain on the Supplier Risk page.
+2. **Search/sort sweep completed** — remaining gaps closed:
+   - Analytical Snapshot (`ShipmentsTable`, accounts + HoM dashboards):
+     search (request #, invoice #, supplier, status) + sort (most delayed /
+     ETD / amount / supplier) on top of its pagination.
+   - Notifications: search box filtering the loaded page (feed stays
+     server-paginated).
+   - Merchandiser "All Updates" activity: search + sort + pagination
+     (25/page).
+   - Audit Logs: free-text search over the loaded page (entity, field,
+     values, user, IP) alongside the existing server filters + pagination.
+   Note: controls added in the previous sweep render ABOVE each table (and
+   once above the tabs on the queue pages) — a hard refresh/redeploy is
+   needed for the PWA to pick up the new bundle.
+
+257 backend tests green; `tsc` clean.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

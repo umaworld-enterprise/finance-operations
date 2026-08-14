@@ -7,10 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMyActivity } from "@/hooks/useRequests";
+import { TableControls } from "@/components/ui/TableControls";
+import { Pagination } from "@/components/ui/Pagination";
+import { byString, useClientTable } from "@/hooks/useClientTable";
 import { formatDate, timeAgo } from "@/lib/utils";
 import { ArrowLeft, Bell } from "lucide-react";
 import Link from "next/link";
-import type { RequestStatus } from "@/types";
+import type { ActivityItem, RequestStatus } from "@/types";
 
 const STATUS_BORDER: Record<RequestStatus, string> = {
   pending_hom_approval: "border-l-purple-500",
@@ -25,8 +28,20 @@ const STATUS_BORDER: Record<RequestStatus, string> = {
   reopened: "border-l-blue-500",
 };
 
+const ACTIVITY_SORTS = [
+  { value: "newest", label: "Newest first", compare: byString<ActivityItem>((a) => a.changed_at, true) },
+  { value: "oldest", label: "Oldest first", compare: byString<ActivityItem>((a) => a.changed_at) },
+  { value: "request", label: "Request #", compare: byString<ActivityItem>((a) => a.request_number) },
+];
+
 export default function ActivityPage() {
   const { data: activity = [], isLoading } = useMyActivity(100);
+  // Search / sort / pagination (10 Aug 2026, app-wide table controls).
+  const table = useClientTable(activity, {
+    searchHaystack: (a) => [a.request_number, a.supplier_name, a.new_status, a.old_status, a.remarks],
+    sortOptions: ACTIVITY_SORTS,
+    pageSize: 25,
+  });
 
   return (
     <RoleGuard allowedRoles={["merchandiser", "super_admin"]}>
@@ -69,7 +84,15 @@ export default function ActivityPage() {
           </Card>
         ) : (
           <div className="space-y-2">
-            {activity.map((item) => (
+            <TableControls
+              search={table.search}
+              onSearch={table.setSearch}
+              sort={table.sort}
+              onSort={table.setSort}
+              sortOptions={ACTIVITY_SORTS}
+              placeholder="Search by request #, supplier, status or remark…"
+            />
+            {table.visible.map((item) => (
               <Link href={`/merchandiser/${item.request_id}`} key={item.id}>
                 <div
                   className={`flex items-start gap-4 px-4 py-4 border-l-4 ${STATUS_BORDER[item.new_status]} bg-muted/20 rounded-r-lg hover:bg-muted/40 transition-colors`}
@@ -103,6 +126,13 @@ export default function ActivityPage() {
                 </div>
               </Link>
             ))}
+            <Pagination
+              page={table.page}
+              totalPages={table.totalPages}
+              total={table.total}
+              pageSize={table.pageSize}
+              onChange={table.setPage}
+            />
           </div>
         )}
       </main>
