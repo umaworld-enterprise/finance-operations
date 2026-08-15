@@ -48,7 +48,7 @@ function ExposureRows({ rows, overdue }: { rows: SupplierExposureRow[]; overdue:
           <TableCell><StatusBadge status={r.current_status} /></TableCell>
           <TableCell className="text-xs whitespace-nowrap">{formatDate(r.grace_etd)}</TableCell>
           <TableCell className="text-xs">
-            {overdue && r.etd_grace_overdue_days != null ? (
+            {overdue && r.etd_grace_overdue_days != null && r.etd_grace_overdue_days > 0 ? (
               <span className="text-red-700 font-medium">{r.etd_grace_overdue_days}d overdue</span>
             ) : (
               "—"
@@ -105,15 +105,21 @@ export function SupplierDefaultHistory({ supplierId, supplierName, currentReques
   const active = history.find((f) => f.is_active);
   const hasGracedPassed = (exposure?.graced_etd_passed.length ?? 0) > 0;
 
-  // Exposure KPIs (10 Aug 2026; refined 11 Aug), per currency:
-  //   Existing  = PROCESSED files only — money actually paid out and not
-  //               yet shipped. Pending/held files are commitments, not
-  //               exposure, so they don't count (they stay visible in the
-  //               breakdown tables below). Excludes the request being
-  //               viewed.
-  //   Potential = Existing + this request's deposit (i.e. once approved
-  //               and paid). A currency column appears only when it has
-  //               processed exposure or this request would add it.
+  // Exposure KPIs (10 Aug 2026; recalibrated 11 Aug), per currency.
+  //   Existing Exposure = Overdue Payments + Payments in Process:
+  //     - Overdue Payments: processed payments past the graced ETD
+  //       (goods not shipped);
+  //     - Payments in Process: processed payments still inside the grace
+  //       window, PLUS payment requests already approved by HoM and
+  //       sitting in the payment queue (pending_payment) even if Accounts
+  //       have not processed them yet.
+  //   Requests still awaiting HoM approval, on hold or reopened are NOT
+  //   exposure (they stay visible in the breakdown tables below).
+  //   Excludes the request being viewed.
+  //   Potential = Existing + this request's deposit (i.e. once approved).
+  //   A currency column appears only when it has existing exposure or this
+  //   request would add it.
+  const EXPOSURE_STATUSES = new Set(["payment_processed", "pending_payment"]);
   const allExposure = [
     ...(exposure?.graced_etd_passed ?? []),
     ...(exposure?.graced_etd_pending ?? []),
@@ -121,7 +127,7 @@ export function SupplierDefaultHistory({ supplierId, supplierName, currentReques
   const existingByCurrency: Record<string, number> = {};
   for (const row of allExposure) {
     if (currentRequest && row.request_id === currentRequest.id) continue;
-    if (row.current_status !== "payment_processed") continue;
+    if (!EXPOSURE_STATUSES.has(row.current_status)) continue;
     const key = row.currency ?? "—";
     existingByCurrency[key] = (existingByCurrency[key] ?? 0) + Number(row.deposit_amount);
   }

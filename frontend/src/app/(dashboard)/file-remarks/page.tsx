@@ -39,7 +39,8 @@ import type { FileRemark, FileRemarkCategory } from "@/types";
 
 const CATEGORY_LABELS: Record<FileRemarkCategory, string> = {
   invoice_split: "Split Invoices",
-  invoice_amount_change: "Invoice amount changes",
+  // Renamed from "Invoice amount changes" (11 Aug 2026).
+  invoice_amount_change: "Invoice Change",
 };
 
 type SplitRow = { file_number: string; amount: string };
@@ -136,16 +137,28 @@ function RemarkDetails({ r }: { r: FileRemark }) {
       </div>
     );
   }
+  // Invoice Change: explicit From → To wording (11 Aug) — the file number
+  // changes from the parent file to the new one.
+  const fromFile = r.old_file_number ?? r.sunshine_invoice_number ?? r.request_number;
   return (
-    <span className="text-xs text-muted-foreground">
-      {r.old_file_number
-        ? `${r.old_file_number}${r.old_amount != null ? ` (${Number(r.old_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })})` : ""}`
-        : ""}
-      {r.old_file_number && r.new_file_number ? " → " : ""}
-      {r.new_file_number
-        ? `${r.new_file_number}${r.new_amount != null ? ` (${Number(r.new_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })})` : ""}`
-        : ""}
-    </span>
+    <div className="text-xs text-muted-foreground space-y-0.5">
+      {fromFile && (
+        <p>
+          <span className="font-medium text-foreground">From</span> {fromFile}
+          {r.old_amount != null
+            ? ` (${Number(r.old_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })})`
+            : ""}
+        </p>
+      )}
+      {r.new_file_number && (
+        <p>
+          <span className="font-medium text-foreground">To</span> {r.new_file_number}
+          {r.new_amount != null
+            ? ` (${Number(r.new_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })})`
+            : ""}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -303,7 +316,7 @@ export default function FileRemarksPage() {
                     className={`mt-1 ${inputCls}`}
                   >
                     <option value="invoice_split">Split Invoices</option>
-                    <option value="invoice_amount_change">Invoice amount changes</option>
+                    <option value="invoice_amount_change">Invoice Change</option>
                   </select>
                 </div>
                 <div>

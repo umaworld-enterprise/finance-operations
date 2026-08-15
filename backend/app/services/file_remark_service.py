@@ -38,7 +38,9 @@ _VIEWER_ROLES = _RAISER_ROLES | {UserRole.FINANCE_ADMIN}
 
 _CATEGORY_LABELS = {
     "invoice_split": "Split Invoices",
-    "invoice_amount_change": "Invoice amount changes",
+    # Renamed from "Invoice amount changes" (11 Aug 2026) — stored category
+    # value stays "invoice_amount_change".
+    "invoice_amount_change": "Invoice Change",
 }
 
 

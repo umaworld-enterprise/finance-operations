@@ -227,13 +227,19 @@ async def update_request(
     db: DB,
     background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
-    # Client rule (2026-07-11): invoice numbers can be UPDATED only by a Super
-    # Admin (setting them at creation via the forms is unaffected). Every change
-    # is audited per-field with its old and new value by the service layer.
-    if current_user.role != UserRole.SUPER_ADMIN and (
+    # Invoice-number updates: Super Admin, or Accounts Team from the payment
+    # queue (11 Aug 2026 — when a file is changed in whole, Accounts action
+    # the approved Invoice Change themselves; both the sunshine and the
+    # proforma number are editable). Setting them at creation via the forms
+    # is unaffected. Every change is audited per-field with its old and new
+    # value by the service layer; duplicate validation applies regardless.
+    _INVOICE_EDIT_ROLES = {UserRole.SUPER_ADMIN, UserRole.ACCOUNTS_TEAM}
+    if current_user.role not in _INVOICE_EDIT_ROLES and (
         data.sunshine_invoice_number is not None or data.supplier_invoice_number is not None
     ):
-        raise AuthorizationError("Invoice numbers can only be updated by a Super Admin.")
+        raise AuthorizationError(
+            "Invoice numbers can only be updated by a Super Admin or the Accounts Team."
+        )
     svc = DepositRequestService(db)
     req = await svc.update(
         request_id, data, current_user.id, current_user.role,

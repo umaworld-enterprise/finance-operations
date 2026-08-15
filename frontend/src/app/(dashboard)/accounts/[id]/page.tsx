@@ -37,9 +37,11 @@ export default function AccountsPaymentPage() {
   const { user } = useAuth();
   // Finance Admin may only record the ship date — everything else read-only.
   const isFinance = user?.role === "finance_admin";
-  // Client rule (2026-07-11): invoice numbers can be UPDATED only by a Super
-  // Admin; every change lands in the audit log with its old and new value.
-  const isSuper = user?.role === "super_admin";
+  // Invoice numbers: editable by Super Admin, and by Accounts Team from the
+  // payment queue (11 Aug 2026 — actioning approved Invoice Change remarks
+  // when a file is changed in whole). Every change lands in the audit log
+  // with its old and new value; duplicate validation applies server-side.
+  const canEditInvoices = user?.role === "super_admin" || user?.role === "accounts_team";
 
   const { mutateAsync: updateInvoiceNumbers, isPending: savingInvoices } = useUpdateRequest(id);
   const [sunshineInvoice, setSunshineInvoice] = useState("");
@@ -254,14 +256,14 @@ export default function AccountsPaymentPage() {
           </CardContent>
         </Card>
 
-        {isSuper && (
+        {canEditInvoices && (
           <Card>
             <CardContent className="p-5 md:p-6 space-y-3">
               <div>
                 <h2 className="font-semibold text-foreground text-sm">Invoice Numbers</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Only a Super Admin can update these. Every change is recorded in the
-                  audit log with its old and new value.
+                  Update these when a file is changed in whole (approved Invoice Change).
+                  Every change is recorded in the audit log with its old and new value.
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
