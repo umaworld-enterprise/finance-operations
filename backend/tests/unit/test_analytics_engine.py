@@ -36,10 +36,31 @@ def test_grace_etd_is_etd_plus_grace_days():
     assert result.grace_etd == date(2025, 6, 11)  # June 1 + 10 days
 
 
-def test_etd_grace_overdue_days_when_shipped_after_grace():
-    # ship_date = June 20, grace_etd = June 11 → 9 days overdue
+# ── Defaulter logic (client rule 11 Aug 2026): overdue accrues ONLY when the
+# advance is PAID + the graced ETD is surpassed + shipment NOT made.
+
+
+def test_overdue_accrues_when_paid_unshipped_past_grace():
+    # Paid, unshipped, grace ended 30 days ago → 30 days overdue.
+    etd = date.today() - timedelta(days=40)  # grace_etd = etd + 10
+    result = compute(_base_input(estimated_etd=etd, ship_date=None))
+    assert result.etd_grace_overdue_days == 30
+
+
+def test_overdue_zero_when_shipment_made():
+    # Shipped (even after grace) → no longer a defaulter; lateness history
+    # stays in actual_etd_overdue_days / cost of fund.
     result = compute(_base_input(ship_date=date(2025, 6, 20)))
-    assert result.etd_grace_overdue_days == 9
+    assert result.etd_grace_overdue_days == 0
+    assert result.actual_etd_overdue_days == 19  # history preserved
+
+
+def test_overdue_zero_when_advance_not_paid():
+    # Unpaid past grace → no money out → not overdue, not a defaulter.
+    etd = date.today() - timedelta(days=40)
+    result = compute(_base_input(estimated_etd=etd, payment_date=None, ship_date=None))
+    assert result.etd_grace_overdue_days == 0
+    assert result.default_status == "on_time"
 
 
 def test_etd_grace_overdue_days_zero_when_on_time():
@@ -173,8 +194,17 @@ def test_no_cost_of_fund_without_estimated_etd():
 
 
 def test_default_status_critical_when_very_overdue():
-    result = compute(_base_input(ship_date=date(2025, 9, 1)))  # way past grace
+    # Paid, unshipped, grace ended 50 days ago (> 30) → critical.
+    etd = date.today() - timedelta(days=60)
+    result = compute(_base_input(estimated_etd=etd, ship_date=None))
     assert result.default_status == "critical"
+
+
+def test_default_status_delayed_when_moderately_overdue():
+    # Paid, unshipped, grace ended 20 days ago (≤ 30) → delayed.
+    etd = date.today() - timedelta(days=30)
+    result = compute(_base_input(estimated_etd=etd, ship_date=None))
+    assert result.default_status == "delayed"
 
 
 def test_default_status_on_time():

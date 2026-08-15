@@ -57,29 +57,13 @@ function nextTentativeDate(req: DepositRequest): string | null {
   return dates[0] ?? null;
 }
 
-function isDueWithin10Days(req: DepositRequest): boolean {
-  const next = nextTentativeDate(req);
-  if (!next) return false;
-  return differenceInDays(new Date(next), new Date()) <= 10;
-}
-
-// Bucket-scoped payable (11 Aug refinement): each pending table shows only
-// the unpaid amount whose tentative date falls in ITS window — the 0–10 day
-// table sums tranches due within 10 days (past-due included), the later
-// table sums tranches due after that (undated ones included).
-function trancheDueSoon(dateStr: string | null): boolean {
-  if (!dateStr) return false;
-  return differenceInDays(new Date(dateStr), new Date()) <= 10;
-}
-
-function payableInBucket(req: DepositRequest, bucket: "soon" | "later"): number {
+// Amount Payable in the pending queue counts only the unpaid tranches whose
+// tentative date falls within the next 10 days (past-due included) — the
+// standing 11 Aug rule, independent of the removed > 10 days table.
+function payableDueSoon(req: DepositRequest): number {
   return (req.tranches ?? [])
-    .filter((t) => t.status === "unpaid")
-    .filter((t) =>
-      bucket === "soon"
-        ? trancheDueSoon(t.tentative_payment_date)
-        : !trancheDueSoon(t.tentative_payment_date),
-    )
+    .filter((t) => t.status === "unpaid" && t.tentative_payment_date)
+    .filter((t) => differenceInDays(new Date(t.tentative_payment_date as string), new Date()) <= 10)
     .reduce((sum, t) => sum + Number(t.amount), 0);
 }
 
@@ -88,15 +72,11 @@ function PendingTable({
   loading,
   title,
   subtitle,
-  bucket,
 }: {
   rows: DepositRequest[];
   loading: boolean;
   title: string;
   subtitle: string;
-  /** Which tentative-date window this table represents — drives the
-   * bucket-scoped Amount Payable column. */
-  bucket: "soon" | "later";
 }) {
   // Each bucket paginates client-side (10 Aug 2026, app-wide table
   // controls) — the page-level search/sort apply before the split.
@@ -153,8 +133,7 @@ function PendingTable({
               Tentative payment: {formatDate(nextTentativeDate(req))}
             </div>
             <div className="text-xs text-muted-foreground">
-              Payable{bucket === "soon" ? " (0–10 days)" : " (later)"}:{" "}
-              <span className="font-semibold text-foreground">{formatCurrency(payableInBucket(req, bucket), req.currency)}</span>
+              Payable (0–10 days): <span className="font-semibold text-foreground">{formatCurrency(payableDueSoon(req), req.currency)}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="font-bold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</span>
@@ -179,7 +158,7 @@ function PendingTable({
               <TableHead>Customer</TableHead>
               <TableHead>Vertical/Category</TableHead>
               <TableHead>Merchandiser</TableHead>
-              <TableHead className="text-right">Amount Payable</TableHead>
+              <TableHead className="text-right">Amount Payable (0–10 days)</TableHead>
               <TableHead className="text-right">Deposit</TableHead>
               <TableHead>Currency</TableHead>
               <TableHead>Tentative Payment</TableHead>
@@ -200,7 +179,7 @@ function PendingTable({
                 <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
                 <TableCell className="text-muted-foreground text-xs">{req.vertical?.name ?? "—"}</TableCell>
                 <TableCell className="text-muted-foreground text-xs">{req.creator?.full_name ?? "—"}</TableCell>
-                <TableCell className="text-right font-semibold text-foreground">{formatCurrency(payableInBucket(req, bucket), req.currency)}</TableCell>
+                <TableCell className="text-right font-semibold text-foreground">{formatCurrency(payableDueSoon(req), req.currency)}</TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs font-medium">{currencyDisplayLabel(req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDate(nextTentativeDate(req))}</TableCell>
@@ -452,10 +431,6 @@ export default function AccountsDashboard() {
   const term = search.trim();
   let filteredQueue = term ? queue.filter((r) => requestMatchesSearch(r, term)) : queue;
   if (sort) filteredQueue = sortRequests(filteredQueue, sort);
-  // Bifurcated by the earliest unpaid tranche's tentative payment date
-  // (UAT Aug 2026, item 13) — undated requests fall in the later bucket.
-  const dueSoon = filteredQueue.filter(isDueWithin10Days);
-  const dueLater = filteredQueue.filter((r) => !isDueWithin10Days(r));
 
   const { data: holdData, isLoading: holdLoading } = useRequestsPaginated(holdPage, PAGE_SIZE, {
     status: ["hold_by_accounts", "hold_by_merchandiser"],
@@ -613,20 +588,14 @@ export default function AccountsDashboard() {
             <TabsTrigger value="all">All Requests</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="pending" className="space-y-6">
+          <TabsContent value="pending">
+            {/* Single pending table (11 Aug — the > 10 days split was
+                removed); the Tentative Payment column carries the date. */}
             <PendingTable
-              rows={dueSoon}
+              rows={filteredQueue}
               loading={queueLoading}
-              title="Tentative Payment in 0–10 Days"
-              subtitle="Earliest unpaid tranche due within 10 days — Amount Payable counts only the tranches due in this window"
-              bucket="soon"
-            />
-            <PendingTable
-              rows={dueLater}
-              loading={queueLoading}
-              title="Tentative Payment in > 10 Days"
-              subtitle="Due later than 10 days (or no tentative date recorded) — Amount Payable counts only the tranches due after the window"
-              bucket="later"
+              title="Pending Payment"
+              subtitle="Sorted oldest first — the Tentative Payment column shows each file's next due date"
             />
           </TabsContent>
 

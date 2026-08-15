@@ -303,7 +303,7 @@ async def test_raised_fans_out_to_accounts(db_session, engine, monkeypatch):
     ).scalars().all()
     assert {n.user_id for n in rows} == {accounts.id, accounts2.id}
     body = rows[0].body
-    assert "Invoice amount changes" in body
+    assert "Invoice Change" in body
     assert request.request_number in body
     assert request.request_number in body and "INV-NEW-1" in body
     assert "1000.0" in body  # amounts travel in the notification

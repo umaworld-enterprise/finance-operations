@@ -609,6 +609,66 @@ So a request with one tranche due tomorrow and one due next month shows
 just tomorrow's amount in the 0–10 table. The On Hold / All / merchandiser
 tables keep the total-unpaid figure. Frontend-only; `tsc` clean.
 
+## Follow-up (11 Aug 2026) — Existing Exposure recalibrated
+
+Existing Exposure = **Overdue Payments** (processed, graced ETD passed,
+goods not shipped) + **Payments in Process** (processed and still inside
+the grace window, PLUS requests already HoM-approved and sitting in the
+payment queue — `pending_payment` — even before Accounts process them).
+Requests awaiting HoM approval, on hold or reopened remain excluded from
+the KPI (visible in the breakdown tables). Potential Exposure and the
+currency-column rule unchanged. Frontend-only; `tsc` clean.
+
+## Follow-up (11 Aug 2026) — pending queue back to a single table
+
+The "Tentative Payment in > 10 Days" table was removed on client request —
+the Pending tab is a single "Pending Payment" table again holding ALL
+pending requests (so later-dated files don't disappear), keeping the
+Tentative Payment column for the next due date. **Amount Payable keeps the
+standing 11 Aug rule**: the column (headed "Amount Payable (0–10 days)")
+sums only the unpaid tranches due within the next 10 days, past-due
+included — a request with nothing due soon shows 0. (An initial revert of
+this to total-unpaid was a mistake and was corrected the same day.)
+Frontend-only; `tsc` clean.
+
+## Follow-up (11 Aug 2026) — Invoice Change rename, From/To details, Accounts invoice editing
+
+1. Category label renamed **"Invoice amount changes" → "Invoice Change"**
+   (form dropdown, tables, notification/audit wording via the shared label
+   maps; stored category value unchanged).
+2. Remark history Details for an Invoice Change now reads explicitly
+   **From {old file} (amount)** / **To {new file} (amount)** on separate
+   lines (From falls back sunshine → stored parent → request number).
+3. Invoice-number editing extended to the **Accounts Team** from the
+   payment-queue request view (client-confirmed: BOTH sunshine and
+   proforma numbers, on any request — the "changed in whole" wording is
+   the business reason, not a system gate). Endpoint guard relaxed from
+   Super Admin-only to {super_admin, accounts_team}; per-field audit and
+   duplicate validation unchanged. The Invoice Numbers card on
+   `accounts/[id]` now shows for Accounts with updated helper text.
+
+257 backend tests green; `tsc` clean.
+
+## Follow-up (11 Aug 2026) — MAJOR: defaulter/overdue logic recalibrated
+
+`etd_grace_overdue_days` (the defaulter metric) now accrues ONLY when all
+three hold: **advance PAID** (payment_date set) + **graced ETD surpassed**
++ **shipment NOT made**. Changed in one place — `analytics/engine.compute()`
+— and inherited by everything that keys off `etd_grace_overdue_days > 0`:
+auto-flagging ("Auto-flagged: Nd past ETD grace"), NPA overdue suppliers,
+delay report, analytics drill/summary, supplier exposure overdue column.
+- Unpaid files never accrue overdue (no money out), even past grace.
+- Shipping clears the defaulter state (overdue → 0); the lateness history
+  stays visible via `actual_etd_overdue_days` (signed, ship-frozen) and
+  cost of fund, which are unchanged.
+- Exposure panel no longer renders "0d overdue" (shows — instead).
+- Deploy note: stored snapshots recompute on the periodic snapshot job and
+  on per-request reseeds — figures update as the job runs, not instantly.
+
+Tests: engine tests rewritten around the three-condition rule (paid+
+unshipped accrual, shipment clears, unpaid never accrues, delayed/critical
+thresholds) — 260 backend tests green; `tsc` clean.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

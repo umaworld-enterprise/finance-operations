@@ -48,12 +48,19 @@ def compute(inp: AnalyticsInput) -> AnalyticsResult:
     if inp.estimated_etd:
         grace_etd = inp.estimated_etd + timedelta(days=inp.etd_grace_days)
 
-    # ETD grace overdue days
+    # ETD grace overdue days — DEFAULTER logic (client rule 11 Aug 2026):
+    # a file is overdue only when ALL THREE hold — the advance has been PAID
+    # (payment_date set), the graced ETD has been surpassed, and shipment has
+    # NOT been made. Unpaid files never accrue overdue (no money is out);
+    # shipping clears the defaulter state (lateness history stays visible via
+    # actual_etd_overdue_days and cost of fund).
     etd_grace_overdue_days: int | None = None
     if grace_etd:
-        reference_date = inp.ship_date or today
-        overdue = (reference_date - grace_etd).days
-        etd_grace_overdue_days = overdue if overdue > 0 else 0
+        if inp.payment_date is not None and inp.ship_date is None:
+            overdue = (today - grace_etd).days
+            etd_grace_overdue_days = overdue if overdue > 0 else 0
+        else:
+            etd_grace_overdue_days = 0
 
     # Payment to ship days
     payment_to_ship_days: int | None = None
