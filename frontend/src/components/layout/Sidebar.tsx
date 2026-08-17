@@ -163,6 +163,12 @@ export function Sidebar() {
               <p className="px-3 mb-2 text-[10px] font-semibold tracking-wide text-blue-200/40 uppercase">
                 Menu
               </p>
+              {/* Module sub-header (11 Aug 2026): the current items all
+                  belong to the Advance Payment module — future modules
+                  (e.g. Logistics) get their own sub-header alongside. */}
+              <p className="px-3 pb-1.5 text-[11px] font-bold tracking-wider text-blue-100/70 uppercase">
+                Advance Payment
+              </p>
               {renderItems(mainItems)}
             </div>
           )}
