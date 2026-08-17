@@ -669,6 +669,13 @@ Tests: engine tests rewritten around the three-condition rule (paid+
 unshipped accrual, shipment clears, unpaid never accrues, delayed/critical
 thresholds) — 260 backend tests green; `tsc` clean.
 
+## Follow-up (11 Aug 2026) — "Advance Payment" module sub-header in the sidebar
+
+An **Advance Payment** sub-header now sits directly below "Menu", grouping
+all current items as the first module — future modules (e.g. Logistics)
+get their own sub-header alongside. Styling: slightly brighter/bolder than
+the "Menu" label so it reads as a module title. Frontend-only; `tsc` clean.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
