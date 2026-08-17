@@ -731,6 +731,17 @@ period refused.
 `alembic upgrade head` (0030). Extraction requires an OpenAI or Claude key
 in AI Settings — Groq is text-only.
 
+## Follow-up (12 Aug 2026) — Accounts' Analytics Snapshot missing fields
+
+The Analytics Snapshot card on the accounts request view silently dropped
+**Cost of Fund** and **Payment to Request Days** — the field-visibility
+DEFAULTS had both set to False for `accounts_team`. Flipped to True for
+accounts AND head_of_merchandiser (parity: HoM approves what Accounts pay).
+Note for existing environments: if an admin ever SAVED the Field Visibility
+matrix, the stored config overrides these defaults per field — toggle the
+two rows on in Admin → Field Visibility there. Backend-only; 267 tests
+green.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

@@ -88,8 +88,11 @@ FIELD_VISIBILITY_DEFAULTS: dict[str, dict[str, bool]] = {
     "etd_grace_overdue_days":        {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
     "actual_etd_overdue_days":       {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
     "payment_to_ship_days":          {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
-    "payment_to_request_days":       {"merchandiser": False, "accounts_team": False, "finance_admin": True, "head_of_merchandiser": False},
-    "cost_of_fund":                  {"merchandiser": False, "accounts_team": False, "finance_admin": True, "head_of_merchandiser": False},
+    # cost_of_fund and payment_to_request_days flipped ON for accounts + HoM
+    # (12 Aug 2026 fix — the Analytics Snapshot card silently dropped both
+    # rows for the Accounts role; they pay the file, they see its full cost).
+    "payment_to_request_days":       {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
+    "cost_of_fund":                  {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
     "default_status":                {"merchandiser": False, "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
     "creator_info":                  {"merchandiser": True,  "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
     "status_history":                {"merchandiser": True,  "accounts_team": True,  "finance_admin": True, "head_of_merchandiser": True},
