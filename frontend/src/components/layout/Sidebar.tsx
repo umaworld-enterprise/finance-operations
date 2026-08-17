@@ -14,6 +14,7 @@ import {
   ClipboardList,
   CreditCard,
   FileText,
+  Landmark,
   LayoutDashboard,
   LogOut,
   MessageSquarePlus,
@@ -31,6 +32,8 @@ interface NavItem {
   icon: React.ElementType;
   roles: UserRole[];
   group: "main" | "admin";
+  /** Module sub-header the item renders under (main group only). */
+  module?: "advance-payment" | "banking";
 }
 
 // Order fixes the left-panel chronology for every role (UAT change note,
@@ -47,6 +50,8 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/analytics",     label: "Analytics",      icon: BarChart3,       roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
   { href: "/reports",       label: "Reports",        icon: FileText,        roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
   { href: "/settings",      label: "Settings",       icon: Settings,        roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
+  // Banking module (Aug 2026) — super-admin only for now.
+  { href: "/bank",          label: "Bank Statements", icon: Landmark,       roles: ["super_admin"],                                                                      group: "main", module: "banking" },
   { href: "/admin/users",   label: "Users",          icon: Users,           roles: ["super_admin"],                                                                      group: "admin" },
   { href: "/admin/audit",   label: "Audit Logs",     icon: ScrollText,      roles: ["super_admin", "finance_admin"],                                                     group: "admin" },
   { href: "/admin/ai",      label: "AI Settings",    icon: BrainCircuit,    roles: ["super_admin"],                                                                      group: "admin" },
@@ -86,6 +91,8 @@ export function Sidebar() {
   );
 
   const mainItems  = visibleItems.filter((i) => i.group === "main");
+  const advanceItems = mainItems.filter((i) => (i.module ?? "advance-payment") === "advance-payment");
+  const bankingItems = mainItems.filter((i) => i.module === "banking");
   const adminItems = visibleItems.filter((i) => i.group === "admin");
 
   const bestMatch = visibleItems
@@ -163,13 +170,25 @@ export function Sidebar() {
               <p className="px-3 mb-2 text-[10px] font-semibold tracking-wide text-blue-200/40 uppercase">
                 Menu
               </p>
-              {/* Module sub-header (11 Aug 2026): the current items all
-                  belong to the Advance Payment module — future modules
-                  (e.g. Logistics) get their own sub-header alongside. */}
-              <p className="px-3 pb-1.5 text-[11px] font-bold tracking-wider text-blue-100/70 uppercase">
-                Advance Payment
-              </p>
-              {renderItems(mainItems)}
+              {/* Module sub-headers (11/12 Aug 2026): items group by module —
+                  Advance Payment first, Banking below; future modules (e.g.
+                  Logistics) get their own block alongside. */}
+              {advanceItems.length > 0 && (
+                <>
+                  <p className="px-3 pb-1.5 text-[11px] font-bold tracking-wider text-blue-100/70 uppercase">
+                    Advance Payment
+                  </p>
+                  {renderItems(advanceItems)}
+                </>
+              )}
+              {bankingItems.length > 0 && (
+                <>
+                  <p className="px-3 pt-4 pb-1.5 text-[11px] font-bold tracking-wider text-blue-100/70 uppercase">
+                    Banking
+                  </p>
+                  {renderItems(bankingItems)}
+                </>
+              )}
             </div>
           )}
 

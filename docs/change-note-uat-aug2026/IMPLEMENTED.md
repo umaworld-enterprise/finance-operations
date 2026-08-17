@@ -676,6 +676,61 @@ all current items as the first module — future modules (e.g. Logistics)
 get their own sub-header alongside. Styling: slightly brighter/bolder than
 the "Menu" label so it reads as a module title. Frontend-only; `tsc` clean.
 
+## Banking module (12 Aug 2026) — bank statement upload + AI extraction + dashboard
+
+New standalone module (client decisions: AI vision extraction; **super
+admin only** for now; no ADT reconciliation in v1; dashboard scope at my
+discretion). Sample analysed: Citi "Asia Account Statement Report" — its
+PDFs have NO usable text layer (fonts without unicode maps), so extraction
+is vision-based.
+
+**Migration `0030_bank_statements.py`** (head **0030**):
+`bank_statements` (header/summary + status processing/extracted/failed +
+extraction_note; unique account+period), `bank_transactions` (date, type
+line as category, reference, detail, debit/credit; CASCADE),
+`bank_daily_balances` (per-day closing balance rows; CASCADE).
+
+**Backend:**
+- `AIClient.chat_vision()` added (OpenAI + Claude wrappers; Groq raises
+  with a switch-provider message). Reuses the admin-configured provider/
+  key/model from AI Settings.
+- `bank_statement_service`: PyMuPDF renders pages (150 dpi, ≤80 pages) →
+  one vision call per page → strict-JSON parse (`parse_page_json`) →
+  aggregate → **integrity check** (beginning − debits + credits vs the
+  statement's own ending balance; result stored in extraction_note, loud
+  MISMATCH wording when off) → persist. Duplicate account+period uploads
+  are refused at extraction time. Runs as a BackgroundTask with its own
+  session; failures flip the row to `failed` with the error.
+- API `/bank/statements` (super admin): POST upload (PDF ≤15 MB, answers
+  immediately in `processing`), GET list, GET detail (transactions +
+  daily balances), DELETE (re-upload path). Upload/delete audited.
+  `pymupdf` added to requirements.
+
+**Frontend:**
+- Sidebar: new **Banking** module sub-header (data-driven `module` field on
+  nav items) with "Bank Statements" (super admin), alongside Advance
+  Payment.
+- `/bank`: one-click PDF upload (TT-copy pattern), statements table
+  (status pill polls every 5 s while processing; search/sort/pagination),
+  delete-with-confirm, and a Month-over-Month table across extracted
+  statements (opening/closing/net per account).
+- `/bank/[id]` dashboard: integrity-check banner (green/amber),
+  six KPIs (Opening, Closing, Total Debits, Total Credits, Net Movement,
+  Transaction count), **Daily Closing Balance** line chart (recharts),
+  **Breakdown by Transaction Type** (Import/Export bills, check clearing,
+  charges, interest… with counts and debit/credit totals), and the full
+  transaction table with search/sort/pagination.
+
+**Tests** (`test_bank_statements.py`, 7 new — 267 total): JSON parsing,
+decimal/date safety, integrity outcomes, end-to-end extraction against a
+fake vision client (rows + balances persisted, header populated, integrity
+passed), mismatch flagged loudly, provider failure → `failed`, duplicate
+period refused.
+
+**Deploy:** `pip install -r requirements.txt` (pymupdf) +
+`alembic upgrade head` (0030). Extraction requires an OpenAI or Claude key
+in AI Settings — Groq is text-only.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

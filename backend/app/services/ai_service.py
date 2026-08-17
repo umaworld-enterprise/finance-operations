@@ -24,6 +24,20 @@ class AIClient(ABC):
         history: list[ChatMessage] | None = None,
     ) -> str: ...
 
+    async def chat_vision(
+        self,
+        system: str,
+        user: str,
+        images_png: list[bytes],
+        max_tokens: int = 4000,
+    ) -> str:
+        """Single-turn chat with PNG images attached (bank-statement
+        extraction, Aug 2026). Providers without vision support raise."""
+        raise RuntimeError(
+            f"The configured AI provider '{self.provider_name}' does not support "
+            "image input — switch the AI provider to OpenAI or Claude in AI Settings."
+        )
+
     @property
     @abstractmethod
     def provider_name(self) -> str: ...
@@ -82,6 +96,28 @@ class OpenAIClientWrapper(AIClient):
         )
         return resp.choices[0].message.content or ""
 
+    async def chat_vision(
+        self, system: str, user: str, images_png: list[bytes], max_tokens: int = 4000
+    ) -> str:
+        import base64
+
+        content: list[dict] = [{"type": "text", "text": user}]
+        for img in images_png:
+            b64 = base64.b64encode(img).decode("ascii")
+            content.append(
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+            )
+        resp = await self._client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": content},
+            ],
+            max_tokens=max_tokens,
+            temperature=0,
+        )
+        return resp.choices[0].message.content or ""
+
 
 class ClaudeClientWrapper(AIClient):
     def __init__(self, api_key: str, model: str):
@@ -106,6 +142,30 @@ class ClaudeClientWrapper(AIClient):
             max_tokens=1500,
             system=system,
             messages=messages,
+        )
+        return resp.content[0].text
+
+    async def chat_vision(
+        self, system: str, user: str, images_png: list[bytes], max_tokens: int = 4000
+    ) -> str:
+        import base64
+
+        content: list[dict] = []
+        for img in images_png:
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": base64.b64encode(img).decode("ascii"),
+                },
+            })
+        content.append({"type": "text", "text": user})
+        resp = await self._client.messages.create(
+            model=self._model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": content}],
         )
         return resp.content[0].text
 
