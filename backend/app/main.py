@@ -297,6 +297,7 @@ def create_app() -> FastAPI:
     from app.api.v1.tranches import router as tranches_router
     from app.api.v1.adjustments import router as adjustments_router
     from app.api.v1.file_remarks import router as file_remarks_router
+    from app.api.v1.bank import router as bank_router
 
     prefix = "/api/v1"
     for r in [
@@ -307,6 +308,7 @@ def create_app() -> FastAPI:
         request_audit_router,
         adjustments_router,
         file_remarks_router,
+        bank_router,
         analytics_router,
         reports_router,
         admin_router,

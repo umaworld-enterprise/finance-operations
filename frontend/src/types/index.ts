@@ -101,6 +101,47 @@ export interface SupplierExposure {
   totals_by_currency: Record<string, number>;
 }
 
+// ── Banking module (Aug 2026) — uploaded statements + AI-extracted rows ──────
+
+export type BankStatementStatus = "processing" | "extracted" | "failed";
+
+export interface BankTransaction {
+  id: string;
+  txn_date: string | null;
+  category: string | null;
+  reference: string | null;
+  detail: string | null;
+  debit: number | null;
+  credit: number | null;
+}
+
+export interface BankDailyBalance {
+  balance_date: string;
+  closing_balance: number;
+}
+
+export interface BankStatement {
+  id: string;
+  bank_name: string;
+  account_number: string | null;
+  account_title: string | null;
+  currency: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  beginning_balance: number | null;
+  ending_balance: number | null;
+  page_count: number;
+  original_filename: string;
+  status: BankStatementStatus;
+  extraction_note: string | null;
+  created_at: string;
+}
+
+export interface BankStatementDetail extends BankStatement {
+  transactions: BankTransaction[];
+  daily_balances: BankDailyBalance[];
+}
+
 // Bank master (Aug 2026) — names only; the tranche form composes the stored
 // value as "{name} ({currency})" from the request's currency.
 export interface Bank {

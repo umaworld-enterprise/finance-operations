@@ -10,3 +10,5 @@ from app.models.integrations import DefaultedSupplier  # noqa: F401
 from app.models.analytics import AnalyticsSnapshot  # noqa: F401
 from app.models.notification import Notification, PushSubscription  # noqa: F401
 from app.models.tranche import InvoiceAdjustment, PaymentTranche  # noqa: F401
+from app.models.file_remark import FileRemark  # noqa: F401
+from app.models.bank_statement import BankDailyBalance, BankStatement, BankTransaction  # noqa: F401
