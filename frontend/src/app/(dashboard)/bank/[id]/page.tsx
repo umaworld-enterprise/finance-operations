@@ -97,7 +97,7 @@ export default function BankStatementDashboard() {
   );
 
   return (
-    <RoleGuard allowedRoles={["super_admin"]}>
+    <RoleGuard allowedRoles={["super_admin", "accounts_team"]}>
       <TopNav
         title={`${statement.bank_name} — ${statement.account_number ?? statement.original_filename}`}
         subtitle={

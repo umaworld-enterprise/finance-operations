@@ -742,6 +742,16 @@ matrix, the stored config overrides these defaults per field — toggle the
 two rows on in Admin → Field Visibility there. Backend-only; 267 tests
 green.
 
+## Follow-up (19 Aug 2026) — Banking module opened to Accounts team
+
+The Banking module (Bank Statements) is no longer super-admin only: the
+**accounts team gets full access** — upload, dashboards, and delete /
+re-upload — per the new requirement. Backend router now guards with
+`RequireAccounts` (super_admin + accounts_team) instead of
+`RequireSuperAdmin`; frontend sidebar entry and both bank pages'
+`RoleGuard`s include `accounts_team`. No migration; deploy backend and
+frontend together so the sidebar link and the API gate match.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
