@@ -1,6 +1,6 @@
 "use client";
 
-// Banking module (Aug 2026) — super-admin only for now. Upload Citi-style
+// Banking module (Aug 2026) — super admin and accounts team. Upload Citi-style
 // statement PDFs; the AI vision provider extracts them server-side, and the
 // dashboard reads the stored rows. Standalone from Advance Payment.
 
@@ -107,7 +107,7 @@ export default function BankStatementsPage() {
   const extracted = statements.filter((s) => s.status === "extracted");
 
   return (
-    <RoleGuard allowedRoles={["super_admin"]}>
+    <RoleGuard allowedRoles={["super_admin", "accounts_team"]}>
       <TopNav
         title="Bank Statements"
         subtitle="Upload monthly statements — transactions are extracted automatically and analysed below"

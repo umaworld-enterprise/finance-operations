@@ -50,8 +50,8 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/analytics",     label: "Analytics",      icon: BarChart3,       roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
   { href: "/reports",       label: "Reports",        icon: FileText,        roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
   { href: "/settings",      label: "Settings",       icon: Settings,        roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
-  // Banking module (Aug 2026) — super-admin only for now.
-  { href: "/bank",          label: "Bank Statements", icon: Landmark,       roles: ["super_admin"],                                                                      group: "main", module: "banking" },
+  // Banking module (Aug 2026) — super admin and accounts team.
+  { href: "/bank",          label: "Bank Statements", icon: Landmark,       roles: ["super_admin", "accounts_team"],                                                     group: "main", module: "banking" },
   { href: "/admin/users",   label: "Users",          icon: Users,           roles: ["super_admin"],                                                                      group: "admin" },
   { href: "/admin/audit",   label: "Audit Logs",     icon: ScrollText,      roles: ["super_admin", "finance_admin"],                                                     group: "admin" },
   { href: "/admin/ai",      label: "AI Settings",    icon: BrainCircuit,    roles: ["super_admin"],                                                                      group: "admin" },
