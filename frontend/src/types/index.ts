@@ -273,6 +273,8 @@ export interface FileRemark {
    * "From {parent}" display. */
   sunshine_invoice_number: string | null;
   supplier_name: string | null;
+  /** The request's currency — shown alongside every amount (19 Aug 2026). */
+  currency: string | null;
   created_by_name: string | null;
   resolved_by_name: string | null;
 }

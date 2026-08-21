@@ -255,6 +255,9 @@ async def test_list_scoping_and_filters(db_session):
     own = await svc.list(merch.id, UserRole.MERCHANDISER)
     assert {r.id for r in own} == {mine.id}
     assert own[0].request_number == request.request_number
+    # The request's currency travels with the remark (19 Aug 2026) — shown
+    # next to every amount in the details display.
+    assert own[0].currency == "USD"
 
     all_rows = await svc.list(accounts.id, UserRole.ACCOUNTS_TEAM)
     assert {r.id for r in all_rows} == {mine.id, theirs.id}

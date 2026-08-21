@@ -814,6 +814,20 @@ Three changes on the File Remarks module:
 No migration; 268 tests green; deploy backend + frontend together (the
 create payload no longer carries new_amount).
 
+**Format update (same day):** split details now read
+`From Invoice {parent}: {amount} ({currency})` /
+`- to Invoice {file}: {amount} ({currency})` /
+`Balance in Invoice {parent}: {amount} ({currency})`. The remark response
+carries the request's `currency` for this (new field on
+FileRemarkResponse). Invoice Change rows keep their From/To layout.
+
+## Follow-up (19 Aug 2026) — Back button on the accounts request summary
+
+The accounts request summary now offers two ways back: a new **Back**
+button (browser history — returns to wherever the user came from, e.g. a
+File Remarks link) alongside the existing **Back to queue** fixed jump to
+the dashboard sheet. Frontend-only.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

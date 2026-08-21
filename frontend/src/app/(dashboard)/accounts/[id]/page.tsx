@@ -186,12 +186,25 @@ export default function AccountsPaymentPage() {
     <RoleGuard allowedRoles={["accounts_team", "super_admin", "finance_admin"]}>
       <TopNav title={`Payment — ${req.request_number}`} />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6 max-w-4xl mx-auto w-full">
-        <Link
-          href="/accounts"
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back to queue
-        </Link>
+        {/* Two ways back (19 Aug 2026): "Back" returns to wherever the user
+            came from (browser history — e.g. a File Remarks link), while
+            "Back to queue" stays a fixed jump to the dashboard sheet. */}
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back
+          </button>
+          <span className="text-border" aria-hidden="true">|</span>
+          <Link
+            href="/accounts"
+            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+          >
+            Back to queue
+          </Link>
+        </div>
 
         <Card>
           <CardContent className="p-5 md:p-6">
