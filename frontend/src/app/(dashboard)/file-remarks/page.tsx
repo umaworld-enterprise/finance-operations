@@ -118,6 +118,9 @@ function DecideDialog({
 // the PARENT file first (10 Aug rework: "from which file to which files") —
 // older rows without a stored parent fall back to the request number.
 function RemarkDetails({ r }: { r: FileRemark }) {
+  // Every amount carries the request's currency (19 Aug 2026 format).
+  const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2 });
+  const cur = r.currency ? ` (${r.currency})` : "";
   if (r.category === "invoice_split" && r.split_targets?.length) {
     // Prefer the parent's CURRENT sunshine invoice number — falls back to
     // the stored parent reference, then the request number (legacy rows).
@@ -130,20 +133,17 @@ function RemarkDetails({ r }: { r: FileRemark }) {
     return (
       <div className="text-xs text-muted-foreground space-y-0.5">
         <p className="font-medium text-foreground">
-          From {parent}
-          {r.old_amount != null
-            ? ` (${Number(r.old_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })})`
-            : ""}
+          From Invoice {parent}
+          {r.old_amount != null ? `: ${fmt(Number(r.old_amount))}${cur}` : ""}
         </p>
         {r.split_targets.map((t, i) => (
           <p key={`${t.file_number}-${i}`}>
-            → {t.file_number} · {Number(t.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+            - to Invoice {t.file_number}: {fmt(Number(t.amount))}{cur}
           </p>
         ))}
         {balance != null && (
           <p className={balance < 0 ? "text-destructive font-medium" : "font-medium text-foreground"}>
-            Balance on {parent}:{" "}
-            {balance.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+            Balance in Invoice {parent}: {fmt(balance)}{cur}
           </p>
         )}
       </div>

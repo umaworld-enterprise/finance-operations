@@ -77,5 +77,7 @@ class FileRemarkResponse(OrmBase):
     # parent, or whose invoice number was edited later, still show it).
     sunshine_invoice_number: str | None = None
     supplier_name: str | None = None
+    # The request's currency — display alongside every amount (19 Aug 2026).
+    currency: str | None = None
     created_by_name: str | None = None
     resolved_by_name: str | None = None
