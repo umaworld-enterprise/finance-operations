@@ -42,6 +42,13 @@ function ExposureRows({ rows, overdue }: { rows: SupplierExposureRow[]; overdue:
       {rows.map((r) => (
         <TableRow key={r.request_id}>
           <TableCell className="font-mono text-xs whitespace-nowrap">{r.request_number}</TableCell>
+          {/* Overdue files carry the Sunshine Invoice No. so the risk rows
+              can be chased by invoice (19 Aug 2026). */}
+          {overdue && (
+            <TableCell className="font-mono text-xs whitespace-nowrap">
+              {r.sunshine_invoice_number ?? "—"}
+            </TableCell>
+          )}
           <TableCell className="text-right tabular-nums text-sm">
             {formatCurrency(Number(r.deposit_amount), r.currency)}
           </TableCell>
@@ -81,6 +88,7 @@ function ExposureSection({
           <TableHeader>
             <TableRow>
               <TableHead>Request #</TableHead>
+              {overdue && <TableHead>Sunshine Invoice #</TableHead>}
               <TableHead className="text-right">Deposit</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Grace ETD</TableHead>

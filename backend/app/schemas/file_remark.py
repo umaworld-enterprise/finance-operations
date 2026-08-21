@@ -23,12 +23,11 @@ class SplitTarget(BaseModel):
 class FileRemarkCreate(BaseModel):
     deposit_request_id: UUID
     category: FileRemarkCategoryLiteral
-    # Invoice amount change: new file + amount. Neither the OLD file number
-    # nor the OLD amount are accepted from the client (10 Aug rework) — both
-    # are server-derived from the selected file (its invoice number and its
-    # deposit_amount), so every remark carries its parent file reference.
+    # Invoice Change: new file number only. Neither the OLD file/amount (10
+    # Aug rework) nor the NEW amount (19 Aug: a whole-invoice change keeps
+    # the amount — pre-filled and locked in the UI) are accepted from the
+    # client; all three are server-derived from the selected file.
     new_file_number: str | None = Field(None, max_length=200)
-    new_amount: Decimal | None = Field(None, gt=0)
     # Split Invoices: dynamic target rows.
     split_targets: list[SplitTarget] | None = None
     # Optional — the structured fields carry the instruction.
@@ -42,18 +41,8 @@ class FileRemarkCreate(BaseModel):
                     "At least one 'file splits to' row (new file number + amount) is required."
                 )
         if self.category == "invoice_amount_change":
-            missing = [
-                label
-                for value, label in (
-                    (self.new_file_number, "New file number"),
-                    (self.new_amount, "New file amount"),
-                )
-                if value in (None, "") or (isinstance(value, str) and not value.strip())
-            ]
-            if missing:
-                raise ValueError(
-                    f"{', '.join(missing)} required for an invoice amount change."
-                )
+            if not (self.new_file_number or "").strip():
+                raise ValueError("New file number required for an invoice change.")
         return self
 
 

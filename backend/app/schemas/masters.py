@@ -142,6 +142,7 @@ class DefaultedSupplierResponse(OrmBase):
 class SupplierExposureRow(BaseModel):
     request_id: UUID
     request_number: str
+    sunshine_invoice_number: str | None = None
     deposit_amount: Decimal
     currency: str | None = None
     current_status: str

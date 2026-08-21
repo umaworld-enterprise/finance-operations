@@ -93,11 +93,16 @@ async def tranches_modifiable(
 ) -> dict:
     """Can the merchandiser still modify/add/delete tranches on this request?
     Blocked once the request leaves pending or Accounts write anything
-    (Aug 2026 batch, item 2.3). Returns the human-readable reason when not.
+    REQUEST-WIDE (ship-date payment row, completed adjustment). Returns the
+    human-readable reason when not.
+
+    19 Aug 2026 relaxation: per-tranche accounts activity (paid / TT copy /
+    payment details) no longer flips this to false — it locks only that
+    tranche, which the frontend derives from the tranche's own fields.
 
     can_add is broader than modifiable: while a REJECTED tranche exists,
-    adding replacement tranches stays allowed even after Accounts touched the
-    request (Aug 2026 rejection workflow)."""
+    adding replacement tranches stays allowed even after a request-wide
+    accounts touch (Aug 2026 rejection workflow)."""
     request = await _request_or_404(db, request_id, current_user)
     svc = TrancheService(db)
     still_pending = request.current_status in _MERCHANDISER_EDITABLE_STATUSES

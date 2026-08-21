@@ -161,6 +161,7 @@ async def get_supplier_exposure(supplier_id: UUID, db: DB, _: User) -> SupplierE
         row = SupplierExposureRow(
             request_id=req.id,
             request_number=req.request_number,
+            sunshine_invoice_number=req.sunshine_invoice_number,
             deposit_amount=req.deposit_amount,
             currency=req.currency.value if req.currency else None,
             current_status=req.current_status.value,

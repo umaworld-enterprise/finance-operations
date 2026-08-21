@@ -90,12 +90,8 @@ class FileRemarkService:
                     f"The split amounts total {total}, which exceeds the file's "
                     f"deposit amount of {deposit}."
                 )
-        if data.category == "invoice_amount_change" and data.new_amount is not None:
-            if data.new_amount > deposit:
-                raise BusinessRuleError(
-                    f"The new file amount ({data.new_amount}) exceeds the file's "
-                    f"deposit amount of {deposit}."
-                )
+        # Invoice Change (19 Aug 2026): a whole-invoice change keeps the
+        # amount — new_amount is server-derived below, no ceiling to check.
 
         # Server-derived parent reference (10 Aug rework): the "old file" is
         # always the selected request itself — its sunshine invoice number
@@ -116,7 +112,14 @@ class FileRemarkService:
             # in the UI, never accepted from the client.
             old_amount=request.deposit_amount,
             new_file_number=(data.new_file_number or "").strip() or None,
-            new_amount=data.new_amount,
+            # Server-derived (19 Aug 2026): the whole invoice changes number,
+            # not value — the new amount IS the file's deposit amount, locked
+            # in the UI and never accepted from the client.
+            new_amount=(
+                request.deposit_amount
+                if data.category == "invoice_amount_change"
+                else None
+            ),
             split_targets=(
                 [
                     {"file_number": t.file_number.strip(), "amount": float(t.amount)}
