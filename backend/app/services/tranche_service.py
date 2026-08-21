@@ -118,6 +118,8 @@ class TrancheService:
                 f"{tranche.label} was rejected and is kept for record-keeping only — "
                 "add a replacement tranche instead."
             )
+        if role == UserRole.MERCHANDISER:
+            self._assert_tranche_untouched_by_accounts(tranche, "edited")
 
         changes = data.model_dump(exclude_unset=True, exclude_none=True)
         if not changes:
@@ -225,6 +227,8 @@ class TrancheService:
             raise ConflictError(
                 f"{tranche.label} was rejected and is kept for record-keeping — it cannot be deleted."
             )
+        if role == UserRole.MERCHANDISER:
+            self._assert_tranche_untouched_by_accounts(tranche, "deleted")
         if len(await self._repo.list_for_request(request_id)) <= 1:
             raise ValidationError("A request must keep at least one tranche.")
         # FK safety: invoice adjustments reference tranches on either side.
@@ -573,28 +577,22 @@ class TrancheService:
     # ── Internals ─────────────────────────────────────────────────────────────
 
     async def accounts_touched_reason(self, request_id: UUID) -> str | None:
-        """Human-readable reason if Accounts has written anything against this
-        request, else None (Aug 2026 batch, item 2.3 — 'any accounts write').
+        """Human-readable reason if Accounts has written anything REQUEST-WIDE,
+        else None.
 
-        Counts: a paid tranche, an uploaded TT copy, a payment_details row
-        (incl. partial rows from ship-date / TT paths), or a COMPLETED invoice
-        adjustment touching the request's tranches. Pending merchandiser-raised
+        Counts only request-level writes: a payment_details row (partial rows
+        from ship-date / legacy TT paths) or a COMPLETED invoice adjustment
+        touching the request's tranches. Pending merchandiser-raised
         adjustments do not count — Accounts hasn't acted on those.
-        REJECTED tranches are dead records: any TT copy / payment details on
-        them no longer count as a touch (otherwise the deadlock the rejection
-        exists to break would immediately re-form).
+
+        Per-tranche activity (a paid tranche, an uploaded TT copy, recorded
+        payment details) no longer freezes the whole request — since the
+        19 Aug 2026 relaxation it locks only that tranche
+        (see _assert_tranche_untouched_by_accounts); the merchandiser keeps
+        adding and editing the untouched unpaid tranches while the request is
+        still pending.
         """
         tranches = await self._repo.list_for_request(request_id)
-        live = [t for t in tranches if t.status != TrancheStatus.REJECTED]
-        if any(t.status == TrancheStatus.PAID for t in live):
-            return "a tranche has already been paid"
-        if any(t.tt_copy_url for t in live):
-            return "a TT copy has already been uploaded"
-        if any(
-            t.payment_date or t.bank or t.payment_reference_number or t.accounts_remarks
-            for t in live
-        ):
-            return "payment details have been recorded against a tranche"
         payment_row = await self._session.scalar(
             select(PaymentDetails.id).where(
                 PaymentDetails.deposit_request_id == request_id
@@ -619,13 +617,17 @@ class TrancheService:
         self, request: DepositRequest, role: UserRole, *, adding: bool = False
     ) -> None:
         """Merchandisers may change tranches only while the request is still
-        pending AND untouched by Accounts. Super Admin keeps the broader
-        pre-existing rules (lock / terminal-status / paid-tranche checks).
+        pending AND Accounts has written nothing request-wide. Super Admin
+        keeps the broader pre-existing rules (lock / terminal-status /
+        paid-tranche checks).
 
-        Exception (Aug 2026 rejection workflow): while a REJECTED tranche
-        exists, ADDING replacement tranches is allowed even after Accounts
-        have touched the request — that is the point of the rejection.
-        Edits/deletes of other tranches stay frozen."""
+        19 Aug 2026 relaxation: paying a tranche (or uploading its TT copy /
+        recording its payment details) locks only THAT tranche — the
+        merchandiser keeps adding tranches and editing the untouched unpaid
+        ones. Request-wide accounts writes (ship-date payment row, completed
+        adjustment) still freeze everything, except ADDING replacement
+        tranches while a REJECTED tranche exists (the rejection workflow's
+        deadlock-breaker)."""
         if role != UserRole.MERCHANDISER:
             return
         if request.current_status not in _MERCHANDISER_EDITABLE_STATUSES:
@@ -638,6 +640,24 @@ class TrancheService:
             if adding and await self.has_rejected_tranche(request.id):
                 return
             raise ConflictError(f"Tranches can no longer be changed — {reason}.")
+
+    @staticmethod
+    def _assert_tranche_untouched_by_accounts(tranche: PaymentTranche, action: str) -> None:
+        """A specific tranche Accounts has started working on (TT copy uploaded
+        or payment details recorded) is locked against merchandiser changes,
+        even though its siblings stay editable (19 Aug 2026)."""
+        if (
+            tranche.tt_copy_url
+            or tranche.payment_date
+            or tranche.bank
+            or tranche.payment_reference_number
+            or tranche.accounts_remarks
+        ):
+            raise ConflictError(
+                f"The Accounts team has started processing {tranche.label} — "
+                f"a TT copy or payment details are already recorded, so it can "
+                f"no longer be {action}."
+            )
 
     async def _sync_request_totals(
         self,

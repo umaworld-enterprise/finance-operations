@@ -752,6 +752,68 @@ re-upload — per the new requirement. Backend router now guards with
 `RoleGuard`s include `accounts_team`. No migration; deploy backend and
 frontend together so the sidebar link and the API gate match.
 
+## Follow-up (19 Aug 2026) — Merchandiser can add tranches after a payment
+
+User report: after a tranche was paid, the merchandiser lost the Add Tranche
+button. Validated as intended behaviour of the old rule (item 2.3: ANY
+accounts write froze all merchandiser tranche changes), then relaxed per the
+new requirement (**add + edit/delete unpaid** chosen):
+
+- **Per-tranche locks replace the request-wide freeze.** A tranche Accounts
+  has started working on — PAID, TT copy uploaded, or payment details
+  recorded — is locked against merchandiser edit/delete
+  (`_assert_tranche_untouched_by_accounts`). Untouched unpaid siblings stay
+  editable/deletable, and ADDING tranches stays open, while the request is
+  still pending. The invoice-total ceiling still applies.
+- **Request-wide accounts writes still freeze everything**: a
+  payment_details row (ship-date / legacy paths) or a completed invoice
+  adjustment (`accounts_touched_reason`, now narrowed to those two). The
+  rejection deadlock-breaker (adds allowed while a REJECTED tranche exists)
+  is unchanged.
+- `/tranches/modifiable` now answers `modifiable: true` in the
+  paid-some-tranches case; the frontend derives per-row locks from the
+  tranche's own fields (`tt_copy_url` / `payment_date` / `bank` /
+  `payment_reference_number`) and shows "In processing by Accounts — locked"
+  on rows it can't touch.
+
+Tests: 268 passing — new `test_paid_tranche_no_longer_freezes_siblings`;
+`test_tt_copy_locks_only_that_tranche` and
+`test_tranche_payment_details_lock_only_that_tranche` rewritten from the old
+blanket-freeze assertions; the rejection-unlock test now freezes via a
+request-wide payment row. No migration.
+
+## Follow-up (19 Aug 2026) — Sunshine Invoice No. on Live Exposure overdue rows
+
+The Live Exposure "Graced ETD passed" (overdue) table now shows the
+**Sunshine Invoice #** column between Request # and Deposit. The exposure
+endpoint (`/masters/suppliers/{id}/exposure`) returns
+`sunshine_invoice_number` on every row; the frontend renders the column on
+the overdue table only. One shared component, so it applies to every role
+that sees the panel (HoM, Accounts, Merchandiser detail views). No
+migration; 268 tests green.
+
+## Follow-up (19 Aug 2026) — File Remarks: request links, split balance, locked Invoice Change amount
+
+Three changes on the File Remarks module:
+
+1. **Request # is a link** in Open Remarks and Remark History — merchandisers
+   land on their request view (`/merchandiser/{id}`), accounts / finance /
+   super admin on the payment-queue view (`/accounts/{id}`).
+2. **Balance after split** — the Details cell on split remarks shows
+   "Balance on {parent}: X" (old amount − split total), always, including
+   0.00 as explicit full-allocation confirmation. Same shared cell for all
+   roles. The New File Remark split form also shows "Balance left" live next
+   to the split total. Legacy rows without a stored old amount show no
+   balance line.
+3. **Invoice Change amount locked** — a whole-invoice change keeps the
+   value: the New file amount pre-fills from the selected file and is
+   read-only; the server now DERIVES new_amount (= the file's deposit
+   amount) and no longer accepts it from the client (schema field removed,
+   ceiling check moot). Only the new file number is typed.
+
+No migration; 268 tests green; deploy backend + frontend together (the
+create payload no longer carries new_amount).
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

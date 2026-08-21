@@ -52,9 +52,7 @@ def _payload(request, category="invoice_amount_change", **extra):
     selected file (10 Aug rework)."""
     from decimal import Decimal
 
-    defaults: dict = {
-        "new_file_number": "INV-NEW-1", "new_amount": Decimal("1000.00"),
-    }
+    defaults: dict = {"new_file_number": "INV-NEW-1"}
     if category == "invoice_split":
         defaults = {
             "split_targets": [
@@ -73,26 +71,20 @@ def _payload(request, category="invoice_amount_change", **extra):
 # ── Category-specific field validation (schema) ───────────────────────────────
 
 
-def test_amount_change_requires_files_and_new_amount():
-    """The OLD file and OLD amount are both server-derived (10 Aug rework)
-    — only the new file and the new amount come from the client."""
-    from decimal import Decimal
+def test_amount_change_requires_only_the_new_file_number():
+    """The OLD file/amount (10 Aug rework) and the NEW amount (19 Aug: a
+    whole-invoice change keeps the amount) are all server-derived — only the
+    new file number comes from the client."""
     from uuid import uuid4
 
     with pytest.raises(PydanticValidationError, match="New file number"):
         FileRemarkCreate(
             deposit_request_id=uuid4(), category="invoice_amount_change",
-            new_amount=Decimal("10"),
         )
-    with pytest.raises(PydanticValidationError, match="New file amount"):
-        FileRemarkCreate(
-            deposit_request_id=uuid4(), category="invoice_amount_change",
-            new_file_number="N-1",
-        )
-    # No old_amount or old_file needed — valid without them.
+    # Valid with just the new file number.
     FileRemarkCreate(
         deposit_request_id=uuid4(), category="invoice_amount_change",
-        new_file_number="N-1", new_amount=Decimal("10"),
+        new_file_number="N-1",
     )
 
 
@@ -176,16 +168,11 @@ async def test_amounts_cannot_exceed_the_files_deposit(db_session):
             ),
             merch.id, UserRole.MERCHANDISER,
         )
-    with pytest.raises(BusinessRuleError, match="exceeds the file's deposit amount"):
-        await svc.create(
-            _payload(request, new_amount=Decimal("1000.01")),
-            merch.id, UserRole.MERCHANDISER,
-        )
-    # Exactly the deposit amount is allowed.
-    ok = await svc.create(
-        _payload(request, new_amount=Decimal("1000.00")), merch.id, UserRole.MERCHANDISER
-    )
+    # Invoice Change (19 Aug 2026): the new amount is server-derived — always
+    # the file's own deposit amount, so it can never breach the ceiling.
+    ok = await svc.create(_payload(request), merch.id, UserRole.MERCHANDISER)
     assert ok.status == "open"
+    assert Decimal(str(ok.new_amount)) == Decimal("1000.00")
 
 
 @pytest.mark.asyncio

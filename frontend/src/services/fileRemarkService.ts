@@ -7,7 +7,6 @@ export interface CreateFileRemarkPayload {
   // The old file reference and old amount are server-derived from the
   // selected request — never sent by the client (10 Aug rework).
   new_file_number?: string;
-  new_amount?: number;
   split_targets?: SplitTarget[];
   remark?: string;
 }

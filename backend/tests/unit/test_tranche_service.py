@@ -379,15 +379,19 @@ async def test_rejected_tranche_is_fully_inert(db_session):
 
 
 async def test_rejection_unlocks_adding_replacement_tranches(db_session):
-    """THE deadlock case: Accounts recorded details (touch) → merchandiser is
-    frozen → Accounts reject the wrong tranche → merchandiser can ADD again,
-    with the ceiling computed from live tranches only."""
+    """THE deadlock case: Accounts wrote request-wide (payment row) →
+    merchandiser is frozen → Accounts reject the wrong tranche → merchandiser
+    can ADD again, with the ceiling computed from live tranches only."""
     merch, accounts, request, (t1, t2) = await _setup(
         db_session, tranche_amounts=("600.00", "9000.00")
     )
     await _seed_bank(db_session)
     svc = TrancheService(db_session)
-    # Accounts touch the request (details on t1) — merchandiser frozen.
+    # Request-wide accounts write — merchandiser frozen (19 Aug 2026: only
+    # request-wide touches freeze everything; per-tranche details lock just
+    # that tranche).
+    await _add_payment_row(db_session, request)
+    # Accounts also record details on t1 (locks t1 individually).
     await svc.update_payment_details(
         request.id, t1.id,
         TranchePaymentDetailsUpdate(payment_date=date(2026, 8, 1), bank="HSBC (USD)"),
@@ -415,7 +419,7 @@ async def test_rejection_unlocks_adding_replacement_tranches(db_session):
             TrancheCreate(amount=Decimal("9000.00"), tentative_payment_date=date(2026, 9, 1)),
             merch.id, UserRole.MERCHANDISER,
         )
-    # Edits of the remaining live tranche stay frozen (details recorded).
+    # Edits of the remaining live tranche stay frozen (request-wide touch).
     with pytest.raises(ConflictError, match="no longer be changed"):
         await svc.update_tranche(
             request.id, t1.id, TrancheUpdate(amount=Decimal("500.00")),
@@ -502,15 +506,54 @@ async def test_edit_blocked_once_accounts_saved_payment_details(db_session):
         )
 
 
-async def test_edit_blocked_once_sibling_tranche_has_tt_copy(db_session):
+async def test_tt_copy_locks_only_that_tranche(db_session):
+    """19 Aug 2026 relaxation: a TT copy on t1 locks t1 for the merchandiser,
+    but its untouched sibling t2 stays editable."""
     merch, _, request, (t1, t2) = await _setup(
         db_session, tranche_amounts=("600.00", "400.00")
     )
     await _with_tt(db_session, t1)
     svc = TrancheService(db_session)
-    with pytest.raises(ConflictError, match="TT copy"):
+    with pytest.raises(ConflictError, match="started processing"):
         await svc.update_tranche(
-            request.id, t2.id, TrancheUpdate(amount=Decimal("500.00")),
+            request.id, t1.id, TrancheUpdate(amount=Decimal("500.00")),
+            merch.id, UserRole.MERCHANDISER,
+        )
+    with pytest.raises(ConflictError, match="started processing"):
+        await svc.delete_tranche(request.id, t1.id, merch.id, UserRole.MERCHANDISER)
+    updated = await svc.update_tranche(
+        request.id, t2.id, TrancheUpdate(amount=Decimal("500.00")),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert updated.amount == Decimal("500.00")
+
+
+async def test_paid_tranche_no_longer_freezes_siblings(db_session):
+    """The 19 Aug 2026 requirement: after a tranche is paid, the merchandiser
+    can still ADD tranches and EDIT/DELETE the untouched unpaid ones. The paid
+    tranche itself stays immutable."""
+    merch, accounts, request, (t1, t2) = await _setup(
+        db_session, tranche_amounts=("600.00", "400.00")
+    )
+    svc = TrancheService(db_session)
+    await _payable(db_session, t1)
+    await svc.pay_tranche(request.id, t1.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+
+    added = await svc.add_tranche(
+        request.id,
+        TrancheCreate(amount=Decimal("100.00"), tentative_payment_date=date(2026, 9, 1)),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert added.tranche_number == 3
+    updated = await svc.update_tranche(
+        request.id, t2.id, TrancheUpdate(amount=Decimal("300.00")),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert updated.amount == Decimal("300.00")
+    await svc.delete_tranche(request.id, added.id, merch.id, UserRole.MERCHANDISER)
+    with pytest.raises(ConflictError, match="already paid"):
+        await svc.update_tranche(
+            request.id, t1.id, TrancheUpdate(amount=Decimal("1.00")),
             merch.id, UserRole.MERCHANDISER,
         )
 
@@ -729,9 +772,10 @@ async def test_payment_details_locked_once_paid(db_session):
         )
 
 
-async def test_tranche_payment_details_count_as_accounts_touch(db_session):
-    """Recorded tranche payment details freeze merchandiser tranche changes,
-    same as any other accounts write (extends the Phase 3 guard)."""
+async def test_tranche_payment_details_lock_only_that_tranche(db_session):
+    """Recorded tranche payment details lock that tranche against merchandiser
+    changes; its untouched sibling stays editable (19 Aug 2026 relaxation of
+    the Phase 3 guard)."""
     merch, accounts, request, (t1, t2) = await _setup(
         db_session, tranche_amounts=("600.00", "400.00")
     )
@@ -742,8 +786,13 @@ async def test_tranche_payment_details_count_as_accounts_touch(db_session):
         TranchePaymentDetailsUpdate(payment_date=date(2026, 8, 2), bank="HSBC (USD)"),
         accounts.id, UserRole.ACCOUNTS_TEAM,
     )
-    with pytest.raises(ConflictError, match="payment details"):
+    with pytest.raises(ConflictError, match="started processing"):
         await svc.update_tranche(
-            request.id, t2.id, TrancheUpdate(amount=Decimal("500.00")),
+            request.id, t1.id, TrancheUpdate(amount=Decimal("500.00")),
             merch.id, UserRole.MERCHANDISER,
         )
+    updated = await svc.update_tranche(
+        request.id, t2.id, TrancheUpdate(amount=Decimal("500.00")),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert updated.amount == Decimal("500.00")

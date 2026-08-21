@@ -11,6 +11,7 @@
 // Reject buttons — the merchandiser is notified of either outcome.
 
 import { useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Check, Inbox, MessageSquarePlus, Plus, Trash2, X } from "lucide-react";
 import { TopNav } from "@/components/layout/TopNav";
@@ -121,6 +122,11 @@ function RemarkDetails({ r }: { r: FileRemark }) {
     // Prefer the parent's CURRENT sunshine invoice number — falls back to
     // the stored parent reference, then the request number (legacy rows).
     const parent = r.sunshine_invoice_number ?? r.old_file_number ?? r.request_number ?? "—";
+    // Balance left on the original file after the split (19 Aug 2026) —
+    // shown even at 0.00 as explicit confirmation of a full allocation.
+    // Needs the stored old amount (legacy rows without one show no balance).
+    const splitTotal = r.split_targets.reduce((sum, t) => sum + Number(t.amount), 0);
+    const balance = r.old_amount != null ? Number(r.old_amount) - splitTotal : null;
     return (
       <div className="text-xs text-muted-foreground space-y-0.5">
         <p className="font-medium text-foreground">
@@ -134,6 +140,12 @@ function RemarkDetails({ r }: { r: FileRemark }) {
             → {t.file_number} · {Number(t.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
           </p>
         ))}
+        {balance != null && (
+          <p className={balance < 0 ? "text-destructive font-medium" : "font-medium text-foreground"}>
+            Balance on {parent}:{" "}
+            {balance.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+          </p>
+        )}
       </div>
     );
   }
@@ -181,12 +193,30 @@ export default function FileRemarksPage() {
   const [requestId, setRequestId] = useState("");
   const [splitRows, setSplitRows] = useState<SplitRow[]>([{ file_number: "", amount: "" }]);
   const [newFile, setNewFile] = useState("");
-  const [newAmount, setNewAmount] = useState("");
   const [remarkText, setRemarkText] = useState("");
   const [decideTarget, setDecideTarget] = useState<FileRemark | null>(null);
   const [decision, setDecision] = useState<"approved" | "rejected">("approved");
 
   const openRemarks = remarks.filter((r) => r.status === "open");
+
+  // Request # cells link to the request's own form (19 Aug 2026) — the
+  // merchandiser's request view for merchandisers, the payment-queue view
+  // for accounts / finance / super admin (its RoleGuard admits all three).
+  const requestHref = (r: FileRemark) =>
+    user?.role === "merchandiser"
+      ? `/merchandiser/${r.deposit_request_id}`
+      : `/accounts/${r.deposit_request_id}`;
+  const RequestLink = ({ r }: { r: FileRemark }) =>
+    r.request_number ? (
+      <Link
+        href={requestHref(r)}
+        className="text-primary hover:underline underline-offset-2"
+      >
+        {r.request_number}
+      </Link>
+    ) : (
+      <>—</>
+    );
 
   // Search / sort / pagination (10 Aug 2026, app-wide table controls).
   const remarkHaystack = (r: FileRemark) => [
@@ -216,14 +246,18 @@ export default function FileRemarksPage() {
   const depositCeiling = selectedRequest != null ? Number(selectedRequest.deposit_amount) : null;
   const splitTotal = splitRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
   const splitOverCeiling = depositCeiling != null && splitTotal > depositCeiling;
-  const newAmountOverCeiling = depositCeiling != null && Number(newAmount) > depositCeiling;
+  // Live balance left on the original file as split amounts are typed
+  // (19 Aug 2026) — matches the balance shown on submitted remarks.
+  const splitBalance = depositCeiling != null ? depositCeiling - splitTotal : null;
 
   const splitRowsValid =
     splitRows.length > 0 &&
     splitRows.every((row) => row.file_number.trim() && Number(row.amount) > 0) &&
     !splitOverCeiling;
-  const amountChangeValid =
-    Boolean(newFile.trim() && Number(newAmount) > 0) && !newAmountOverCeiling;
+  // Invoice Change (19 Aug 2026): the whole invoice changes number, not
+  // value — the amount is pre-filled from the file and locked; the server
+  // derives it independently, so only the new file number is client input.
+  const amountChangeValid = Boolean(newFile.trim());
   const canSubmit =
     !!requestId && (category === "invoice_split" ? splitRowsValid : amountChangeValid);
 
@@ -231,7 +265,6 @@ export default function FileRemarksPage() {
     setRequestId("");
     setSplitRows([{ file_number: "", amount: "" }]);
     setNewFile("");
-    setNewAmount("");
     setRemarkText("");
   };
 
@@ -251,10 +284,10 @@ export default function FileRemarksPage() {
               })),
             }
           : {
-              // The old file reference is server-derived from the selected
-              // request (10 Aug rework) — nothing to type.
+              // The old file reference (10 Aug rework) AND the new amount
+              // (19 Aug: whole-invoice change keeps the amount) are both
+              // server-derived — only the new file number is typed.
               new_file_number: newFile.trim(),
-              new_amount: Number(newAmount),
             }),
         remark: remarkText.trim() || undefined,
       });
@@ -412,6 +445,11 @@ export default function FileRemarksPage() {
                     {depositCeiling != null && (
                       <p className={`text-xs ${splitOverCeiling ? "text-destructive" : "text-muted-foreground"}`}>
                         Split total: {splitTotal.toFixed(2)} of {depositCeiling.toFixed(2)}
+                        {splitBalance != null && (
+                          <span className={splitOverCeiling ? "" : "font-medium text-foreground"}>
+                            {" "}· Balance left: {splitBalance.toFixed(2)}
+                          </span>
+                        )}
                       </p>
                     )}
                   </div>
@@ -454,23 +492,22 @@ export default function FileRemarksPage() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="fr-new-amount">
-                      New file amount<span className="ml-0.5" aria-hidden="true">*</span>
-                    </Label>
+                    <Label htmlFor="fr-new-amount">New file amount</Label>
+                    {/* 19 Aug 2026: the whole invoice changes number, not
+                        value — pre-filled from the file and locked; the
+                        server derives it independently. */}
                     <input
                       id="fr-new-amount"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={newAmount}
-                      onChange={(e) => setNewAmount(e.target.value)}
-                      className={`mt-1 ${inputCls}`}
+                      type="text"
+                      value={oldAmountDisplay}
+                      readOnly
+                      disabled
+                      placeholder="Select a file above"
+                      className={`mt-1 ${inputCls} bg-muted opacity-70 cursor-not-allowed`}
                     />
-                    {newAmountOverCeiling && (
-                      <p className="text-xs text-destructive mt-1">
-                        Cannot exceed the file&apos;s old amount of {depositCeiling!.toFixed(2)}.
-                      </p>
-                    )}
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Same as the old amount — a whole-invoice change keeps the value.
+                    </p>
                   </div>
                 </div>
               )}
@@ -544,7 +581,7 @@ export default function FileRemarksPage() {
                             {formatDate(r.created_at)}
                           </TableCell>
                           <TableCell className="font-mono text-xs font-semibold whitespace-nowrap">
-                            {r.request_number ?? "—"}
+                            <RequestLink r={r} />
                           </TableCell>
                           <TableCell className="text-sm whitespace-nowrap">
                             {CATEGORY_LABELS[r.category]}
@@ -634,7 +671,7 @@ export default function FileRemarksPage() {
                           {formatDate(r.created_at)}
                         </TableCell>
                         <TableCell className="font-mono text-xs font-semibold whitespace-nowrap">
-                          {r.request_number ?? "—"}
+                          <RequestLink r={r} />
                         </TableCell>
                         <TableCell className="text-sm whitespace-nowrap">
                           {CATEGORY_LABELS[r.category]}

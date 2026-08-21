@@ -40,6 +40,8 @@ async def test_exposure_buckets_and_exclusions(db_session):
         db_session, supplier=supplier, customer=customer, created_by=merch,
         status=RequestStatus.PAYMENT_PROCESSED, deposit_amount=Decimal("500.00"),
     )
+    overdue_req.sunshine_invoice_number = "SUN-2026-042"
+    await db_session.flush()
     await _snapshot(db_session, overdue_req, today - timedelta(days=5), overdue=5)
 
     # 2. Graced ETD in the future — "pending" bucket.
@@ -91,6 +93,8 @@ async def test_exposure_buckets_and_exclusions(db_session):
 
     assert [r.request_number for r in result.graced_etd_passed] == [overdue_req.request_number]
     assert result.graced_etd_passed[0].etd_grace_overdue_days == 5
+    # Overdue rows carry the Sunshine Invoice No. (19 Aug 2026).
+    assert result.graced_etd_passed[0].sunshine_invoice_number == "SUN-2026-042"
     assert {r.request_number for r in result.graced_etd_pending} == {
         pending_req.request_number, bare_req.request_number,
     }

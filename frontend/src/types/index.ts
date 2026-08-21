@@ -87,6 +87,7 @@ export interface DefaultedSupplier {
 export interface SupplierExposureRow {
   request_id: string;
   request_number: string;
+  sunshine_invoice_number: string | null;
   deposit_amount: number;
   currency: string | null;
   current_status: RequestStatus;

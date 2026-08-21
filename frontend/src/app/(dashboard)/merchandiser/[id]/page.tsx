@@ -276,9 +276,10 @@ export default function MerchandiserRequestDetail() {
           <CardContent className="p-5 md:p-6">
             <h2 className="text-sm font-semibold text-foreground mb-1">Advance Payment Tranches</h2>
             <p className="text-xs text-muted-foreground mb-4">
-              You can edit, add or delete tranches while the request is pending and
-              the Accounts team has not started processing it. The Accounts team is
-              notified of every change.
+              You can edit, add or delete tranches while the request is pending —
+              including after some tranches are paid. Tranches already paid, or
+              already in processing by the Accounts team, stay locked. The Accounts
+              team is notified of every change.
             </p>
             <TrancheList
               requestId={id}

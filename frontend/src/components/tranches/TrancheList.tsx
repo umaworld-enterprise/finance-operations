@@ -218,6 +218,11 @@ export function TrancheList({
   // Adding replacement tranches stays possible after a rejection even when
   // other changes are frozen (Aug 2026 rejection workflow).
   const merchandiserCanAdd = mode === "merchandiser" && (canAdd ?? canModify);
+  // 19 Aug 2026 relaxation: accounts activity locks only the tranche it is
+  // on — an unpaid tranche with a TT copy or payment details recorded is in
+  // Accounts' hands; its untouched siblings stay editable.
+  const accountsStartedProcessing = (t: PaymentTranche) =>
+    !!(t.tt_copy_url || t.payment_date || t.bank || t.payment_reference_number);
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const startEdit = (t: PaymentTranche) => {
@@ -492,8 +497,20 @@ export function TrancheList({
               )}
 
               {/* Merchandiser: edit/delete unpaid tranches while the request
-                  is pending and untouched by Accounts */}
-              {merchandiserCanModify && t.status === "unpaid" && !isEditing && (
+                  is pending — only the tranches Accounts hasn't started
+                  working on (19 Aug 2026 relaxation). */}
+              {merchandiserCanModify &&
+                t.status === "unpaid" &&
+                accountsStartedProcessing(t) &&
+                !isEditing && (
+                  <p className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <Lock className="h-3 w-3" /> In processing by Accounts — locked against edits
+                  </p>
+                )}
+              {merchandiserCanModify &&
+                t.status === "unpaid" &&
+                !accountsStartedProcessing(t) &&
+                !isEditing && (
                 <div className="flex items-center gap-2">
                   <Button size="sm" variant="outline" onClick={() => startEdit(t)}>
                     <Pencil className="h-3.5 w-3.5 mr-1.5" /> Edit amount / date
