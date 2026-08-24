@@ -514,6 +514,70 @@ async def notify_tranche_event(request_id: UUID, tranche_id: UUID, event: str) -
         )
 
 
+async def notify_tranche_added(
+    request_id: UUID, tranche_id: UUID, reopened: bool = False
+) -> None:
+    """After a merchandiser adds a tranche — bell + push to every active
+    Accounts Team user AND super admin (19 Aug 2026 fix: adds previously
+    reused the generic 'updated' notification, which skipped super admins).
+    When the add reopened a completed file, the message says so.
+
+    Own session; failures logged and swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+    from app.models.tranche import PaymentTranche
+
+    try:
+        async with AsyncSessionFactory() as session:
+            request = await _load_request(session, request_id)
+            tranche = await session.get(PaymentTranche, tranche_id)
+            if request is None or tranche is None:
+                return
+            body = (
+                f"{tranche.label} ({tranche.amount}) was added to "
+                f"{request.request_number}"
+                + (
+                    " — the completed file has been REOPENED for the additional amount."
+                    if reopened
+                    else " by the merchandiser."
+                )
+            )
+            message = {
+                "title": "File reopened — new tranche" if reopened else "New tranche added",
+                "body": body,
+                "url": f"/accounts/{request_id}",
+                "attachment_url": None,
+            }
+            result = await session.execute(
+                select(User).where(
+                    User.role.in_([UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN]),
+                    User.is_active == True,  # noqa: E712
+                )
+            )
+            targets = list(result.scalars().all())
+            for user in targets:
+                session.add(
+                    Notification(
+                        user_id=user.id,
+                        type=TYPE_TRANCHE_UPDATED,
+                        title=message["title"],
+                        body=message["body"],
+                        url=message["url"],
+                        attachment_url=None,
+                        deposit_request_id=request.id,
+                    )
+                )
+            await session.commit()
+            for user in targets:
+                await _push_to_user(session, user.id, message)
+            await session.commit()
+    except Exception as exc:
+        logger.error(
+            "notify_tranche_added failed",
+            request_id=str(request_id), tranche_id=str(tranche_id), error=str(exc),
+        )
+
+
 async def notify_tranche_updated(request_id: UUID, tranche_id: UUID, changes: str) -> None:
     """After a merchandiser edits an unpaid tranche — bell + push to every
     active Accounts Team user so they work from the latest values.

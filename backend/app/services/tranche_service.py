@@ -295,6 +295,38 @@ class TrancheService:
         await self._session.delete(tranche)
         await self._session.flush()
         await self._sync_request_totals(request, user_id, ip_address, user_agent)
+
+        # Dynamic status (19 Aug 2026 follow-up): deleting the only unpaid
+        # tranche can leave every live tranche paid — the request then
+        # completes again, the exact mirror of the reopen that add_tranche
+        # performs. Mechanical consequence, so no role-gated transition
+        # check here (the DB trigger still validates the status pair).
+        if request.current_status == RequestStatus.PENDING_PAYMENT:
+            remaining = await self._repo.list_for_request(request_id)
+            live = [t for t in remaining if t.status != TrancheStatus.REJECTED]
+            if live and all(t.status == TrancheStatus.PAID for t in live):
+                old_status = request.current_status
+                await self._request_repo.update(
+                    request,
+                    current_status=RequestStatus.PAYMENT_PROCESSED,
+                    is_locked=True,
+                )
+                self._session.add(
+                    StatusHistory(
+                        deposit_request_id=request_id,
+                        old_status=old_status,
+                        new_status=RequestStatus.PAYMENT_PROCESSED,
+                        changed_by=user_id,
+                    )
+                )
+                await self._audit.record_status_change(
+                    "deposit_requests", request_id, user_id,
+                    old_status=old_status.value,
+                    new_status=RequestStatus.PAYMENT_PROCESSED.value,
+                    ip_address=ip_address, user_agent=user_agent,
+                )
+                await self._sync_request_payment_details(request_id, user_id)
+
         return label
 
     # ── Accounts payments ─────────────────────────────────────────────────────

@@ -862,6 +862,25 @@ completes again), ceiling + role guards on reopen, transition-map cases
 `_add_payment_row` fixture carries a ship_date so request-wide freeze tests
 still exercise a genuine touch.
 
+## Follow-up (19 Aug 2026) — Reopen fixes: dynamic status on delete + add notification
+
+Two gaps found in UAT of the reopen feature:
+
+1. **Dynamic status** — deleting the tranche that reopened a completed file
+   left the request stuck in Pending Payment. `delete_tranche` now
+   re-derives: when a deletion leaves every live tranche paid, the request
+   flips straight back to payment_processed, re-locks, writes
+   StatusHistory + audit, and re-derives the payment_details marker — the
+   exact mirror of the reopen.
+2. **Add-tranche notification** — adds reused the generic "tranche updated"
+   notification, which only reached `accounts_team` role users (super
+   admins got nothing). New `notify_tranche_added` (bell + Web Push,
+   identical payloads) goes to all active accounts users AND super admins;
+   when the add reopened a completed file the title/body say "File
+   reopened — new tranche".
+
+Backend-only; 273 tests green (new delete-recompletes round-trip test).
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
