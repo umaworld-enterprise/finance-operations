@@ -58,6 +58,13 @@ _ALLOWED_TRANSITIONS: dict[tuple[RequestStatus, RequestStatus], frozenset[UserRo
     (RequestStatus.REOPENED, RequestStatus.PENDING_PAYMENT): frozenset({
         UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN,
     }),
+    # Merchandiser adds a tranche to a completed file (19 Aug 2026) — the
+    # request REOPENS into the payment queue for the additional amount (up
+    # to the invoice total) and completes again once the new tranches are
+    # paid. Fired by TrancheService.add_tranche, not a standalone action.
+    (RequestStatus.PAYMENT_PROCESSED, RequestStatus.PENDING_PAYMENT): frozenset({
+        UserRole.MERCHANDISER, UserRole.SUPER_ADMIN,
+    }),
     # HoM approves → request goes to Accounts normally
     (RequestStatus.PENDING_HOM_APPROVAL, RequestStatus.PENDING_PAYMENT): frozenset({
         UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN,

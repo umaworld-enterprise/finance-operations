@@ -641,7 +641,9 @@ export function TrancheList({
       {mode === "merchandiser" && !canModify && (
         <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
           {merchandiserCanAdd
-            ? "A tranche was rejected — add replacement tranches below until the total matches the required amount again. Existing tranches stay locked."
+            ? rejectedCount > 0
+              ? "A tranche was rejected — add replacement tranches below until the total matches the required amount again. Existing tranches stay locked."
+              : "Payment on this file is complete — adding a tranche reopens it with the Accounts team for the additional amount (up to the invoice total)."
             : `Tranches can no longer be changed${modifyBlockedReason ? ` — ${modifyBlockedReason}.` : "."} Contact the Accounts team if an amount or date is wrong.`}
         </p>
       )}

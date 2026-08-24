@@ -161,16 +161,27 @@ class TrancheService:
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> PaymentTranche:
-        """Merchandiser adds a tranche to their own pending, untouched request."""
+        """Merchandiser adds a tranche to their own request — pending, or
+        payment-processed (19 Aug 2026: adding to a completed file REOPENS
+        it into the payment queue for the additional amount)."""
         request = await self._get_request_or_404(request_id)
         if role not in {UserRole.MERCHANDISER, UserRole.SUPER_ADMIN}:
             raise AuthorizationError("Only the request's merchandiser can add tranches.")
         if role == UserRole.MERCHANDISER and request.created_by != user_id:
             raise AuthorizationError("You can only add tranches on your own requests.")
-        assert_record_not_locked(request.is_locked, role)
         if request.current_status in _TERMINAL_STATUSES:
             raise ConflictError("Tranches cannot be added on a cancelled or rejected request.")
-        await self._assert_merchandiser_may_modify(request, role, adding=True)
+        reopening = request.current_status == RequestStatus.PAYMENT_PROCESSED
+        if reopening:
+            # The completion lock is exactly what this path lifts — validate
+            # the reopen transition up-front instead (the DB trigger enforces
+            # it again on the status write below).
+            assert_transition_allowed(
+                request.current_status, RequestStatus.PENDING_PAYMENT, role
+            )
+        else:
+            assert_record_not_locked(request.is_locked, role)
+            await self._assert_merchandiser_may_modify(request, role, adding=True)
 
         new_total = await self._repo.sum_amounts_for_request(request_id) + Decimal(str(data.amount))
         if new_total > Decimal(str(request.total_supplier_invoice_amount)):
@@ -195,6 +206,44 @@ class TrancheService:
             ),
             ip_address=ip_address, user_agent=user_agent,
         )
+
+        if reopening:
+            from app.models.enums import PaymentStatus
+            from app.repositories.payment_repo import PaymentRepository
+
+            old_status = request.current_status
+            await self._request_repo.update(
+                request,
+                current_status=RequestStatus.PENDING_PAYMENT,
+                is_locked=False,
+            )
+            self._session.add(
+                StatusHistory(
+                    deposit_request_id=request_id,
+                    old_status=old_status,
+                    new_status=RequestStatus.PENDING_PAYMENT,
+                    changed_by=user_id,
+                )
+            )
+            await self._audit.record_status_change(
+                "deposit_requests", request_id, user_id,
+                old_status=old_status.value,
+                new_status=RequestStatus.PENDING_PAYMENT.value,
+                ip_address=ip_address, user_agent=user_agent,
+            )
+            # Step the completion marker back to partial: the paid-so-far
+            # date stays on record; payment_status clears until the new
+            # tranches complete the file again (pay_tranche re-derives it).
+            payment_repo = PaymentRepository(self._session)
+            payment_row = await payment_repo.get_by_request_id(request_id)
+            if (
+                payment_row is not None
+                and payment_row.payment_status == PaymentStatus.PROCESSED.value
+            ):
+                await payment_repo.update(
+                    payment_row, payment_status=None, updated_by=user_id
+                )
+
         await self._sync_request_totals(request, user_id, ip_address, user_agent)
         return tranche
 
@@ -592,13 +641,28 @@ class TrancheService:
         adding and editing the untouched unpaid tranches while the request is
         still pending.
         """
+        from app.models.enums import PaymentStatus
+
         tranches = await self._repo.list_for_request(request_id)
-        payment_row = await self._session.scalar(
-            select(PaymentDetails.id).where(
-                PaymentDetails.deposit_request_id == request_id
+        payment_row = (
+            await self._session.execute(
+                select(PaymentDetails).where(
+                    PaymentDetails.deposit_request_id == request_id
+                )
             )
-        )
-        if payment_row is not None:
+        ).scalar_one_or_none()
+        # A row that only carries the paid-so-far date (what a reopened file
+        # keeps after add_tranche clears its processed marker, 19 Aug 2026)
+        # is NOT a touch — otherwise a reopened request would freeze
+        # instantly. Real accounts activity on the row still counts.
+        if payment_row is not None and (
+            payment_row.payment_status == PaymentStatus.PROCESSED.value
+            or payment_row.ship_date is not None
+            or payment_row.tt_copy_url is not None
+            or payment_row.bank
+            or payment_row.payment_reference_number
+            or payment_row.accounts_remarks
+        ):
             return "the Accounts team has started payment processing"
         adjustments = await AdjustmentRepository(self._session).list_for_tranche_ids(
             [t.id for t in tranches]

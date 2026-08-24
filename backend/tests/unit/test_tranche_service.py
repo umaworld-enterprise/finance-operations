@@ -482,7 +482,16 @@ async def test_duplicate_tt_upload_rejected(db_session):
 
 
 async def _add_payment_row(db_session, request):
-    db_session.add(PaymentDetails(id=uuid.uuid4(), deposit_request_id=request.id))
+    """Request-wide accounts write. Carries a ship_date so it registers as a
+    touch — a bare row holding only a payment date no longer freezes anything
+    (19 Aug 2026: that is what a reopened file keeps)."""
+    db_session.add(
+        PaymentDetails(
+            id=uuid.uuid4(),
+            deposit_request_id=request.id,
+            ship_date=date(2026, 8, 1),
+        )
+    )
     await db_session.flush()
 
 
@@ -526,6 +535,75 @@ async def test_tt_copy_locks_only_that_tranche(db_session):
         merch.id, UserRole.MERCHANDISER,
     )
     assert updated.amount == Decimal("500.00")
+
+
+async def test_add_tranche_reopens_processed_request(db_session):
+    """19 Aug 2026: adding a tranche to a fully paid file reopens it — back
+    to pending_payment, unlocked, completion marker stepped back — and it
+    completes again once the new tranche is paid."""
+    from sqlalchemy import select as sa_select
+
+    merch, accounts, request, (t1,) = await _setup(db_session)
+    svc = TrancheService(db_session)
+    await _payable(db_session, t1)
+    await svc.pay_tranche(request.id, t1.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    assert request.current_status == RequestStatus.PAYMENT_PROCESSED
+    assert request.is_locked is True
+
+    added = await svc.add_tranche(
+        request.id,
+        TrancheCreate(amount=Decimal("500.00"), tentative_payment_date=date(2026, 9, 1)),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert request.current_status == RequestStatus.PENDING_PAYMENT
+    assert request.is_locked is False
+    assert Decimal(str(request.deposit_amount)) == Decimal("1500.00")
+    payment_row = (
+        await db_session.execute(
+            sa_select(PaymentDetails).where(
+                PaymentDetails.deposit_request_id == request.id
+            )
+        )
+    ).scalar_one()
+    assert payment_row.payment_status is None  # completion marker stepped back
+    assert payment_row.payment_date is not None  # paid-so-far date kept
+
+    # The reopened file is a normal pending request: the new tranche can be
+    # edited (no request-wide freeze from the leftover payment row)...
+    updated = await svc.update_tranche(
+        request.id, added.id, TrancheUpdate(amount=Decimal("400.00")),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert updated.amount == Decimal("400.00")
+    # ...and paying it completes the file again.
+    await _payable(db_session, added)
+    await svc.pay_tranche(request.id, added.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    assert request.current_status == RequestStatus.PAYMENT_PROCESSED
+    assert request.is_locked is True
+    assert payment_row.payment_status == "processed"
+
+
+async def test_reopen_by_adding_respects_invoice_ceiling_and_roles(db_session):
+    merch, accounts, request, (t1,) = await _setup(db_session)
+    svc = TrancheService(db_session)
+    await _payable(db_session, t1)
+    await svc.pay_tranche(request.id, t1.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+
+    # Ceiling: 1000 paid + 9500 would breach the 10000 invoice total.
+    with pytest.raises(ValidationError, match="cannot exceed"):
+        await svc.add_tranche(
+            request.id,
+            TrancheCreate(amount=Decimal("9500.00"), tentative_payment_date=date(2026, 9, 1)),
+            merch.id, UserRole.MERCHANDISER,
+        )
+    assert request.current_status == RequestStatus.PAYMENT_PROCESSED
+    # Only the request's merchandiser (or super admin) can reopen by adding.
+    with pytest.raises(AuthorizationError):
+        await svc.add_tranche(
+            request.id,
+            TrancheCreate(amount=Decimal("100.00"), tentative_payment_date=date(2026, 9, 1)),
+            accounts.id, UserRole.ACCOUNTS_TEAM,
+        )
 
 
 async def test_paid_tranche_no_longer_freezes_siblings(db_session):

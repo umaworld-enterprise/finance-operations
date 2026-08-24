@@ -828,6 +828,40 @@ button (browser history — returns to wherever the user came from, e.g. a
 File Remarks link) alongside the existing **Back to queue** fixed jump to
 the dashboard sheet. Frontend-only.
 
+## Follow-up (19 Aug 2026) — Adding a tranche REOPENS a completed file
+
+New requirement (after the single-tranche file on the screenshot closed on
+its first payment): the merchandiser can add tranches to a
+**payment-processed** file — doing so REOPENS it.
+
+- **New status transition** `payment_processed → pending_payment`
+  (merchandiser + super admin only), fired inside
+  `TrancheService.add_tranche`, not a standalone action. All three
+  status-rule locations updated: `status_transitions.py`, the Postgres
+  trigger (**migration 0031**), enums unchanged.
+- On reopen: request returns to the payment queue, unlocks, StatusHistory +
+  audit written, and the payment_details completion marker steps back
+  (payment_status cleared; the paid-so-far payment_date is kept for the
+  record). Paying the new final tranche completes and locks the file again,
+  re-deriving the marker.
+- Ceiling unchanged: total tranches ≤ invoice total. Paid tranches stay
+  immutable; the new unpaid tranche is a normal editable pending tranche.
+- `accounts_touched_reason` narrowed once more: a payment row counts as a
+  request-wide touch only when it shows real accounts activity (processed
+  status, ship date, legacy TT copy, bank/reference/remarks) — a bare row
+  holding only the paid-so-far date (what a reopened file keeps) does not
+  freeze the merchandiser.
+- Frontend: merchandiser detail keeps the tranche list interactive on
+  processed files; `/tranches/modifiable` answers `can_add: true` there;
+  the amber notice explains that adding reopens the file (the rejection
+  wording now only shows when a rejected tranche actually exists).
+
+Tests: 272 passing — reopen round-trip (pay → add → edit → pay →
+completes again), ceiling + role guards on reopen, transition-map cases
+(the old "processed → pending is invalid" test now asserts the opposite);
+`_add_payment_row` fixture carries a ship_date so request-wide freeze tests
+still exercise a genuine touch.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

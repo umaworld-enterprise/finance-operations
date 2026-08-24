@@ -286,7 +286,10 @@ export default function MerchandiserRequestDetail() {
               tranches={req.tranches ?? []}
               currency={req.currency}
               mode={
-                req.is_locked ||
+                // A completed file stays interactive for the merchandiser:
+                // adding a tranche REOPENS it (19 Aug 2026) — the lock only
+                // freezes the existing (paid) tranches, handled per-row.
+                (req.is_locked && req.current_status !== "payment_processed") ||
                 ["cancelled_by_merchandiser", "cancelled_by_accounts", "rejected_by_hom"].includes(
                   req.current_status,
                 )

@@ -19,7 +19,7 @@ from app.integrations.google_drive.drive_service import (
     validate_tt_copy,
 )
 from app.models.deposit_request import DepositRequest
-from app.models.enums import UserRole
+from app.models.enums import RequestStatus, UserRole
 from app.models.tranche import PaymentTranche
 from app.repositories.audit_repo import AuditRepository
 from app.repositories.deposit_request_repo import DepositRequestRepository
@@ -102,7 +102,9 @@ async def tranches_modifiable(
 
     can_add is broader than modifiable: while a REJECTED tranche exists,
     adding replacement tranches stays allowed even after a request-wide
-    accounts touch (Aug 2026 rejection workflow)."""
+    accounts touch (Aug 2026 rejection workflow); and adding to a
+    payment-processed file is always possible — it REOPENS the request
+    (19 Aug 2026)."""
     request = await _request_or_404(db, request_id, current_user)
     svc = TrancheService(db)
     still_pending = request.current_status in _MERCHANDISER_EDITABLE_STATUSES
@@ -114,7 +116,11 @@ async def tranches_modifiable(
     else:
         reason = await svc.accounts_touched_reason(request_id)
     modifiable = reason is None
-    can_add = modifiable or (still_pending and await svc.has_rejected_tranche(request_id))
+    can_add = (
+        modifiable
+        or (still_pending and await svc.has_rejected_tranche(request_id))
+        or request.current_status == RequestStatus.PAYMENT_PROCESSED
+    )
     return {"modifiable": modifiable, "reason": reason, "can_add": can_add}
 
 
