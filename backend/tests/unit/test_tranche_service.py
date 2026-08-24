@@ -583,6 +583,38 @@ async def test_add_tranche_reopens_processed_request(db_session):
     assert payment_row.payment_status == "processed"
 
 
+async def test_deleting_the_reopening_tranche_recompletes_the_request(db_session):
+    """Dynamic status (19 Aug 2026 follow-up): if the tranche that reopened a
+    completed file is deleted again, every live tranche is paid once more —
+    the request must flip straight back to payment_processed and re-lock."""
+    from sqlalchemy import select as sa_select
+
+    merch, accounts, request, (t1,) = await _setup(db_session)
+    svc = TrancheService(db_session)
+    await _payable(db_session, t1)
+    await svc.pay_tranche(request.id, t1.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+
+    added = await svc.add_tranche(
+        request.id,
+        TrancheCreate(amount=Decimal("500.00"), tentative_payment_date=date(2026, 9, 1)),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert request.current_status == RequestStatus.PENDING_PAYMENT
+
+    await svc.delete_tranche(request.id, added.id, merch.id, UserRole.MERCHANDISER)
+    assert request.current_status == RequestStatus.PAYMENT_PROCESSED
+    assert request.is_locked is True
+    assert Decimal(str(request.deposit_amount)) == Decimal("1000.00")
+    payment_row = (
+        await db_session.execute(
+            sa_select(PaymentDetails).where(
+                PaymentDetails.deposit_request_id == request.id
+            )
+        )
+    ).scalar_one()
+    assert payment_row.payment_status == "processed"  # marker re-derived
+
+
 async def test_reopen_by_adding_respects_invoice_ceiling_and_roles(db_session):
     merch, accounts, request, (t1,) = await _setup(db_session)
     svc = TrancheService(db_session)

@@ -35,6 +35,7 @@ from app.schemas.tranche import (
 )
 from app.services.adjustment_service import AdjustmentService
 from app.services.notification_service import (
+    notify_tranche_added,
     notify_tranche_event,
     notify_tranche_rejected,
     notify_tranche_removed,
@@ -133,19 +134,25 @@ async def add_tranche(
     db: DB,
     background_tasks: BackgroundTasks,
 ) -> TrancheResponse:
-    """Merchandiser adds a tranche to their own pending, untouched request.
-    Accounts Team is notified of the change."""
+    """Merchandiser adds a tranche to their own pending request — or to a
+    payment-processed one, which REOPENS it (19 Aug 2026). Accounts Team and
+    super admins are notified of the new tranche either way."""
+    repo = DepositRequestRepository(db)
+    before = await repo.get_for_validation(request_id)
+    was_processed = (
+        before is not None
+        and before.current_status == RequestStatus.PAYMENT_PROCESSED
+    )
     svc = TrancheService(db)
     tranche = await svc.add_tranche(
         request_id, data, current_user.id, current_user.role,
         ip_address=_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
-    req = await DepositRequestRepository(db).get_for_validation(request_id)
+    req = await repo.get_for_validation(request_id)
     background_tasks.add_task(seed_snapshot_for_request, request_id)
     background_tasks.add_task(
-        notify_tranche_updated, request_id, tranche.id,
-        f"added with amount {tranche.amount}",
+        notify_tranche_added, request_id, tranche.id, was_processed
     )
     return _tranche_response(tranche, req.total_supplier_invoice_amount)
 
