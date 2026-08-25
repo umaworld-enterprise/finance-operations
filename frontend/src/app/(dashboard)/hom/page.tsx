@@ -145,7 +145,7 @@ export default function HomDashboard() {
 
   return (
     <RoleGuard allowedRoles={["head_of_merchandiser", "super_admin"]}>
-      <TopNav title="HoM Dashboard" subtitle="Head of Merchandiser — approval queue and performance" />
+      <TopNav title="HoM Workspace" subtitle="Head of Merchandiser — approval queue and performance" />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
 
         {/* Pending Approval Queue */}

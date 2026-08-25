@@ -416,8 +416,8 @@ export default function AccountsDashboard() {
   const [allPage, setAllPage]   = useState(1);
   const [activeTab, setActiveTab] = useState("pending");
   const [search, setSearch]     = useState("");
-  // null = untouched: the pending queue keeps its designed oldest-first order
-  // ("process in order") until the user actively picks a sort.
+  // null = untouched: the pending queue keeps the server's latest-first
+  // default (19 Aug 2026) until the user actively picks a sort.
   const [sort, setSort]         = useState<RequestSort | null>(null);
   const debouncedSearch = useDebouncedValue(search.trim());
   const listParams = {
@@ -491,7 +491,7 @@ export default function AccountsDashboard() {
     <RoleGuard allowedRoles={["accounts_team", "super_admin"]}>
       <TopNav
         title="Payment Queue"
-        subtitle="Process advance deposit payments in order of submission"
+        subtitle="Process advance deposit payments — latest requests first"
       />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
         {/* FY-to-date KPIs (April–March), incl. Rejected and Cancelled heads

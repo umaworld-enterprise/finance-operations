@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { TrancheList } from "@/components/tranches/TrancheList";
+import { StatusHistoryCard } from "@/components/tranches/StatusHistoryCard";
 import { SupplierDefaultHistory } from "@/components/forms/SupplierDefaultHistory";
 import { RequestAuditTrail } from "@/components/tranches/RequestAuditTrail";
 import { RequestAdjustments } from "@/components/tranches/RequestAdjustments";
@@ -202,7 +203,7 @@ export default function MerchandiserRequestDetail() {
               {fv.exchange_rate !== false && req.exchange_rate != null && field("Exchange Rate", req.exchange_rate)}
               {field("Sunshine Invoice #", req.sunshine_invoice_number)}
               {field("Supplier Proforma Invoice #", req.supplier_invoice_number)}
-              {field("Estimated ETD", req.estimated_etd ? formatDate(req.estimated_etd) : null)}
+              {field("ETD", req.estimated_etd ? formatDate(req.estimated_etd) : null)}
               {req.payment_terms && field("Payment Terms", req.payment_terms)}
               {field("Submission Source", req.submission_source)}
               {field("Created", formatDate(req.created_at))}
@@ -326,33 +327,8 @@ export default function MerchandiserRequestDetail() {
           currentRequest={{ id: req.id, deposit_amount: Number(req.deposit_amount), currency: req.currency }}
         />
 
-        {fv.status_history !== false && req.status_history && req.status_history.length > 0 && (
-          <Card>
-            <CardContent className="p-5 md:p-6">
-              <h2 className="text-sm font-semibold text-foreground mb-4">Status History</h2>
-              <ol className="space-y-3">
-                {req.status_history.map((h) => (
-                  <li key={h.id} className="flex flex-col sm:flex-row gap-1 sm:gap-3 text-sm">
-                    <span className="text-muted-foreground shrink-0 sm:w-32 text-xs pt-0.5">
-                      {formatDate(h.changed_at)}
-                    </span>
-                    <span className="flex-1">
-                      {h.old_status ? (
-                        <>
-                          <StatusBadge status={h.old_status} />
-                          <span className="mx-1.5 text-muted-foreground">→</span>
-                        </>
-                      ) : null}
-                      <StatusBadge status={h.new_status} showFull />
-                      {h.remarks && (
-                        <p className="text-xs text-muted-foreground mt-0.5">{h.remarks}</p>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            </CardContent>
-          </Card>
+        {fv.status_history !== false && (
+          <StatusHistoryCard history={req.status_history} tranches={req.tranches} />
         )}
 
         {/* Merchandiser remarks — editable until the request is rejected or

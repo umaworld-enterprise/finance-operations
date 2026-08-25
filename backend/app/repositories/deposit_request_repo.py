@@ -190,11 +190,12 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
     async def get_pending_payment_queue(
         self, created_by: UUID | None = None, limit: int = 500
     ) -> list[DepositRequest]:
-        """Pending requests sorted oldest first — for Accounts dashboard."""
+        """Pending requests sorted latest first (19 Aug 2026 — matches every
+        other request table; was oldest-first 'process in order')."""
         stmt = (
             self._base_query()
             .where(DepositRequest.current_status == RequestStatus.PENDING_PAYMENT)
-            .order_by(DepositRequest.created_at.asc())
+            .order_by(DepositRequest.created_at.desc())
             .limit(limit)
         )
         if created_by is not None:

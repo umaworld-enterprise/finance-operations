@@ -813,7 +813,7 @@ function WeeklyTrackerTab() {
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Requested, unpaid deposits sorted by Estimated ETD, bucketed into the
+        Requested, unpaid deposits sorted by ETD, bucketed into the
         ETD&apos;s Monday–Sunday week. Requests without an ETD collect at the bottom.
       </p>
       {isLoading ? (
@@ -849,7 +849,7 @@ function WeeklyTrackerTab() {
                     <TableHead>Tranche</TableHead>
                     <TableHead className="text-right">Unpaid Amount</TableHead>
                     <TableHead>Tentative Payment</TableHead>
-                    <TableHead>Estimated ETD</TableHead>
+                    <TableHead>ETD</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

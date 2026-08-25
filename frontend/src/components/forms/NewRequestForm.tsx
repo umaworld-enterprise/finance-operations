@@ -300,7 +300,7 @@ export function NewRequestForm({ onSuccess, onCancel }: Props) {
               />
 
               <Field
-                label="Estimated ETD"
+                label="ETD"
                 tooltip="Estimated Time of Departure — when goods are expected to leave the origin port/warehouse."
                 error={errors.estimated_etd?.message}
                 type="date"
