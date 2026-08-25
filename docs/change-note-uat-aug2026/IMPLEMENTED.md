@@ -881,6 +881,36 @@ Two gaps found in UAT of the reopen feature:
 
 Backend-only; 273 tests green (new delete-recompletes round-trip test).
 
+## Follow-up (19 Aug 2026) — Snapshot sorts + tranche rejections in Status History
+
+1. **Analytical Snapshot sorting** — the All-Shipments tables (HoM +
+   Accounts dashboards) gained two sort options: "Request date (new → old)"
+   (backed by a new `created_at` field on `/analytics/shipments`) and
+   "Request ID (new → old)" (request_number descending).
+2. **Tranche rejections in Status History** — a rejected tranche never
+   changes the REQUEST status (by design — replacements follow), which made
+   the Status History look stuck on "Pending Payment". The three detail
+   pages now share one `StatusHistoryCard` that merges request status
+   transitions with tranche-rejection events: a red "Rejected — Tranche N"
+   entry with the rejection date and reason, in chronological order.
+
+No migration; 273 tests green, tsc clean.
+
+## Follow-up (19 Aug 2026) — Label cleanups + latest-first queue
+
+1. **"Estimated ETD" → "ETD"** app-wide (ETD already means Estimated Time
+   of Departure): request form label, all three detail pages, payment
+   forecast table + hint, report column list, and the export header in
+   report_service. "Original ETD" / "Grace ETD" / "Actual ETD" wording is
+   untouched; backend field names stay `estimated_etd`.
+2. **"Dashboard" → "Workspace"**: sidebar "HoM Dashboard" → "HoM
+   Workspace", HoM page title likewise, onboarding button "Continue to
+   Workspace". No other role had "Dashboard" in a visible title.
+3. **Accounts Pending Payment queue now lists latest requests first** (was
+   deliberately oldest-first "process in order") — matches every other
+   request table's newest-first default; subtitle updated. Merchandiser and
+   HoM queues already defaulted to newest-first.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

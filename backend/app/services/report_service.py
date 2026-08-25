@@ -74,7 +74,7 @@ class ReportService:
         headers = [
             "Key", "Request Date", "Select Supplier", "Select Customer", "Vertical/Category",
             "Currency", "Deposit Amount", "Deposit (%)", "Total Supplier Proforma Invoice Amount",
-            "Estimated ETD", "Payment Terms", "Payment Status", "Staff",
+            "ETD", "Payment Terms", "Payment Status", "Staff",
             "Supplier Invoice Number", "Sunshine Invoice Number", "Rate",
             "Remarks", "Staff Email",
             "Payment Date", "Bank", "Payment Ref #", "Bank Payment Status",

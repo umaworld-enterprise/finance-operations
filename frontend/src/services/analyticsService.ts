@@ -51,6 +51,8 @@ export interface ShipmentRow {
   /** Server-computed: max(0, today − estimated_etd); null when no ETD. */
   days_delayed: number | null;
   current_status: string;
+  /** Request creation date — drives the "Request date (new → old)" sort. */
+  created_at: string | null;
 }
 
 export const analyticsService = {

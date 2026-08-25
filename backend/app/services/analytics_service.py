@@ -800,6 +800,7 @@ class AnalyticsService:
                 DepositRequest.deposit_amount,
                 DepositRequest.estimated_etd,
                 DepositRequest.current_status,
+                DepositRequest.created_at,
                 Supplier.name.label("supplier_name"),
             )
             .join(Supplier, Supplier.id == DepositRequest.supplier_id)
@@ -831,6 +832,9 @@ class AnalyticsService:
                 "estimated_etd": r.estimated_etd.isoformat() if r.estimated_etd else None,
                 "days_delayed": days_delayed,
                 "current_status": status,
+                # Request date — drives the "Request date (new → old)" sort
+                # on the Analytical Snapshot tables (19 Aug 2026).
+                "created_at": r.created_at.isoformat() if r.created_at else None,
             }
 
         out = [to_row(r) for r in rows]

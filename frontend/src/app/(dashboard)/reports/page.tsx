@@ -17,7 +17,7 @@ const REPORT_TYPES = [
     value: "requests",
     label: "Supplier Advance Payment Requests",
     desc: "All Supplier Advance Payment Request records including payment and analytics data",
-    columns: ["Key", "Request Date", "Select Supplier", "Select Customer", "Vertical/Category", "Currency", "Deposit Amount", "Deposit (%)", "Total Supplier Proforma Invoice Amount", "Estimated ETD", "Payment Terms", "Payment Status", "Staff", "Supplier Invoice Number", "Sunshine Invoice Number", "Rate", "Remarks", "Staff Email", "Payment Date", "Bank", "Payment Ref #", "Bank Payment Status", "Ship Date", "Actual ETD", "Accounts Remarks", "ETD (Grace) Overdue Days", "Cost of Fund"],
+    columns: ["Key", "Request Date", "Select Supplier", "Select Customer", "Vertical/Category", "Currency", "Deposit Amount", "Deposit (%)", "Total Supplier Proforma Invoice Amount", "ETD", "Payment Terms", "Payment Status", "Staff", "Supplier Invoice Number", "Sunshine Invoice Number", "Rate", "Remarks", "Staff Email", "Payment Date", "Bank", "Payment Ref #", "Bank Payment Status", "Ship Date", "Actual ETD", "Accounts Remarks", "ETD (Grace) Overdue Days", "Cost of Fund"],
   },
   {
     // UAT Aug 2026, item 1 — the exact columns Accounts paste into the bank

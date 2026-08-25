@@ -157,7 +157,7 @@ export default function OnboardingPage() {
 
           <Button type="submit" className="w-full" disabled={submitting}>
             {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {submitting ? "Saving…" : "Continue to Dashboard"}
+            {submitting ? "Saving…" : "Continue to Workspace"}
           </Button>
         </form>
       </Card>

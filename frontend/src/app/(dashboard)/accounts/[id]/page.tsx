@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PaymentForm } from "@/components/forms/PaymentForm";
 import { TrancheList } from "@/components/tranches/TrancheList";
+import { StatusHistoryCard } from "@/components/tranches/StatusHistoryCard";
 import { SupplierDefaultHistory } from "@/components/forms/SupplierDefaultHistory";
 import { RequestAuditTrail } from "@/components/tranches/RequestAuditTrail";
 import { RequestAdjustments } from "@/components/tranches/RequestAdjustments";
@@ -240,7 +241,7 @@ export default function AccountsPaymentPage() {
               {fv.deposit_percentage !== false && field("Deposit %", `${req.deposit_percentage}%`)}
               {fv.total_supplier_invoice_amount !== false && field("Total Invoice Amount", formatCurrency(req.total_supplier_invoice_amount, req.currency ?? undefined))}
               {fv.exchange_rate !== false && req.exchange_rate != null && field("Exchange Rate", req.exchange_rate)}
-              {req.estimated_etd && field("Estimated ETD", formatDate(req.estimated_etd))}
+              {req.estimated_etd && field("ETD", formatDate(req.estimated_etd))}
               {field("Submitted", formatDate(req.created_at))}
               {req.payment_terms && field("Payment Terms", req.payment_terms)}
               {req.sunshine_invoice_number && field("Sunshine Invoice #", req.sunshine_invoice_number)}
@@ -401,33 +402,8 @@ export default function AccountsPaymentPage() {
 
         <RequestAuditTrail requestId={id} />
 
-        {fv.status_history !== false && req.status_history && req.status_history.length > 0 && (
-          <Card>
-            <CardContent className="p-5 md:p-6">
-              <h2 className="font-semibold text-foreground mb-4 text-sm">Status History</h2>
-              <ol className="space-y-3">
-                {req.status_history.map((h) => (
-                  <li key={h.id} className="flex flex-col sm:flex-row gap-1 sm:gap-3 text-sm">
-                    <span className="text-muted-foreground shrink-0 sm:w-32 text-xs pt-0.5">
-                      {formatDate(h.changed_at)}
-                    </span>
-                    <span className="flex-1">
-                      {h.old_status ? (
-                        <>
-                          <StatusBadge status={h.old_status} />
-                          <span className="mx-1.5 text-muted-foreground">→</span>
-                        </>
-                      ) : null}
-                      <StatusBadge status={h.new_status} showFull />
-                      {h.remarks && (
-                        <p className="text-xs text-muted-foreground mt-0.5">{h.remarks}</p>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            </CardContent>
-          </Card>
+        {fv.status_history !== false && (
+          <StatusHistoryCard history={req.status_history} tranches={req.tranches} />
         )}
 
         {(canHold || canResume || canCancel || canReopen || canReject) && (

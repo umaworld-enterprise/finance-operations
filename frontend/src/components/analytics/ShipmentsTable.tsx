@@ -33,6 +33,8 @@ function DelayCell({ days }: { days: number | null }) {
 
 const SHIPMENT_SORTS = [
   { value: "delay", label: "Most delayed first", compare: byNumber<ShipmentRow>((s) => s.days_delayed ?? -1, true) },
+  { value: "created", label: "Request date (new → old)", compare: byString<ShipmentRow>((s) => s.created_at ?? "", true) },
+  { value: "request", label: "Request ID (new → old)", compare: byString<ShipmentRow>((s) => s.request_number, true) },
   { value: "etd", label: "Original ETD", compare: byString<ShipmentRow>((s) => s.estimated_etd ?? "") },
   { value: "amount", label: "Amount (high → low)", compare: byNumber<ShipmentRow>((s) => Number(s.amount), true) },
   { value: "supplier", label: "Supplier (A–Z)", compare: byString<ShipmentRow>((s) => s.supplier_name) },
