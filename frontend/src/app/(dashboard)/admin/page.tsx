@@ -57,7 +57,9 @@ function RequestRow({ req }: { req: DepositRequest }) {
   return (
     <TableRow>
       <TableCell>
-        <span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span>
+        <Link href={`/accounts/${req.id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
+          {requestDisplayNumber(req)}
+        </Link>
       </TableCell>
       <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
       <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>

@@ -340,6 +340,7 @@ export default function AccountsPaymentPage() {
           supplierId={req.supplier.id}
           supplierName={req.supplier.name}
           currentRequest={{ id: req.id, deposit_amount: Number(req.deposit_amount), currency: req.currency }}
+          linkBase="/accounts"
         />
 
         {/* Advance Payment Tranches — Accounts pays tranche-by-tranche and

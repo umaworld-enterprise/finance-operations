@@ -198,6 +198,7 @@ export default function HomRequestDetail() {
           supplierId={req.supplier.id}
           supplierName={req.supplier.name}
           currentRequest={{ id: req.id, deposit_amount: Number(req.deposit_amount), currency: req.currency }}
+          linkBase="/hom"
         />
 
         <RequestAuditTrail requestId={id} />

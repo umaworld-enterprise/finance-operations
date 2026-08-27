@@ -949,6 +949,21 @@ No migration; 273 tests green, tsc clean.
 
 Frontend-only; tsc clean.
 
+## Follow-up (19 Aug 2026) — Hyperlink sweep, every request-number render site
+
+Thorough pass over every place a request number renders. Newly linked:
+admin Recent Requests rows, the supplier drill-down request list,
+Adjust Invoices PENDING table (history was already linked), and the
+Supplier Default History live-exposure tables (new `linkBase` prop —
+"/accounts" on the accounts view, "/hom" on the HoM view; the merchandiser
+view stays unlinked since that role cannot open other people's requests).
+Already-linked (verified): analytics snapshots, drill-down (mobile +
+desktop), shipments snapshot, HoM queue, file remarks, weekly tracker,
+merchandiser tables/activity (whole row is the link), admin critical
+overdue list, notifications. Deliberately not links: chart axis labels,
+detail-page titles (they ARE the request page), rows frozen by a
+merchandiser hold, and dialog prose.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
