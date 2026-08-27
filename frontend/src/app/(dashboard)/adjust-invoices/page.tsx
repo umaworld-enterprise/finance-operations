@@ -372,11 +372,19 @@ function AdjustInvoicesPageImpl() {
                           </TableCell>
                           <TableCell className="text-sm">{a.supplier_name ?? "—"}</TableCell>
                           <TableCell className="text-sm">
-                            {a.source_request_number}
+                            {a.source_request_id ? (
+                              <Link href={`/accounts/${a.source_request_id}`} className="text-primary underline underline-offset-2">
+                                {a.source_request_number}
+                              </Link>
+                            ) : a.source_request_number}
                             <span className="text-muted-foreground"> / {a.source_tranche_label}</span>
                           </TableCell>
                           <TableCell className="text-sm">
-                            {a.destination_request_number}
+                            {a.destination_request_id ? (
+                              <Link href={`/accounts/${a.destination_request_id}`} className="text-primary underline underline-offset-2">
+                                {a.destination_request_number}
+                              </Link>
+                            ) : a.destination_request_number}
                             <span className="text-muted-foreground"> / {a.destination_tranche_label}</span>
                           </TableCell>
                           <TableCell className="text-right tabular-nums text-sm">

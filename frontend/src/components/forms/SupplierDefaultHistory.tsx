@@ -12,6 +12,7 @@
 // the supplier has flags OR live exposure. Used app-wide: HoM, Accounts
 // and Merchandiser request detail views.
 
+import Link from "next/link";
 import { AlertTriangle, CalendarClock } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -34,14 +35,34 @@ interface Props {
     deposit_amount: number;
     currency: string | null;
   };
+  /** Detail-page base the exposure request numbers link to (19 Aug 2026,
+   * app-wide hyperlinks) — e.g. "/accounts" or "/hom". Omit on views whose
+   * role cannot open other requests (merchandiser). */
+  linkBase?: "/accounts" | "/hom";
 }
 
-function ExposureRows({ rows, overdue }: { rows: SupplierExposureRow[]; overdue: boolean }) {
+function ExposureRows({
+  rows,
+  overdue,
+  linkBase,
+}: {
+  rows: SupplierExposureRow[];
+  overdue: boolean;
+  linkBase?: "/accounts" | "/hom";
+}) {
   return (
     <TableBody>
       {rows.map((r) => (
         <TableRow key={r.request_id}>
-          <TableCell className="font-mono text-xs whitespace-nowrap">{r.request_number}</TableCell>
+          <TableCell className="font-mono text-xs whitespace-nowrap">
+            {linkBase ? (
+              <Link href={`${linkBase}/${r.request_id}`} className="hover:underline underline-offset-2">
+                {r.request_number}
+              </Link>
+            ) : (
+              r.request_number
+            )}
+          </TableCell>
           {/* Overdue files carry the Sunshine Invoice No. so the risk rows
               can be chased by invoice (19 Aug 2026). */}
           {overdue && (
@@ -72,11 +93,13 @@ function ExposureSection({
   hint,
   rows,
   overdue,
+  linkBase,
 }: {
   title: string;
   hint: string;
   rows: SupplierExposureRow[];
   overdue: boolean;
+  linkBase?: "/accounts" | "/hom";
 }) {
   if (rows.length === 0) return null;
   return (
@@ -95,14 +118,14 @@ function ExposureSection({
               <TableHead>Overdue</TableHead>
             </TableRow>
           </TableHeader>
-          <ExposureRows rows={rows} overdue={overdue} />
+          <ExposureRows rows={rows} overdue={overdue} linkBase={linkBase} />
         </Table>
       </div>
     </div>
   );
 }
 
-export function SupplierDefaultHistory({ supplierId, supplierName, currentRequest }: Props) {
+export function SupplierDefaultHistory({ supplierId, supplierName, currentRequest, linkBase }: Props) {
   const { data: history = [] } = useSupplierDefaultHistory(supplierId ?? null);
   const { data: exposure } = useSupplierExposure(supplierId ?? null);
 
@@ -229,12 +252,14 @@ export function SupplierDefaultHistory({ supplierId, supplierName, currentReques
               hint="The grace period has expired and goods have not shipped — defaulting behaviour."
               rows={exposure.graced_etd_passed}
               overdue
+              linkBase={linkBase}
             />
             <ExposureSection
               title="Graced ETD not yet passed"
               hint="Open commitments still inside the grace window."
               rows={exposure.graced_etd_pending}
               overdue={false}
+              linkBase={linkBase}
             />
           </div>
         )}

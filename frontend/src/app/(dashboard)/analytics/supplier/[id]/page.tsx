@@ -178,9 +178,12 @@ export default function SupplierDrillPage() {
                       {requests.map((req) => (
                         <TableRow key={req.id}>
                           <TableCell>
-                            <span className="font-mono text-xs font-semibold text-foreground">
+                            <Link
+                              href={`/accounts/${req.id}`}
+                              className="font-mono text-xs font-semibold text-foreground hover:underline underline-offset-2"
+                            >
                               {req.request_number}
-                            </span>
+                            </Link>
                           </TableCell>
                           <TableCell className="text-foreground">{req.customer.name}</TableCell>
                           <TableCell className="text-muted-foreground text-sm">
