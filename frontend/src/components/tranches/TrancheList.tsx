@@ -11,6 +11,7 @@ import {
   useDeleteTranche,
   usePayTranche,
   useRejectTranche,
+  useReleaseTranche,
   useUpdateTranche,
   useUpdateTranchePaymentDetails,
   useUploadTrancheTtCopy,
@@ -18,6 +19,12 @@ import {
 import { useBanks } from "@/hooks/useMasters";
 import { currencyDisplayLabel, formatCurrency, formatDate, todayLocalISO } from "@/lib/utils";
 import type { PaymentTranche } from "@/types";
+
+// Release gate (19 Aug 2026): tranche 2 onwards stays "Yet to be Released"
+// until the merchandiser releases it — Accounts cannot pay it before that.
+export function needsRelease(t: PaymentTranche): boolean {
+  return t.status === "unpaid" && !t.released_at && t.tranche_number > 1;
+}
 
 interface Props {
   requestId: string;
@@ -198,9 +205,14 @@ export function TrancheList({
   const deleteTranche = useDeleteTranche(requestId);
   const payTranche = usePayTranche(requestId);
   const rejectTranche = useRejectTranche(requestId);
+  const releaseTranche = useReleaseTranche(requestId);
   const updateDetails = useUpdateTranchePaymentDetails(requestId);
   const [payConfirmId, setPayConfirmId] = useState<string | null>(null);
   const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
+  const [releaseConfirmId, setReleaseConfirmId] = useState<string | null>(null);
+  // Disclaimer shown before the add form opens (19 Aug 2026): tranche 2
+  // onwards is a future payment the merchandiser must release later.
+  const [addDisclaimerOpen, setAddDisclaimerOpen] = useState(false);
   // Payment-details drafts per tranche — saved together with Mark Paid
   // (10 Aug refinement: no separate Save Details button).
   const [drafts, setDrafts] = useState<Record<string, PaymentDraft>>({});
@@ -271,6 +283,20 @@ export function TrancheList({
       setAddDate(todayLocalISO());
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to add tranche.");
+    }
+  };
+
+  const doRelease = async (trancheId: string) => {
+    const t = tranches.find((x) => x.id === trancheId);
+    try {
+      await releaseTranche.mutateAsync(trancheId);
+      toast.success(
+        `${t?.label ?? "Tranche"} released — the Accounts team has been notified and can now pay it.`,
+      );
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to release the tranche.");
+    } finally {
+      setReleaseConfirmId(null);
     }
   };
 
@@ -398,6 +424,11 @@ export function TrancheList({
                     <Lock className="h-3 w-3" /> Locked against edits
                   </span>
                 )}
+                {needsRelease(t) && (
+                  <span className="inline-flex items-center text-xs font-medium border px-2 py-0.5 rounded-full text-amber-700 bg-amber-50 border-amber-200">
+                    Yet to be Released
+                  </span>
+                )}
                 {t.is_legacy && (
                   <span className="text-[10px] text-muted-foreground border border-border rounded-full px-2 py-0.5">
                     Migrated record
@@ -507,6 +538,20 @@ export function TrancheList({
                     <Lock className="h-3 w-3" /> In processing by Accounts — locked against edits
                   </p>
                 )}
+              {/* Merchandiser: release a "Yet to be Released" tranche so
+                  Accounts can pay it (19 Aug 2026). Available whenever the
+                  request is live — independent of the edit freeze. */}
+              {mode === "merchandiser" && needsRelease(t) && !isEditing && (
+                <div>
+                  <Button
+                    size="sm"
+                    onClick={() => setReleaseConfirmId(t.id)}
+                    disabled={releaseTranche.isPending}
+                  >
+                    Release {t.label} for Payment
+                  </Button>
+                </div>
+              )}
               {merchandiserCanModify &&
                 t.status === "unpaid" &&
                 !accountsStartedProcessing(t) &&
@@ -529,10 +574,22 @@ export function TrancheList({
                 </div>
               )}
 
+              {/* Accounts: an unreleased tranche is not theirs to act on yet
+                  (19 Aug 2026) — the payment form appears only once the
+                  merchandiser releases it. The backend refuses pay anyway. */}
+              {mode === "accounts" && needsRelease(t) && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  Yet to be Released by the merchandiser — this tranche becomes
+                  payable once they release it
+                  {t.tentative_payment_date
+                    ? ` (tentative date ${formatDate(t.tentative_payment_date)})`
+                    : ""}.
+                </p>
+              )}
               {/* Accounts: TT copy + payment details are both mandatory, then
                   an EXPLICIT Mark Paid click changes the status (Aug 2026,
                   item 3.1 — uploads never auto-pay). */}
-              {mode === "accounts" && t.status === "unpaid" && (
+              {mode === "accounts" && t.status === "unpaid" && !needsRelease(t) && (
                 <div className="space-y-3 pt-2 mt-1 border-t border-border">
                   <TranchePaymentDetailsForm
                     currency={currency}
@@ -689,11 +746,34 @@ export function TrancheList({
             </div>
           </div>
         ) : (
-          <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
+          <Button size="sm" variant="outline" onClick={() => setAddDisclaimerOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Tranche
           </Button>
         )
       )}
+
+      {/* Disclaimer before adding a tranche (19 Aug 2026): tranche 2 onwards
+          is a future payment gated behind an explicit release. */}
+      <ConfirmDialog
+        open={addDisclaimerOpen}
+        onOpenChange={(open) => !open && setAddDisclaimerOpen(false)}
+        title="This tranche is a future payment"
+        description="A new tranche is created as 'Yet to be Released' — the Accounts team cannot pay it until you release it. Release it on or before its tentative payment date; you will get daily reminders from 5 days before."
+        confirmLabel="I understand — add tranche"
+        onConfirm={() => {
+          setAddDisclaimerOpen(false);
+          setAddOpen(true);
+        }}
+      />
+
+      <ConfirmDialog
+        open={releaseConfirmId !== null}
+        onOpenChange={(open) => !open && setReleaseConfirmId(null)}
+        title="Release this tranche for payment?"
+        description="The Accounts team will be notified that the tranche is now payable. This cannot be undone."
+        confirmLabel="Yes, release it"
+        onConfirm={() => releaseConfirmId && doRelease(releaseConfirmId)}
+      />
 
       <ConfirmDialog
         open={payConfirmId !== null}

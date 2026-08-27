@@ -82,6 +82,9 @@ class TrancheResponse(OrmBase):
     accounts_remarks: str | None = None
     rejection_reason: str | None = None
     rejected_at: datetime | None = None
+    # Release gate (19 Aug 2026): NULL on an unpaid tranche 2+ means "Yet to
+    # be Released" — Accounts cannot pay it until the merchandiser releases.
+    released_at: datetime | None = None
     is_legacy: bool
     created_at: datetime
     updated_at: datetime

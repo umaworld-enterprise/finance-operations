@@ -129,7 +129,7 @@ Sign-in is direct Google OAuth — no third-party auth service. The frontend
 opens the Google popup (auth-code flow), the backend exchanges the code using
 the client secret, verifies the ID token, matches the email against a
 pre-registered `users` row, and issues its own HS256 JWT (`SECRET_KEY`,
-12 h expiry by default via `ACCESS_TOKEN_EXPIRE_MINUTES`).
+72 h expiry by default via `ACCESS_TOKEN_EXPIRE_MINUTES`).
 
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an **OAuth client ID** of type **Web application**.
 2. Add every frontend origin under **Authorized JavaScript origins** — e.g. `http://localhost:3000`, `https://staging.example.com`, `https://app.example.com`. (No redirect URIs are needed — the popup flow uses `postmessage`.)
@@ -147,7 +147,7 @@ pre-registered `users` row, and issues its own HS256 JWT (`SECRET_KEY`,
 | `SECRET_KEY` | Backend | Signs the app-issued JWTs — generate with `openssl rand -hex 32` |
 | `GOOGLE_CLIENT_ID` | Backend | Google OAuth client id (same value as the frontend's) |
 | `GOOGLE_CLIENT_SECRET` | Backend | Google OAuth client secret — server-side only |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Backend | Session lifetime (default 720 = 12 h) |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Backend | Session lifetime (default 4320 = 72 h) |
 | `DATABASE_URL` | Backend | PostgreSQL connection string (asyncpg driver) |
 | `GOOGLE_WEBHOOK_SECRET` | Backend | HMAC shared secret with Apps Script |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Backend | Service account JSON (single line) — used for Sheets sync AND Drive TT copy uploads |

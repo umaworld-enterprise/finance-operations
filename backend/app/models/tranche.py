@@ -80,6 +80,14 @@ class PaymentTranche(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # True for tranches synthesised from pre-tranche records (migration 0018
     # backfill or API compat mode) — these may lack a tentative date.
     is_legacy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Release gate (19 Aug 2026, migration 0032): tranche 2 onwards is a
+    # FUTURE payment — it stays "Yet to be Released" (released_at NULL) and
+    # Accounts cannot pay it until the merchandiser releases it. Tranche 1
+    # is auto-released at creation; existing rows were backfilled released.
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    released_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
 
     deposit_request: Mapped["DepositRequest"] = relationship(back_populates="tranches")
     paid_by_user: Mapped["User | None"] = relationship(foreign_keys=[paid_by])

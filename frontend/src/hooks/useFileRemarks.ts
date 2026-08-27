@@ -20,6 +20,15 @@ export function useFileRemarks(params?: {
   });
 }
 
+export function useSelectableFiles(enabled: boolean) {
+  return useQuery({
+    queryKey: [...FILE_REMARKS_KEY, "selectable-files"],
+    queryFn: fileRemarkService.selectableFiles,
+    enabled,
+    refetchInterval: 10_000,
+  });
+}
+
 export function useCreateFileRemark() {
   const qc = useQueryClient();
   return useMutation({

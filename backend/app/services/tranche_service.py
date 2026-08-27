@@ -197,6 +197,11 @@ class TrancheService:
             tranche_number=next_number,
             amount=data.amount,
             tentative_payment_date=data.tentative_payment_date,
+            # Release gate (19 Aug 2026): tranche 2 onwards is a FUTURE
+            # payment — it stays "Yet to be Released" until the merchandiser
+            # releases it. Tranche 1 is payable immediately.
+            released_at=(datetime.now(timezone.utc) if next_number == 1 else None),
+            released_by=(user_id if next_number == 1 else None),
         )
         await self._audit.record_create(
             "payment_tranches", tranche.id, user_id,
@@ -245,6 +250,46 @@ class TrancheService:
                 )
 
         await self._sync_request_totals(request, user_id, ip_address, user_agent)
+        return tranche
+
+    async def release_tranche(
+        self,
+        request_id: UUID,
+        tranche_id: UUID,
+        user_id: UUID,
+        role: UserRole,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> PaymentTranche:
+        """Merchandiser releases a 'Yet to be Released' tranche (2 onwards)
+        for payment (19 Aug 2026) — only then can Accounts mark it paid."""
+        request = await self._get_request_or_404(request_id)
+        if role not in {UserRole.MERCHANDISER, UserRole.SUPER_ADMIN}:
+            raise AuthorizationError("Only the request's merchandiser can release tranches.")
+        if role == UserRole.MERCHANDISER and request.created_by != user_id:
+            raise AuthorizationError("You can only release tranches on your own requests.")
+        if request.current_status in _TERMINAL_STATUSES:
+            raise ConflictError("Tranches cannot be released on a cancelled or rejected request.")
+
+        tranche = await self._get_tranche_locked(request_id, tranche_id)
+        if tranche.status == TrancheStatus.PAID:
+            raise ConflictError(f"{tranche.label} is already paid.")
+        if tranche.status == TrancheStatus.REJECTED:
+            raise ConflictError(f"{tranche.label} was rejected and cannot be released.")
+        if tranche.released_at is not None:
+            raise ConflictError(f"{tranche.label} is already released.")
+
+        tranche = await self._repo.update(
+            tranche,
+            released_at=datetime.now(timezone.utc),
+            released_by=user_id,
+        )
+        await self._audit.record_update(
+            "payment_tranches", tranche.id, user_id,
+            field_name="released_at",
+            old_value=None, new_value=str(tranche.released_at),
+            ip_address=ip_address, user_agent=user_agent,
+        )
         return tranche
 
     async def delete_tranche(
@@ -366,6 +411,14 @@ class TrancheService:
             raise ConflictError(
                 "Tranches can only be paid while the request is pending payment "
                 f"(current status: {request.current_status.value})."
+            )
+        # Release gate (19 Aug 2026): tranche 2 onwards must be explicitly
+        # released by the merchandiser before Accounts can pay it. Tranche 1
+        # is auto-released at creation; pre-feature rows were backfilled.
+        if tranche.released_at is None and tranche.tranche_number != 1:
+            raise ConflictError(
+                f"{tranche.label} has not been released by the merchandiser "
+                "yet — it cannot be marked paid until they release it."
             )
         # Readiness gate (Aug 2026, item 3.1): a tranche becomes PAID only via
         # this explicit action, and only once its TT copy AND payment details

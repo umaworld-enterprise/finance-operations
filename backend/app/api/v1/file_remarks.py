@@ -50,6 +50,18 @@ async def list_file_remarks(
     )
 
 
+@router.get("/selectable-files")
+async def selectable_files(current_user: User, db: DB) -> list[dict]:
+    """Files the raiser can pick in the New File Remark dropdown (19 Aug
+    2026 chain support): the live files of every payment-completed request —
+    root file plus files born from approved splits / invoice changes, any
+    depth — minus files already under an open remark. File number only, no
+    supplier appended."""
+    return await FileRemarkService(db).selectable_files(
+        current_user.id, current_user.role
+    )
+
+
 @router.post("", response_model=FileRemarkResponse, status_code=201)
 async def create_file_remark(
     data: FileRemarkCreate,

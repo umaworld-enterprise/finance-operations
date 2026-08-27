@@ -13,12 +13,12 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { RequestsTable } from "@/components/tables/RequestsTable";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
-import { useRequestsPaginated, useMyActivity } from "@/hooks/useRequests";
+import { useRequestsPaginated, useMyActivity, usePendingRelease } from "@/hooks/useRequests";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   Table, TableHeader, TableBody, TableRow, TableHead,
 } from "@/components/ui/table";
-import { ClipboardList, Clock, CheckCircle, XCircle, Ban, PauseCircle, Bell, ArrowRight, Plus, ChevronDown } from "lucide-react";
+import { ClipboardList, Clock, CheckCircle, XCircle, Ban, PauseCircle, Bell, ArrowRight, Plus, ChevronDown, CalendarClock } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { timeAgo } from "@/lib/utils";
@@ -59,6 +59,9 @@ export default function MerchandiserDashboard() {
   const [formOpen, setFormOpen] = useState(false);
   const debouncedSearch = useDebouncedValue(search.trim());
   const { data: activity = [] } = useMyActivity();
+  // "Yet to be Released" tranches (2 onwards) awaiting this merchandiser's
+  // release (19 Aug 2026).
+  const { data: pendingRelease = [] } = usePendingRelease();
 
   // /merchandiser/new redirects here with ?new=1 — auto-expand the form so
   // old bookmarks still land on an open request form.
@@ -144,6 +147,19 @@ export default function MerchandiserDashboard() {
           <StatCard label="Rejected"         value={rejectedData?.total ?? "—"}  icon={XCircle}       subtext="By HoM or Accounts" />
           <StatCard label="Cancelled"        value={cancelledData?.total ?? "—"} icon={Ban} />
         </div>
+
+        {/* Tranche release tile (19 Aug 2026) — tranches 2+ awaiting this
+            merchandiser's release before Accounts can pay them. */}
+        {pendingRelease.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            <StatCard
+              label="Tranche Payments to be Released"
+              value={pendingRelease.length}
+              icon={CalendarClock}
+              subtext="Open the request and click Release so Accounts can pay"
+            />
+          </div>
+        )}
 
         {activity.length > 0 && (
           <div className="space-y-2">

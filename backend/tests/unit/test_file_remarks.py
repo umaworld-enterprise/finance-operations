@@ -157,7 +157,7 @@ async def test_amounts_cannot_exceed_the_files_deposit(db_session):
     merch, _, request = await _setup(db_session)
     svc = FileRemarkService(db_session)
 
-    with pytest.raises(BusinessRuleError, match="exceeds the file's deposit amount"):
+    with pytest.raises(BusinessRuleError, match="exceeds the file's"):
         await svc.create(
             _payload(
                 request, category="invoice_split",
@@ -331,3 +331,104 @@ async def test_decision_notifies_the_raiser_with_the_outcome(db_session, engine,
     assert "rejected" in bodies
     assert "Done — number updated." in bodies
     assert "Amounts do not match." in bodies
+
+
+# ── File chains (19 Aug 2026): splits & changes selectable to any depth ──────
+
+from decimal import Decimal
+from app.core.exceptions import BusinessRuleError
+
+
+@pytest.mark.asyncio
+async def test_live_files_replay_the_approved_chain(db_session):
+    """Root file → approved split (A + B, root fully consumed) → approved
+    invoice change (A → C): the live set is exactly {C, B}, each with its
+    carried amount, and everything stays anchored to the core request."""
+    merch, accounts, request = await _setup(db_session)
+    svc = FileRemarkService(db_session)
+
+    split = await svc.create(
+        _payload(
+            request, category="invoice_split",
+            split_targets=[
+                {"file_number": "FILE-A", "amount": Decimal("600.00")},
+                {"file_number": "FILE-B", "amount": Decimal("400.00")},
+            ],
+        ),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    await svc.decide(split.id, "approved", accounts.id, UserRole.ACCOUNTS_TEAM)
+
+    change = await svc.create(
+        _payload(request, file_number="FILE-A", new_file_number="FILE-C"),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    # The chained remark records the SPLIT file as its parent, with the
+    # split amount — and lives on the core request (audit lands there).
+    assert change.old_file_number == "FILE-A"
+    assert Decimal(str(change.old_amount)) == Decimal("600.00")
+    assert Decimal(str(change.new_amount)) == Decimal("600.00")
+    assert change.deposit_request_id == request.id
+    await svc.decide(change.id, "approved", accounts.id, UserRole.ACCOUNTS_TEAM)
+
+    live = await svc.live_files_for_request(request)
+    assert live == {"FILE-C": Decimal("600.00"), "FILE-B": Decimal("400.00")}
+
+    # Full chain: a split-born file can be split again, capped at ITS amount.
+    with pytest.raises(BusinessRuleError, match="exceeds the file's"):
+        await svc.create(
+            _payload(
+                request, category="invoice_split", file_number="FILE-B",
+                split_targets=[{"file_number": "FILE-D", "amount": Decimal("500.00")}],
+            ),
+            merch.id, UserRole.MERCHANDISER,
+        )
+    resplit = await svc.create(
+        _payload(
+            request, category="invoice_split", file_number="FILE-B",
+            split_targets=[{"file_number": "FILE-D", "amount": Decimal("150.00")}],
+        ),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert resplit.old_file_number == "FILE-B"
+    assert Decimal(str(resplit.old_amount)) == Decimal("400.00")
+
+
+@pytest.mark.asyncio
+async def test_selectable_files_exclude_dead_and_open(db_session):
+    """The dropdown offers live files only: a consumed parent disappears, an
+    unapproved split adds nothing, and a file under an open remark is held
+    back until decided. Rows carry the file number, not the supplier."""
+    from app.core.exceptions import ValidationError as VErr
+
+    merch, accounts, request = await _setup(db_session)
+    svc = FileRemarkService(db_session)
+
+    rows = await svc.selectable_files(merch.id, UserRole.MERCHANDISER)
+    root = [r for r in rows if r["deposit_request_id"] == str(request.id)]
+    assert len(root) == 1 and root[0]["is_root"] is True
+
+    # Open (unapproved) split: targets NOT selectable yet; the parent file is
+    # held back while its remark is open.
+    split = await svc.create(
+        _payload(
+            request, category="invoice_split",
+            split_targets=[{"file_number": "FILE-A", "amount": Decimal("1000.00")}],
+        ),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    rows = await svc.selectable_files(merch.id, UserRole.MERCHANDISER)
+    assert [r for r in rows if r["deposit_request_id"] == str(request.id)] == []
+
+    # Approved: the parent was fully consumed — only FILE-A remains.
+    await svc.decide(split.id, "approved", accounts.id, UserRole.ACCOUNTS_TEAM)
+    rows = await svc.selectable_files(merch.id, UserRole.MERCHANDISER)
+    mine = [r for r in rows if r["deposit_request_id"] == str(request.id)]
+    assert [(r["file_number"], r["amount"]) for r in mine] == [("FILE-A", 1000.0)]
+
+    # A file that is not live is refused server-side.
+    with pytest.raises(VErr, match="not a live file"):
+        await svc.create(
+            _payload(request, file_number="NOT-A-FILE", new_file_number="X"),
+            merch.id, UserRole.MERCHANDISER,
+        )

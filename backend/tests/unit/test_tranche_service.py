@@ -575,7 +575,9 @@ async def test_add_tranche_reopens_processed_request(db_session):
         merch.id, UserRole.MERCHANDISER,
     )
     assert updated.amount == Decimal("400.00")
-    # ...and paying it completes the file again.
+    # ...and once released (19 Aug 2026 gate) and payable, paying it
+    # completes the file again.
+    await svc.release_tranche(request.id, added.id, merch.id, UserRole.MERCHANDISER)
     await _payable(db_session, added)
     await svc.pay_tranche(request.id, added.id, accounts.id, UserRole.ACCOUNTS_TEAM)
     assert request.current_status == RequestStatus.PAYMENT_PROCESSED
@@ -906,3 +908,52 @@ async def test_tranche_payment_details_lock_only_that_tranche(db_session):
         merch.id, UserRole.MERCHANDISER,
     )
     assert updated.amount == Decimal("500.00")
+
+
+# ── Release gate (19 Aug 2026): tranche 2 onwards must be released ────────────
+
+
+async def test_added_tranche_starts_unreleased_and_blocks_pay(db_session):
+    """A tranche added by the merchandiser (2 onwards) is 'Yet to be
+    Released' — Accounts cannot pay it until the merchandiser releases it."""
+    merch, accounts, request, (t1,) = await _setup(db_session)
+    svc = TrancheService(db_session)
+    added = await svc.add_tranche(
+        request.id,
+        TrancheCreate(amount=Decimal("500.00"), tentative_payment_date=date(2026, 9, 1)),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert added.released_at is None
+    await _payable(db_session, added)
+    with pytest.raises(ConflictError, match="not been released"):
+        await svc.pay_tranche(request.id, added.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    # Release → payable.
+    released = await svc.release_tranche(request.id, added.id, merch.id, UserRole.MERCHANDISER)
+    assert released.released_at is not None
+    paid = await svc.pay_tranche(request.id, added.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    assert paid.status == TrancheStatus.PAID
+
+
+async def test_release_permissions_and_conflicts(db_session):
+    merch, accounts, request, (t1, t2) = await _setup(
+        db_session, tranche_amounts=("600.00", "400.00")
+    )
+    t2.released_at = None  # exercise the gate on a factory tranche
+    await db_session.flush()
+    svc = TrancheService(db_session)
+    # Accounts cannot release.
+    with pytest.raises(AuthorizationError):
+        await svc.release_tranche(request.id, t2.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+    # Another merchandiser cannot release.
+    other = await make_user(db_session, UserRole.MERCHANDISER)
+    with pytest.raises(AuthorizationError):
+        await svc.release_tranche(request.id, t2.id, other.id, UserRole.MERCHANDISER)
+    # Owner releases; double release conflicts.
+    await svc.release_tranche(request.id, t2.id, merch.id, UserRole.MERCHANDISER)
+    with pytest.raises(ConflictError, match="already released"):
+        await svc.release_tranche(request.id, t2.id, merch.id, UserRole.MERCHANDISER)
+    # Paid and rejected tranches cannot be released.
+    await _payable(db_session, t1)
+    await svc.reject_tranche(request.id, t1.id, "r", accounts.id, UserRole.ACCOUNTS_TEAM)
+    with pytest.raises(ConflictError, match="rejected"):
+        await svc.release_tranche(request.id, t1.id, merch.id, UserRole.MERCHANDISER)

@@ -102,7 +102,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     from app.core.database import AsyncSessionFactory
     from app.analytics.snapshot_job import refresh_all_snapshots
-    from app.services.notification_service import send_fallback_notifications
+    from app.services.notification_service import (
+        send_fallback_notifications,
+        send_release_reminders,
+    )
 
     scheduler_owner = _acquire_scheduler_lock()
     if scheduler_owner:
@@ -120,6 +123,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             minutes=30,
             args=[AsyncSessionFactory],
             id="payment_notification_fallback",
+            replace_existing=True,
+        )
+        # Daily release reminders (19 Aug 2026): merchandisers with
+        # 'Yet to be Released' tranches due within 5 days (or overdue) get a
+        # countdown reminder each morning — 03:30 UTC ≈ 09:00 IST.
+        _scheduler.add_job(
+            send_release_reminders,
+            "cron",
+            hour=3,
+            minute=30,
+            id="tranche_release_reminders",
             replace_existing=True,
         )
         _scheduler.start()

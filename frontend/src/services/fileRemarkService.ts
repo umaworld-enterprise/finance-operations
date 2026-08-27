@@ -4,11 +4,25 @@ import type { FileRemark, FileRemarkCategory, SplitTarget } from "@/types";
 export interface CreateFileRemarkPayload {
   deposit_request_id: string;
   category: FileRemarkCategory;
-  // The old file reference and old amount are server-derived from the
-  // selected request — never sent by the client (10 Aug rework).
+  /** The selected file within the request (19 Aug 2026 chain support) —
+   * the root file or a live split-born / invoice-changed file. The server
+   * validates it and derives the old amount from it. */
+  file_number?: string;
   new_file_number?: string;
   split_targets?: SplitTarget[];
   remark?: string;
+}
+
+/** One selectable file in the New File Remark dropdown (19 Aug 2026):
+ * the live files of every payment-completed request — root plus files born
+ * from approved splits / invoice changes, any depth. */
+export interface SelectableFile {
+  deposit_request_id: string;
+  request_number: string;
+  file_number: string;
+  amount: number;
+  currency: string | null;
+  is_root: boolean;
 }
 
 const fileRemarkService = {
@@ -17,6 +31,11 @@ const fileRemarkService = {
     request_id?: string;
   }): Promise<FileRemark[]> => {
     const { data } = await api.get<FileRemark[]>("/file-remarks", { params });
+    return data;
+  },
+
+  selectableFiles: async (): Promise<SelectableFile[]> => {
+    const { data } = await api.get<SelectableFile[]>("/file-remarks/selectable-files");
     return data;
   },
 

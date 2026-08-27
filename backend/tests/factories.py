@@ -103,7 +103,10 @@ async def make_tranche(
     amount: Decimal = Decimal("1000.00"),
     status: TrancheStatus = TrancheStatus.UNPAID,
     paid_by: User | None = None,
+    released: bool = True,
 ) -> PaymentTranche:
+    """released=True mirrors the 0032 backfill (all pre-feature tranches are
+    released); pass released=False to exercise the release gate."""
     tranche = PaymentTranche(
         id=uuid.uuid4(),
         deposit_request_id=request.id,
@@ -113,6 +116,7 @@ async def make_tranche(
         status=status,
         paid_at=datetime.now(timezone.utc) if status == TrancheStatus.PAID else None,
         paid_by=paid_by.id if paid_by else None,
+        released_at=datetime.now(timezone.utc) if released else None,
     )
     session.add(tranche)
     await session.flush()

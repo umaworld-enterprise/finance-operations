@@ -20,16 +20,17 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
-import { useRequestsPaginated, usePendingQueue, useQueueKpis } from "@/hooks/useRequests";
+import { useRequestsPaginated, usePendingQueue, useQueueKpis, usePendingRelease } from "@/hooks/useRequests";
 import { ShipmentsTable } from "@/components/analytics/ShipmentsTable";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
 import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, cn, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
 import { differenceInDays } from "date-fns";
-import { Clock, CheckCircle, AlertTriangle, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
+import { needsRelease } from "@/components/tranches/TrancheList";
+import { Clock, CheckCircle, AlertTriangle, CalendarClock, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
 import Link from "next/link";
-import type { DepositRequest } from "@/types";
+import type { DepositRequest, PendingReleaseRow } from "@/types";
 
 const PAGE_SIZE = 50;
 
@@ -60,10 +61,20 @@ function nextTentativeDate(req: DepositRequest): string | null {
 // Amount Payable in the pending queue counts only the unpaid tranches whose
 // tentative date falls within the next 10 days (past-due included) — the
 // standing 11 Aug rule, independent of the removed > 10 days table.
+// Unreleased tranches are excluded (19 Aug 2026): they are not payable yet —
+// their amount shows in the "Yet to be Released" column beside this one.
 function payableDueSoon(req: DepositRequest): number {
   return (req.tranches ?? [])
-    .filter((t) => t.status === "unpaid" && t.tentative_payment_date)
+    .filter((t) => t.status === "unpaid" && t.tentative_payment_date && !needsRelease(t))
     .filter((t) => differenceInDays(new Date(t.tentative_payment_date as string), new Date()) <= 10)
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+}
+
+// Sum of this request's "Yet to be Released" tranches (2 onwards, unpaid,
+// unreleased) — waiting on the merchandiser, not payable by Accounts yet.
+function yetToReleaseAmount(req: DepositRequest): number {
+  return (req.tranches ?? [])
+    .filter(needsRelease)
     .reduce((sum, t) => sum + Number(t.amount), 0);
 }
 
@@ -138,6 +149,11 @@ function PendingTable({
             <div className="text-xs text-muted-foreground">
               Payable (0–10 days): <span className="font-semibold text-foreground">{formatCurrency(payableDueSoon(req), req.currency)}</span>
             </div>
+            {yetToReleaseAmount(req) > 0 && (
+              <div className="text-xs text-muted-foreground">
+                Yet to be Released: <span className="font-semibold text-amber-700">{formatCurrency(yetToReleaseAmount(req), req.currency)}</span>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <span className="font-bold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</span>
               <Button size="sm" asChild>
@@ -163,6 +179,7 @@ function PendingTable({
               <TableHead>Vertical/Category</TableHead>
               <TableHead>Merchandiser</TableHead>
               <TableHead className="text-right">Amount Payable (0–10 days)</TableHead>
+              <TableHead className="text-right">Yet to be Released</TableHead>
               <TableHead className="text-right">Deposit</TableHead>
               <TableHead>Currency</TableHead>
               <TableHead>Tentative Payment</TableHead>
@@ -172,9 +189,9 @@ function PendingTable({
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableSkeleton rows={5} cols={13} />
+              <TableSkeleton rows={5} cols={14} />
             ) : rows.length === 0 ? (
-              <tr><td colSpan={13}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
+              <tr><td colSpan={14}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id}>
                 <TableCell>
@@ -189,6 +206,15 @@ function PendingTable({
                 <TableCell className="text-muted-foreground text-xs">{req.vertical?.name ?? "—"}</TableCell>
                 <TableCell className="text-muted-foreground text-xs">{req.creator?.full_name ?? "—"}</TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(payableDueSoon(req), req.currency)}</TableCell>
+                <TableCell className="text-right text-sm">
+                  {yetToReleaseAmount(req) > 0 ? (
+                    <span className="font-semibold text-amber-700">
+                      {formatCurrency(yetToReleaseAmount(req), req.currency)}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs font-medium">{currencyDisplayLabel(req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDate(nextTentativeDate(req))}</TableCell>
@@ -347,6 +373,69 @@ function StatusTable({
   );
 }
 
+// "Yet to be Released" tab (19 Aug 2026): tranches 2+ the merchandiser has
+// not released yet — Accounts cannot pay these; the amount column shows what
+// is waiting on each release.
+function YetToReleaseTable({ rows }: { rows: PendingReleaseRow[] }) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="px-5 py-4 border-b border-border">
+        <h3 className="font-semibold text-foreground text-sm">Yet to be Released by Merchandiser</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Future tranches awaiting the merchandiser&apos;s release — they become
+          payable here the moment they are released.
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Request #</TableHead>
+              <TableHead>Invoice #</TableHead>
+              <TableHead>Supplier</TableHead>
+              <TableHead>Merchandiser</TableHead>
+              <TableHead>Tranche</TableHead>
+              <TableHead className="text-right">Amount (to be released)</TableHead>
+              <TableHead>Tentative Payment</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={7}>
+                  <EmptyState
+                    icon={CalendarClock}
+                    title="Nothing awaiting release"
+                    description="Future tranches the merchandiser has not released yet will appear here."
+                  />
+                </td>
+              </tr>
+            ) : rows.map((r) => (
+              <TableRow key={r.tranche_id}>
+                <TableCell>
+                  <Link href={`/accounts/${r.request_id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
+                    {r.request_number}
+                  </Link>
+                </TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{r.sunshine_invoice_number || "—"}</TableCell>
+                <TableCell className="text-foreground font-medium">{r.supplier_name}</TableCell>
+                <TableCell className="text-muted-foreground text-xs">{r.merchandiser_name ?? "—"}</TableCell>
+                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{r.tranche_label}</TableCell>
+                <TableCell className="text-right font-semibold text-foreground">
+                  {formatCurrency(r.amount, r.currency)}
+                </TableCell>
+                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                  {r.tentative_payment_date ? formatDate(r.tentative_payment_date) : "—"}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </Card>
+  );
+}
+
 function AllTable({ rows }: { rows: DepositRequest[] }) {
   return (
     <Card className="overflow-hidden">
@@ -480,6 +569,8 @@ export default function AccountsDashboard() {
   // KPI cards: financial-year-to-date (April–March), one backend query
   // (UAT Aug 2026, item 5).
   const { data: kpis } = useQueueKpis();
+  // "Yet to be Released" tranches (19 Aug 2026) — waiting on merchandisers.
+  const { data: pendingRelease = [] } = usePendingRelease();
 
   function changeSearch(value: string) {
     setSearch(value);
@@ -562,6 +653,14 @@ export default function AccountsDashboard() {
             icon={ClipboardList}
             subtext={fySubtext}
           />
+          {/* Live bucket, not FY (19 Aug 2026): future tranches waiting on
+              the merchandiser's release — not payable yet. */}
+          <StatCard
+            label="Yet to be Released by Merchandiser"
+            value={pendingRelease.length}
+            icon={CalendarClock}
+            subtext="Live — tranches awaiting release"
+          />
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
@@ -571,10 +670,9 @@ export default function AccountsDashboard() {
             placeholder="Search by invoice #, request #, supplier or customer…"
             className="sm:max-w-md flex-1"
           />
-          {/* Until touched, the label mirrors each tab's real default order:
-              pending is served oldest-first ("process in order"), the rest newest-first. */}
+          {/* Every tab defaults to latest-first (19 Aug 2026). */}
           <SortSelect
-            value={sort ?? (activeTab === "pending" ? "oldest" : "newest")}
+            value={sort ?? "newest"}
             onChange={changeSort}
             className="sm:w-52"
           />
@@ -614,8 +712,20 @@ export default function AccountsDashboard() {
                 </span>
               )}
             </TabsTrigger>
+            <TabsTrigger value="yet-to-release">
+              Yet to be Released
+              {pendingRelease.length > 0 && (
+                <span className="ml-1.5 bg-secondary text-secondary-foreground border border-border text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                  {pendingRelease.length}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="all">All Requests</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="yet-to-release">
+            <YetToReleaseTable rows={pendingRelease} />
+          </TabsContent>
 
           <TabsContent value="pending">
             {/* Single pending table (11 Aug — the > 10 days split was

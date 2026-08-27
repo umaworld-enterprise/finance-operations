@@ -8,13 +8,17 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
 from pydantic import BaseModel
 
 from app.analytics.snapshot_job import seed_snapshot_for_request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.database import get_db_session
 from app.core.dependencies import CurrentUser, get_current_user
 from app.core.exceptions import AppError, AuthorizationError, NotFoundError
+from app.models.deposit_request import DepositRequest
 from app.models.enums import UserRole
 from app.models.enums import RequestStatus
+from app.models.masters import User as UserModel
 from app.repositories.deposit_request_repo import DepositRequestRepository
 from app.schemas.deposit_request import (
     ActivityItemResponse,
@@ -160,6 +164,57 @@ async def my_activity(
     """Recent status changes on the current user's own requests."""
     svc = DepositRequestService(db)
     return await svc.get_my_activity(current_user.id, limit=limit)
+
+
+@router.get("/pending-release")
+async def pending_release(
+    current_user: User,
+    db: DB,
+) -> list[dict]:
+    """'Yet to be Released' tranches (2 onwards, unpaid, unreleased) on live
+    pending-payment requests (19 Aug 2026). Drives the merchandiser
+    'Tranche Payments to be Released' tile and the Accounts Workspace
+    'Yet to be Released by Merchandiser' tile + tab. Merchandisers see their
+    own; accounts / HoM / finance / super admins see all."""
+    from app.models.enums import TrancheStatus
+    from app.models.masters import Supplier
+    from app.models.tranche import PaymentTranche, tranche_label
+
+    Creator = aliased(UserModel)
+    stmt = (
+        select(PaymentTranche, DepositRequest, Supplier.name, Creator.full_name)
+        .join(DepositRequest, DepositRequest.id == PaymentTranche.deposit_request_id)
+        .join(Supplier, Supplier.id == DepositRequest.supplier_id)
+        .outerjoin(Creator, Creator.id == DepositRequest.created_by)
+        .where(
+            PaymentTranche.status == TrancheStatus.UNPAID,
+            PaymentTranche.released_at.is_(None),
+            PaymentTranche.tranche_number > 1,
+            DepositRequest.is_deleted == False,  # noqa: E712
+            DepositRequest.current_status == RequestStatus.PENDING_PAYMENT,
+        )
+        .order_by(PaymentTranche.tentative_payment_date.asc().nulls_last())
+    )
+    if current_user.role == UserRole.MERCHANDISER:
+        stmt = stmt.where(DepositRequest.created_by == current_user.id)
+    rows = (await db.execute(stmt)).all()
+    return [
+        {
+            "request_id": str(req.id),
+            "request_number": req.request_number,
+            "sunshine_invoice_number": req.sunshine_invoice_number,
+            "supplier_name": supplier_name,
+            "merchandiser_name": creator_name,
+            "currency": req.currency.value if req.currency else None,
+            "tranche_id": str(t.id),
+            "tranche_label": tranche_label(t.tranche_number),
+            "amount": float(t.amount),
+            "tentative_payment_date": (
+                t.tentative_payment_date.isoformat() if t.tentative_payment_date else None
+            ),
+        }
+        for t, req, supplier_name, creator_name in rows
+    ]
 
 
 @router.get("/hom-queue", response_model=list[DepositRequestResponse])
