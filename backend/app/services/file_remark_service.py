@@ -48,11 +48,112 @@ def category_label(category: str) -> str:
     return _CATEGORY_LABELS.get(category, category)
 
 
+def _root_file_number(request: DepositRequest) -> str:
+    """The request's own file reference: sunshine invoice number, else the
+    proforma number, else the request number (10 Aug rework)."""
+    return (
+        (request.sunshine_invoice_number or "").strip()
+        or (request.supplier_invoice_number or "").strip()
+        or request.request_number
+    )
+
+
 class FileRemarkService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._request_repo = DepositRequestRepository(session)
         self._audit = AuditService(session)
+
+    async def live_files_for_request(self, request: DepositRequest) -> dict[str, "Decimal"]:
+        """The request's CURRENT file set (19 Aug 2026 chain support): start
+        from the root file with the full deposit, then replay every APPROVED
+        remark in decision order — a split moves value from its parent file
+        into the new file numbers (the parent keeps the balance, and drops
+        out once fully consumed); an invoice change replaces its parent file
+        number with the new one. The result is what the merchandiser can
+        select for the next split / invoice change — chains of any depth,
+        always anchored to (and audited on) this core request."""
+        from decimal import Decimal
+
+        files: dict[str, Decimal] = {
+            _root_file_number(request): Decimal(str(request.deposit_amount))
+        }
+        result = await self._session.execute(
+            select(FileRemark)
+            .where(
+                FileRemark.deposit_request_id == request.id,
+                FileRemark.status == FileRemarkStatus.APPROVED.value,
+            )
+            .order_by(FileRemark.resolved_at.asc().nulls_last(), FileRemark.created_at.asc())
+        )
+        for r in result.scalars().all():
+            old = (r.old_file_number or "").strip()
+            if r.category == "invoice_split" and r.split_targets:
+                total = sum(
+                    (Decimal(str(t.get("amount") or 0)) for t in r.split_targets),
+                    Decimal("0"),
+                )
+                if old in files:
+                    files[old] -= total
+                    if files[old] <= 0:
+                        del files[old]
+                for t in r.split_targets:
+                    number = (t.get("file_number") or "").strip()
+                    if number:
+                        files[number] = files.get(number, Decimal("0")) + Decimal(
+                            str(t.get("amount") or 0)
+                        )
+            elif r.category == "invoice_amount_change" and r.new_file_number:
+                carried = files.pop(old, None)
+                files[r.new_file_number] = (
+                    Decimal(str(r.new_amount)) if r.new_amount is not None else (carried or Decimal("0"))
+                )
+        return files
+
+    async def selectable_files(self, user_id: UUID, role: UserRole) -> list[dict]:
+        """Every file the raiser can pick in the New File Remark dropdown:
+        the live files (root + split-born + invoice-changed, any depth) of
+        each payment-completed request, minus files already under an OPEN
+        remark. Merchandisers see their own requests; accounts / super see
+        all."""
+        if role not in _RAISER_ROLES:
+            raise AuthorizationError("Your role cannot raise file remarks.")
+        stmt = select(DepositRequest).where(
+            DepositRequest.is_deleted == False,  # noqa: E712
+            DepositRequest.current_status == RequestStatus.PAYMENT_PROCESSED,
+        )
+        if role == UserRole.MERCHANDISER:
+            stmt = stmt.where(DepositRequest.created_by == user_id)
+        requests = list((await self._session.execute(stmt)).scalars().all())
+        if not requests:
+            return []
+        open_rows = (
+            await self._session.execute(
+                select(FileRemark.deposit_request_id, FileRemark.old_file_number).where(
+                    FileRemark.deposit_request_id.in_([r.id for r in requests]),
+                    FileRemark.status == FileRemarkStatus.OPEN.value,
+                )
+            )
+        ).all()
+        under_open = {(rid, (num or "").strip()) for rid, num in open_rows}
+        out: list[dict] = []
+        for req in requests:
+            live = await self.live_files_for_request(req)
+            for number, amount in live.items():
+                if (req.id, number) in under_open:
+                    continue  # already being actioned — one open remark per file
+                out.append(
+                    {
+                        "deposit_request_id": str(req.id),
+                        "request_number": req.request_number,
+                        "file_number": number,
+                        "amount": float(amount),
+                        "currency": req.currency.value if req.currency else None,
+                        "is_root": number == _root_file_number(req),
+                    }
+                )
+        out.sort(key=lambda r: (r["request_number"], not r["is_root"], r["file_number"]))
+        return out
 
     async def create(
         self,
@@ -78,45 +179,52 @@ class FileRemarkService:
                 f"(current status: {request.current_status.value})."
             )
 
-        # Amounts can never exceed the file's deposit amount (7 Aug fix —
-        # the old amount is the ceiling for what can be moved or split).
         from decimal import Decimal
 
-        deposit = Decimal(str(request.deposit_amount))
+        # The selected FILE (19 Aug 2026 chain support): the root file or any
+        # live file born from an approved split / invoice change on this
+        # request — validated against the server-replayed live set, which
+        # also supplies the old amount. Every chained remark stays anchored
+        # to this core request, so its audit trail records the whole chain.
+        live = await self.live_files_for_request(request)
+        if data.file_number and data.file_number.strip():
+            parent_file = data.file_number.strip()
+            if parent_file not in live:
+                raise ValidationError(
+                    f"'{parent_file}' is not a live file of this request — "
+                    "pick a file from the dropdown."
+                )
+            deposit = live[parent_file]
+        else:
+            # Legacy callers without a file selection act on the root file.
+            parent_file = _root_file_number(request)
+            deposit = live.get(parent_file, Decimal(str(request.deposit_amount)))
+
+        # Amounts can never exceed the selected file's amount (7 Aug fix —
+        # the old amount is the ceiling for what can be moved or split).
         if data.category == "invoice_split" and data.split_targets:
             total = sum((t.amount for t in data.split_targets), Decimal("0"))
             if total > deposit:
                 raise BusinessRuleError(
                     f"The split amounts total {total}, which exceeds the file's "
-                    f"deposit amount of {deposit}."
+                    f"amount of {deposit}."
                 )
         # Invoice Change (19 Aug 2026): a whole-invoice change keeps the
         # amount — new_amount is server-derived below, no ceiling to check.
-
-        # Server-derived parent reference (10 Aug rework): the "old file" is
-        # always the selected request itself — its sunshine invoice number
-        # when present, else the proforma number, else the request number.
-        # Never accepted from the client; recorded for BOTH categories so a
-        # split's history shows which file it split from.
-        parent_file = (
-            (request.sunshine_invoice_number or "").strip()
-            or (request.supplier_invoice_number or "").strip()
-            or request.request_number
-        )
         remark = FileRemark(
             deposit_request_id=request.id,
             category=data.category,
             old_file_number=parent_file,
-            # Server-derived (4 Aug follow-up): the old amount is always the
-            # selected file's deposit amount — pre-populated and non-editable
-            # in the UI, never accepted from the client.
-            old_amount=request.deposit_amount,
+            # Server-derived (4 Aug follow-up; chain-aware 19 Aug 2026): the
+            # old amount is the SELECTED file's live amount — pre-populated
+            # and non-editable in the UI, never accepted from the client.
+            old_amount=deposit,
             new_file_number=(data.new_file_number or "").strip() or None,
             # Server-derived (19 Aug 2026): the whole invoice changes number,
-            # not value — the new amount IS the file's deposit amount, locked
-            # in the UI and never accepted from the client.
+            # not value — the new amount IS the selected file's amount,
+            # locked in the UI and never accepted from the client.
             new_amount=(
-                request.deposit_amount
+                deposit
                 if data.category == "invoice_amount_change"
                 else None
             ),

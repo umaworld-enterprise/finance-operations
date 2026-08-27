@@ -206,6 +206,9 @@ export interface PaymentTranche {
    * visible as a dead record and its amount stops counting. */
   rejection_reason: string | null;
   rejected_at: string | null;
+  /** Release gate (19 Aug 2026): NULL on an unpaid tranche 2+ means "Yet to
+   * be Released" — Accounts cannot pay it until the merchandiser releases. */
+  released_at: string | null;
   is_legacy: boolean;
   created_at: string;
   updated_at: string;
@@ -326,6 +329,21 @@ export interface DepositRequest {
   /** Who performed the most recent status change — names the holder /
    * canceller / rejecter (UAT Aug 2026, item 6). */
   last_status_change_by?: string | null;
+}
+
+/** One "Yet to be Released" tranche row (19 Aug 2026) — drives the
+ * merchandiser tile and the Accounts Workspace tile + tab. */
+export interface PendingReleaseRow {
+  request_id: string;
+  request_number: string;
+  sunshine_invoice_number: string | null;
+  supplier_name: string;
+  merchandiser_name: string | null;
+  currency: string | null;
+  tranche_id: string;
+  tranche_label: string;
+  amount: number;
+  tentative_payment_date: string | null;
 }
 
 export interface DepositRequestDetail extends DepositRequest {

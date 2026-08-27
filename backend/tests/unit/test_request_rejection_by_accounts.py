@@ -261,3 +261,52 @@ async def test_cancel_blocked_until_unpaid_tranches_deleted(db_session):
         request.id, RequestStatus.CANCELLED_BY_MERCHANDISER, merch.id, UserRole.MERCHANDISER
     )
     assert updated.current_status == RequestStatus.CANCELLED_BY_MERCHANDISER
+
+
+# ── Release reminders (19 Aug 2026): daily countdown to the merchandiser ─────
+
+
+async def test_release_reminders_countdown(db_session, engine, monkeypatch):
+    """Unreleased tranches (2 onwards) due within 5 days — or overdue — send
+    the merchandiser a daily bell reminder; released / far-future / tranche-1
+    rows stay silent."""
+    from datetime import date as date_cls
+    from datetime import timedelta, datetime, timezone
+
+    from app.models.tranche import PaymentTranche
+    from app.services.notification_service import send_release_reminders
+    from tests.factories import make_tranche
+
+    merch, _, request = await _setup(db_session)
+    today = date_cls.today()
+
+    async def tranche(number, days_from_now, released):
+        t = await make_tranche(
+            db_session, request, number=number,
+            amount=Decimal("100.00"), released=released,
+        )
+        t.tentative_payment_date = today + timedelta(days=days_from_now)
+        await db_session.flush()
+        return t
+
+    await tranche(2, 3, released=False)     # 3 days left → reminder
+    await tranche(3, -2, released=False)    # overdue → reminder
+    await tranche(4, 10, released=False)    # outside the 5-day window → silent
+    await tranche(5, 2, released=True)      # already released → silent
+    await db_session.commit()
+    _patch_factory(engine, monkeypatch)
+
+    await send_release_reminders()
+
+    rows = (
+        await db_session.execute(
+            select(Notification).where(Notification.user_id == merch.id)
+        )
+    ).scalars().all()
+    titles = sorted(n.title for n in rows)
+    assert len(rows) == 2
+    assert any("3 days left" in t for t in titles)
+    assert any("overdue by 2 days" in t for t in titles)
+    for n in rows:
+        assert n.url == f"/merchandiser/{request.id}"
+        assert "Yet to be Released" in n.body

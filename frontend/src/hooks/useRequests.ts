@@ -301,6 +301,28 @@ export function useUpdateTranchePaymentDetails(requestId: string) {
   });
 }
 
+// Release gate (19 Aug 2026): merchandiser releases a "Yet to be Released"
+// tranche so Accounts can pay it.
+export function useReleaseTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (trancheId: string) => requestService.releaseTranche(requestId, trancheId),
+    onSuccess: () => {
+      invalidateRequestAndTranches(qc, requestId);
+      qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, "pending-release"] });
+    },
+  });
+}
+
+export function usePendingRelease() {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, "pending-release"],
+    queryFn: requestService.getPendingRelease,
+    refetchInterval: POLL,
+    staleTime: STALE,
+  });
+}
+
 export function usePayTranche(requestId: string) {
   const qc = useQueryClient();
   return useMutation({

@@ -23,6 +23,12 @@ class SplitTarget(BaseModel):
 class FileRemarkCreate(BaseModel):
     deposit_request_id: UUID
     category: FileRemarkCategoryLiteral
+    # The selected FILE within the request (19 Aug 2026 chain support): the
+    # root file, or a live file born from an approved split / invoice change
+    # on this request. Omitted → the request's root file (legacy behaviour).
+    # The server validates it against the request's LIVE file set and derives
+    # the old amount from that file.
+    file_number: str | None = Field(None, max_length=200)
     # Invoice Change: new file number only. Neither the OLD file/amount (10
     # Aug rework) nor the NEW amount (19 Aug: a whole-invoice change keeps
     # the amount — pre-filled and locked in the UI) are accepted from the

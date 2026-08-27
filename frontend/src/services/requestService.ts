@@ -6,6 +6,7 @@ import type {
   InvoiceAdjustment,
   PaymentDetails,
   PaymentTranche,
+  PendingReleaseRow,
   QueueKpis,
   RequestAuditEntry,
 } from "@/types";
@@ -233,6 +234,20 @@ const requestService = {
       `/requests/${id}/tranches/${trancheId}/payment-details`,
       payload,
     );
+    return data;
+  },
+
+  // Release gate (19 Aug 2026): merchandiser releases a "Yet to be
+  // Released" tranche (2 onwards) so Accounts can pay it.
+  releaseTranche: async (id: string, trancheId: string): Promise<PaymentTranche> => {
+    const { data } = await api.post<PaymentTranche>(
+      `/requests/${id}/tranches/${trancheId}/release`,
+    );
+    return data;
+  },
+
+  getPendingRelease: async (): Promise<PendingReleaseRow[]> => {
+    const { data } = await api.get<PendingReleaseRow[]>("/requests/pending-release");
     return data;
   },
 

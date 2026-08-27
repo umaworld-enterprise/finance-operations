@@ -29,11 +29,11 @@ import { Pagination } from "@/components/ui/Pagination";
 import { TableControls } from "@/components/ui/TableControls";
 import { byString, useClientTable } from "@/hooks/useClientTable";
 import { useAuth } from "@/hooks/useAuth";
-import { useRequests } from "@/hooks/useRequests";
 import {
   useCreateFileRemark,
   useDecideFileRemark,
   useFileRemarks,
+  useSelectableFiles,
 } from "@/hooks/useFileRemarks";
 import { formatDate } from "@/lib/utils";
 import type { FileRemark, FileRemarkCategory } from "@/types";
@@ -122,9 +122,10 @@ function RemarkDetails({ r }: { r: FileRemark }) {
   const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2 });
   const cur = r.currency ? ` (${r.currency})` : "";
   if (r.category === "invoice_split" && r.split_targets?.length) {
-    // Prefer the parent's CURRENT sunshine invoice number — falls back to
-    // the stored parent reference, then the request number (legacy rows).
-    const parent = r.sunshine_invoice_number ?? r.old_file_number ?? r.request_number ?? "—";
+    // Prefer the STORED parent file (19 Aug 2026 chain support — a split of
+    // a split-born file must show that file, not the request's invoice
+    // number); legacy rows without one fall back as before.
+    const parent = r.old_file_number ?? r.sunshine_invoice_number ?? r.request_number ?? "—";
     // Balance left on the original file after the split (19 Aug 2026) —
     // shown even at 0.00 as explicit confirmation of a full allocation.
     // Needs the stored old amount (legacy rows without one show no balance).
@@ -181,16 +182,19 @@ export default function FileRemarksPage() {
   // File Remark form — every decider role sees just open remarks + history.
   const canRaise = user?.role === "merchandiser";
 
-  // Role-scoped server-side; only payment-completed files are eligible.
-  const { data: requests = [] } = useRequests();
-  const completedRequests = requests.filter((r) => r.current_status === "payment_processed");
+  // Selectable files (19 Aug 2026 chain support): the live files of every
+  // payment-completed request — root file PLUS files born from approved
+  // splits / invoice changes, any depth — file number only, no supplier.
+  const { data: selectableFiles = [] } = useSelectableFiles(canRaise);
   const { data: remarks = [], isLoading } = useFileRemarks();
   const createRemark = useCreateFileRemark();
   const decideRemark = useDecideFileRemark();
 
   // Category comes FIRST (4 Aug rework) and drives the rest of the form.
   const [category, setCategory] = useState<FileRemarkCategory>("invoice_split");
-  const [requestId, setRequestId] = useState("");
+  // Selection key: request id + file number (a request can carry several
+  // live files once splits / changes chain — 19 Aug 2026).
+  const [fileKey, setFileKey] = useState("");
   const [splitRows, setSplitRows] = useState<SplitRow[]>([{ file_number: "", amount: "" }]);
   const [newFile, setNewFile] = useState("");
   const [remarkText, setRemarkText] = useState("");
@@ -236,14 +240,16 @@ export default function FileRemarksPage() {
     searchHaystack: remarkHaystack, sortOptions: remarkSorts, pageSize: 20,
   });
 
-  // The old amount pre-populates from the selected file's deposit amount and
+  // The old amount pre-populates from the selected file's LIVE amount and
   // is NOT editable (4 Aug follow-up) — the server derives it independently.
-  const selectedRequest = completedRequests.find((r) => r.id === requestId);
+  const selectedFile = selectableFiles.find(
+    (f) => `${f.deposit_request_id}||${f.file_number}` === fileKey,
+  );
   const oldAmountDisplay =
-    selectedRequest != null ? Number(selectedRequest.deposit_amount).toFixed(2) : "";
+    selectedFile != null ? Number(selectedFile.amount).toFixed(2) : "";
 
-  // Amounts can never exceed the file's deposit ("old") amount (7 Aug fix).
-  const depositCeiling = selectedRequest != null ? Number(selectedRequest.deposit_amount) : null;
+  // Amounts can never exceed the selected file's ("old") amount (7 Aug fix).
+  const depositCeiling = selectedFile != null ? Number(selectedFile.amount) : null;
   const splitTotal = splitRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
   const splitOverCeiling = depositCeiling != null && splitTotal > depositCeiling;
   // Live balance left on the original file as split amounts are typed
@@ -259,20 +265,23 @@ export default function FileRemarksPage() {
   // derives it independently, so only the new file number is client input.
   const amountChangeValid = Boolean(newFile.trim());
   const canSubmit =
-    !!requestId && (category === "invoice_split" ? splitRowsValid : amountChangeValid);
+    !!selectedFile && (category === "invoice_split" ? splitRowsValid : amountChangeValid);
 
   const resetForm = () => {
-    setRequestId("");
+    setFileKey("");
     setSplitRows([{ file_number: "", amount: "" }]);
     setNewFile("");
     setRemarkText("");
   };
 
   const doCreate = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || !selectedFile) return;
     try {
       await createRemark.mutateAsync({
-        deposit_request_id: requestId,
+        deposit_request_id: selectedFile.deposit_request_id,
+        // The selected FILE (19 Aug 2026 chain support) — root or a live
+        // split-born / invoice-changed file; the server validates it.
+        file_number: selectedFile.file_number,
         category,
         // The old amount is deliberately NOT sent — the server derives it
         // from the selected file's deposit amount.
@@ -354,21 +363,26 @@ export default function FileRemarksPage() {
                 </div>
                 <div>
                   <Label htmlFor="fr-request">Select file (payment completed)</Label>
+                  {/* File number only (19 Aug 2026) — no supplier appended;
+                      includes files born from approved splits / invoice
+                      changes, chainable to any depth. */}
                   <select
                     id="fr-request"
-                    value={requestId}
-                    onChange={(e) => setRequestId(e.target.value)}
+                    value={fileKey}
+                    onChange={(e) => setFileKey(e.target.value)}
                     className={`mt-1 ${inputCls}`}
                   >
                     <option value="">
-                      {completedRequests.length === 0
+                      {selectableFiles.length === 0
                         ? "No payment-completed files"
                         : "Select file"}
                     </option>
-                    {completedRequests.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.request_number}
-                        {r.sunshine_invoice_number ? ` (${r.sunshine_invoice_number})` : ""} — {r.supplier.name}
+                    {selectableFiles.map((f) => (
+                      <option
+                        key={`${f.deposit_request_id}||${f.file_number}`}
+                        value={`${f.deposit_request_id}||${f.file_number}`}
+                      >
+                        {f.file_number}
                       </option>
                     ))}
                   </select>

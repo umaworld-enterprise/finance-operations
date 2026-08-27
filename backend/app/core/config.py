@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # mode bypasses auth entirely).
     google_client_id: str = ""
     google_client_secret: str = ""
-    access_token_expire_minutes: int = 720  # 12h sessions
+    access_token_expire_minutes: int = 4320  # 72h sessions (was 12h — 19 Aug 2026)
 
     # Database
     database_url: str

@@ -244,6 +244,8 @@ class DepositRequestService:
         callers) get a single compatibility tranche covering the full deposit
         amount, flagged is_legacy since it carries no tentative payment date.
         """
+        from datetime import datetime, timezone
+
         if data.tranches:
             for i, t in enumerate(data.tranches, start=1):
                 self._session.add(
@@ -252,6 +254,11 @@ class DepositRequestService:
                         tranche_number=i,
                         amount=t.amount,
                         tentative_payment_date=t.tentative_payment_date,
+                        # Release gate (19 Aug 2026): tranche 1 is payable
+                        # immediately; tranche 2 onwards stays "Yet to be
+                        # Released" until the merchandiser releases it.
+                        released_at=(datetime.now(timezone.utc) if i == 1 else None),
+                        released_by=(request.created_by if i == 1 else None),
                     )
                 )
         else:
@@ -262,6 +269,8 @@ class DepositRequestService:
                     amount=request.deposit_amount,
                     tentative_payment_date=None,
                     is_legacy=True,
+                    released_at=datetime.now(timezone.utc),
+                    released_by=request.created_by,
                 )
             )
 

@@ -964,6 +964,91 @@ overdue list, notifications. Deliberately not links: chart axis labels,
 detail-page titles (they ARE the request page), rows frozen by a
 merchandiser hold, and dialog prose.
 
+## Follow-up (19 Aug 2026) — Tranche release gate (Tranche 2 onwards)
+
+From Tranche 2 onwards a tranche is a FUTURE payment gated behind an
+explicit merchandiser release (all four scoping answers: real gate /
+backfill released / keep reminding past due / bell + push + accounts
+notified on release).
+
+- **Data (migration 0032)**: `released_at` / `released_by` on
+  payment_tranches; ALL existing rows backfilled released. Tranche 1 is
+  auto-released at creation (request form and add_tranche); tranche 2+
+  starts "Yet to be Released".
+- **Gate**: `pay_tranche` refuses an unreleased tranche 2+;
+  `release_tranche` (owner merchandiser / super admin; unpaid, unrejected,
+  not already released) sets the release, audits, and notifies accounts +
+  super admins ("Tranche released — ready to pay", bell + push). Endpoint:
+  `POST /requests/{id}/tranches/{tid}/release`.
+- **Merchandiser UI**: disclaimer dialog before the Add Tranche form ("a
+  new tranche is created as Yet to be Released…"), amber "Yet to be
+  Released" pill on the row, "Release Tranche N for Payment" button with a
+  confirm, and a "Tranche Payments to be Released" tile on the workspace
+  (shows when > 0).
+- **Accounts Workspace**: "Yet to be Released by Merchandiser" KPI tile
+  (live, not FY) + a "Yet to be Released" tab listing tranche-level rows —
+  Request # (linked), Invoice #, Supplier, Merchandiser, Tranche,
+  **Amount (to be released)**, Tentative Payment. On the request view an
+  unreleased tranche shows a notice instead of the payment form. Requests
+  stay in Pending too (their released tranches remain payable).
+- **Reminders**: daily APScheduler job (03:30 UTC ≈ 09:00 IST) —
+  merchandisers with unreleased tranches due within 5 days get "5 days
+  left" → … → "due TODAY" → "overdue by N days", bell + Web Push, until
+  released or the file leaves pending. New endpoint
+  `GET /requests/pending-release` (merchandisers: own; other roles: all)
+  drives both tiles and the tab, polled every 10 s.
+- Also fixed in passing: the accounts sort dropdown fallback still said
+  "oldest" for the pending tab after the latest-first change.
+
+Tests: 278 green — gate round-trip (add → blocked pay → release → pay),
+release permissions/conflicts, reminder countdown (3-days-left + overdue
+sent; far-future / released / tranche-1 silent); the reopen round-trip now
+releases before re-paying. `make_tranche` factory defaults to released
+(mirrors the 0032 backfill).
+
+Deploy: **`alembic upgrade head` (0032)** + backend & frontend together.
+
+**Same-day addition:** the Pending Payment list shows a **"Yet to be
+Released"** amount column beside Amount Payable (amber when > 0, — when
+none; also a line on the mobile cards), and `payableDueSoon` now EXCLUDES
+unreleased tranches — an unreleased amount is never counted as payable.
+
+## Follow-up (19 Aug 2026) — Session lifetime extended to 72 h
+
+Auto-logout is the JWT expiry: `access_token_expire_minutes` default raised
+**720 (12 h) → 4320 (72 h)** (config.py, .env.example, README). The
+frontend cookie Max-Age follows the server's `expires_in` automatically.
+Caveat: an environment that sets `ACCESS_TOKEN_EXPIRE_MINUTES` explicitly
+overrides the default — update that env var there. Existing tokens keep
+their old expiry; users get 72 h from their next sign-in.
+
+## Follow-up (19 Aug 2026) — File Remarks: file-number dropdown + full chains
+
+Scoping answers: file number = sunshine invoice # (fallbacks preserved),
+approved splits only, FULL chain depth.
+
+1. **Dropdown shows the file number only** — no supplier appended. Backed by
+   `GET /file-remarks/selectable-files`: for every payment-completed
+   request, the server replays its APPROVED remarks over the root file —
+   a split moves value into the target files (parent keeps the balance,
+   drops out at zero), an invoice change swaps the file number — and
+   returns the LIVE file set. Files under an open remark are held back
+   until decided.
+2. **Split-born files are selectable** for Invoice Change AND (full chain)
+   for further splits; invoice-changed numbers re-enter too — any depth.
+   `FileRemarkCreate` gained `file_number` (validated server-side against
+   the live set); old amount / ceiling / locked new-amount all derive from
+   the SELECTED file's live amount, not the request total.
+3. **Audit chain on the core file** — every chained remark stays anchored
+   to the original deposit_request_id, so its raise/approve/reject audit
+   rows land on the main file's trail (existing behaviour, now guaranteed
+   by design). RemarkDetails now prefers the stored parent file number so a
+   chained remark displays its true parent.
+
+280 tests green (live-set replay incl. re-split ceiling; selectable rules:
+consumed parent gone, open remark holds a file back, non-live file
+refused); tsc clean. No migration; deploy backend + frontend together.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

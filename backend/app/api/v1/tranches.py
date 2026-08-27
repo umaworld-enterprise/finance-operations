@@ -38,6 +38,7 @@ from app.services.notification_service import (
     notify_tranche_added,
     notify_tranche_event,
     notify_tranche_rejected,
+    notify_tranche_released,
     notify_tranche_removed,
     notify_tranche_updated,
 )
@@ -154,6 +155,29 @@ async def add_tranche(
     background_tasks.add_task(
         notify_tranche_added, request_id, tranche.id, was_processed
     )
+    return _tranche_response(tranche, req.total_supplier_invoice_amount)
+
+
+@router.post("/{tranche_id}/release", response_model=TrancheResponse)
+async def release_tranche(
+    request_id: UUID,
+    tranche_id: UUID,
+    current_user: User,
+    request: Request,
+    db: DB,
+    background_tasks: BackgroundTasks,
+) -> TrancheResponse:
+    """Merchandiser releases a 'Yet to be Released' tranche (2 onwards) for
+    payment (19 Aug 2026) — Accounts and super admins are notified that it
+    is now payable."""
+    svc = TrancheService(db)
+    tranche = await svc.release_tranche(
+        request_id, tranche_id, current_user.id, current_user.role,
+        ip_address=_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    req = await DepositRequestRepository(db).get_for_validation(request_id)
+    background_tasks.add_task(notify_tranche_released, request_id, tranche.id)
     return _tranche_response(tranche, req.total_supplier_invoice_amount)
 
 

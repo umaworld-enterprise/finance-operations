@@ -578,6 +578,141 @@ async def notify_tranche_added(
         )
 
 
+async def notify_tranche_released(request_id: UUID, tranche_id: UUID) -> None:
+    """After the merchandiser releases a 'Yet to be Released' tranche
+    (19 Aug 2026) — bell + push to every active Accounts Team user and super
+    admin: the tranche is now payable.
+
+    Own session; failures logged and swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+    from app.models.tranche import PaymentTranche
+
+    try:
+        async with AsyncSessionFactory() as session:
+            request = await _load_request(session, request_id)
+            tranche = await session.get(PaymentTranche, tranche_id)
+            if request is None or tranche is None:
+                return
+            message = {
+                "title": "Tranche released — ready to pay",
+                "body": (
+                    f"{tranche.label} ({tranche.amount}) of "
+                    f"{request.request_number} was released by the "
+                    f"merchandiser and can now be paid."
+                ),
+                "url": f"/accounts/{request_id}",
+                "attachment_url": None,
+            }
+            result = await session.execute(
+                select(User).where(
+                    User.role.in_([UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN]),
+                    User.is_active == True,  # noqa: E712
+                )
+            )
+            targets = list(result.scalars().all())
+            for user in targets:
+                session.add(
+                    Notification(
+                        user_id=user.id,
+                        type=TYPE_TRANCHE_UPDATED,
+                        title=message["title"],
+                        body=message["body"],
+                        url=message["url"],
+                        attachment_url=None,
+                        deposit_request_id=request.id,
+                    )
+                )
+            await session.commit()
+            for user in targets:
+                await _push_to_user(session, user.id, message)
+            await session.commit()
+    except Exception as exc:
+        logger.error(
+            "notify_tranche_released failed",
+            request_id=str(request_id), tranche_id=str(tranche_id), error=str(exc),
+        )
+
+
+async def send_release_reminders() -> None:
+    """Daily scheduler job (19 Aug 2026): remind each merchandiser about
+    their 'Yet to be Released' tranches (2 onwards) starting 5 days before
+    the tentative payment date — "5 days left", "4 days left", …, "due
+    today", then "overdue by N days" until released or the file closes.
+    Bell + push, one notification per tranche per daily run.
+
+    Own session; failures logged and swallowed (scheduler contract).
+    """
+    from datetime import date as date_cls
+    from datetime import timedelta
+
+    from app.core.database import AsyncSessionFactory
+    from app.models.deposit_request import DepositRequest
+    from app.models.enums import TrancheStatus
+    from app.models.tranche import PaymentTranche
+
+    try:
+        async with AsyncSessionFactory() as session:
+            today = date_cls.today()
+            result = await session.execute(
+                select(PaymentTranche, DepositRequest)
+                .join(
+                    DepositRequest,
+                    DepositRequest.id == PaymentTranche.deposit_request_id,
+                )
+                .where(
+                    PaymentTranche.status == TrancheStatus.UNPAID,
+                    PaymentTranche.released_at.is_(None),
+                    PaymentTranche.tranche_number > 1,
+                    PaymentTranche.tentative_payment_date.isnot(None),
+                    PaymentTranche.tentative_payment_date <= today + timedelta(days=5),
+                    DepositRequest.is_deleted == False,  # noqa: E712
+                    DepositRequest.current_status == RequestStatus.PENDING_PAYMENT,
+                    DepositRequest.created_by.isnot(None),
+                )
+            )
+            rows = result.all()
+            sent = 0
+            for tranche, request in rows:
+                days_left = (tranche.tentative_payment_date - today).days
+                if days_left > 0:
+                    when = f"{days_left} day{'s' if days_left != 1 else ''} left"
+                elif days_left == 0:
+                    when = "due TODAY"
+                else:
+                    when = f"overdue by {-days_left} day{'s' if days_left != -1 else ''}"
+                message = {
+                    "title": f"Release reminder — {when}",
+                    "body": (
+                        f"{tranche.label} ({tranche.amount}) of "
+                        f"{request.request_number} is due on "
+                        f"{tranche.tentative_payment_date.strftime('%d/%m/%Y')} and is "
+                        f"still Yet to be Released. Release it so Accounts can pay."
+                    ),
+                    "url": f"/merchandiser/{request.id}",
+                    "attachment_url": None,
+                }
+                session.add(
+                    Notification(
+                        user_id=request.created_by,
+                        type=TYPE_TRANCHE_UPDATED,
+                        title=message["title"],
+                        body=message["body"],
+                        url=message["url"],
+                        attachment_url=None,
+                        deposit_request_id=request.id,
+                    )
+                )
+                await session.commit()
+                await _push_to_user(session, request.created_by, message)
+                await session.commit()
+                sent += 1
+            if sent:
+                logger.info("release reminders sent", count=sent)
+    except Exception as exc:
+        logger.error("send_release_reminders failed", error=str(exc))
+
+
 async def notify_tranche_updated(request_id: UUID, tranche_id: UUID, changes: str) -> None:
     """After a merchandiser edits an unpaid tranche — bell + push to every
     active Accounts Team user so they work from the latest values.
