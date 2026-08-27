@@ -120,10 +120,13 @@ function PendingTable({
         ) : rows.map((req) => (
           <div key={req.id} className="p-4 space-y-2.5">
             <div className="flex items-start justify-between gap-3">
-              <span className="font-mono text-xs font-bold text-foreground">{requestDisplayNumber(req)}</span>
+              <Link href={`/accounts/${req.id}`} className="font-mono text-xs font-bold text-foreground hover:underline underline-offset-2">
+                {requestDisplayNumber(req)}
+              </Link>
               {agingBadge(req.created_at)}
             </div>
             <div className="text-xs text-muted-foreground font-mono">Invoice # {req.sunshine_invoice_number || "—"}</div>
+            <div className="text-xs text-muted-foreground">Requested: {formatDate(req.created_at)}</div>
             <div className="text-sm font-semibold text-foreground">{req.supplier.name}</div>
             <div className="text-xs text-muted-foreground">{req.customer.name}</div>
             <div className="text-xs text-muted-foreground">
@@ -153,6 +156,7 @@ function PendingTable({
           <TableHeader>
             <TableRow>
               <TableHead>Request #</TableHead>
+              <TableHead>Request Date</TableHead>
               <TableHead>Invoice #</TableHead>
               <TableHead>Supplier</TableHead>
               <TableHead>Customer</TableHead>
@@ -168,12 +172,17 @@ function PendingTable({
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableSkeleton rows={5} cols={12} />
+              <TableSkeleton rows={5} cols={13} />
             ) : rows.length === 0 ? (
-              <tr><td colSpan={12}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
+              <tr><td colSpan={13}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id}>
-                <TableCell><span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span></TableCell>
+                <TableCell>
+                  <Link href={`/accounts/${req.id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
+                    {requestDisplayNumber(req)}
+                  </Link>
+                </TableCell>
+                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDate(req.created_at)}</TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
                 <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
@@ -251,7 +260,13 @@ function StatusTable({
         ) : rows.map((req) => (
           <div key={req.id} className={cn("p-4 space-y-2.5", frozenForAccounts(req) && "opacity-50")}>
             <div className="flex items-start justify-between gap-3">
-              <span className="font-mono text-xs font-bold text-foreground">{requestDisplayNumber(req)}</span>
+              {frozenForAccounts(req) ? (
+                <span className="font-mono text-xs font-bold text-foreground">{requestDisplayNumber(req)}</span>
+              ) : (
+                <Link href={`/accounts/${req.id}`} className="font-mono text-xs font-bold text-foreground hover:underline underline-offset-2">
+                  {requestDisplayNumber(req)}
+                </Link>
+              )}
               <StatusBadge status={req.current_status} showFull />
             </div>
             <div className="text-xs text-muted-foreground font-mono">Invoice # {req.sunshine_invoice_number || "—"}</div>
@@ -301,7 +316,11 @@ function StatusTable({
               <tr><td colSpan={showPayable ? 10 : 9}><EmptyState icon={AlertTriangle} title={emptyTitle} /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id} className={cn(frozenForAccounts(req) && "opacity-50 pointer-events-none select-none")}>
-                <TableCell><span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span></TableCell>
+                <TableCell>
+                  <Link href={`/accounts/${req.id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
+                    {requestDisplayNumber(req)}
+                  </Link>
+                </TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
                 <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
@@ -342,7 +361,13 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
         ) : rows.map((req) => (
           <div key={req.id} className={cn("p-4 space-y-2.5", frozenForAccounts(req) && "opacity-50")}>
             <div className="flex items-start justify-between gap-3">
-              <span className="font-mono text-xs font-bold text-foreground">{requestDisplayNumber(req)}</span>
+              {frozenForAccounts(req) ? (
+                <span className="font-mono text-xs font-bold text-foreground">{requestDisplayNumber(req)}</span>
+              ) : (
+                <Link href={`/accounts/${req.id}`} className="font-mono text-xs font-bold text-foreground hover:underline underline-offset-2">
+                  {requestDisplayNumber(req)}
+                </Link>
+              )}
               <StatusBadge status={req.current_status} showFull />
             </div>
             <div className="text-sm font-semibold text-foreground">{req.supplier.name}</div>
@@ -385,7 +410,11 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
               <tr><td colSpan={9}><EmptyState icon={ClipboardList} title="No requests yet" /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id} className={cn(frozenForAccounts(req) && "opacity-50 pointer-events-none select-none")}>
-                <TableCell><span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span></TableCell>
+                <TableCell>
+                  <Link href={`/accounts/${req.id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
+                    {requestDisplayNumber(req)}
+                  </Link>
+                </TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
                 <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
@@ -490,7 +519,7 @@ export default function AccountsDashboard() {
   return (
     <RoleGuard allowedRoles={["accounts_team", "super_admin"]}>
       <TopNav
-        title="Payment Queue"
+        title="Accounts Workspace"
         subtitle="Process advance deposit payments — latest requests first"
       />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6">

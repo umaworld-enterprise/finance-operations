@@ -15,7 +15,7 @@ export function useFileRemarks(params?: {
     staleTime: 30_000,
     // Auto-reload (UAT Aug 2026, item 4): new remarks and decisions appear
     // without a manual refresh.
-    refetchInterval: 30_000,
+    refetchInterval: 10_000,
     refetchOnWindowFocus: true,
   });
 }

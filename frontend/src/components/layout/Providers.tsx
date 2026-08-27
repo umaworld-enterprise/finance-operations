@@ -20,10 +20,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            // 60 s before data counts as stale (was 5 min) — the UAT change
-            // note (Aug 2026, item 4) asked for auto-reload across the app;
-            // workflow queries additionally poll every 30 s in their hooks.
-            staleTime: 60 * 1000,
+            // Near-live app (19 Aug 2026, executive feedback: cross-user
+            // changes must show without a manual refresh): data counts as
+            // stale after 10 s and EVERY query polls every 15 s while its
+            // page is visible. Workflow-critical hooks poll faster (10 s)
+            // in their own files.
+            staleTime: 10 * 1000,
+            refetchInterval: 15 * 1000,
+            // Hidden tabs don't poll (default) — the focus refetch below
+            // catches up the moment the user returns.
             // Keep data in memory for 30 minutes after all components unmount.
             // Navigating back to a page is instant — stale data shows first,
             // then refreshes in the background.

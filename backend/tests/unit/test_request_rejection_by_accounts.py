@@ -209,3 +209,55 @@ async def test_rejection_notifies_merchandiser_and_all_homs(db_session, engine, 
     assert by_user[merch.id].url == f"/merchandiser/{request.id}"
     assert by_user[hom1.id].url == f"/hom/{request.id}"
     assert by_user[hom2.id].url == f"/hom/{request.id}"
+
+# ── Tranche-derived guards on whole-request transitions (19 Aug 2026) ─────────
+
+
+async def test_paid_tranche_blocks_request_hold_and_reject(db_session):
+    """Once ANY tranche is paid, whole-request Hold and Reject are refused —
+    money already left, so those transitions would record wrong information."""
+    from app.models.enums import TrancheStatus
+    from tests.factories import make_tranche
+
+    merch, accounts, request = await _setup(db_session)
+    t1 = await make_tranche(db_session, request, number=1, amount=Decimal("400.00"))
+    await make_tranche(db_session, request, number=2, amount=Decimal("600.00"))
+    t1.status = TrancheStatus.PAID
+    await db_session.flush()
+    svc = DepositRequestService(db_session)
+    with pytest.raises(BusinessRuleError, match="already been paid"):
+        await svc.transition_status(
+            request.id, RequestStatus.HOLD_BY_ACCOUNTS, accounts.id, UserRole.ACCOUNTS_TEAM
+        )
+    with pytest.raises(BusinessRuleError, match="already been paid"):
+        await svc.transition_status(
+            request.id, RequestStatus.REJECTED_BY_ACCOUNTS, accounts.id,
+            UserRole.ACCOUNTS_TEAM, remarks="wrong",
+        )
+
+
+async def test_cancel_blocked_until_unpaid_tranches_deleted(db_session):
+    """Rejected tranche + unpaid tranche: the merchandiser must delete the
+    unpaid tranche(s) explicitly before the file can be closed — nothing is
+    closed silently (19 Aug 2026)."""
+    from app.models.enums import TrancheStatus
+    from tests.factories import make_tranche
+
+    merch, _, request = await _setup(db_session)
+    t1 = await make_tranche(db_session, request, number=1, amount=Decimal("400.00"))
+    t2 = await make_tranche(db_session, request, number=2, amount=Decimal("600.00"))
+    t1.status = TrancheStatus.REJECTED
+    await db_session.flush()
+    svc = DepositRequestService(db_session)
+    with pytest.raises(BusinessRuleError, match="Delete the unpaid"):
+        await svc.transition_status(
+            request.id, RequestStatus.CANCELLED_BY_MERCHANDISER, merch.id, UserRole.MERCHANDISER
+        )
+    # Delete the unpaid tranche — then the file closes normally.
+    await TrancheService(db_session).delete_tranche(
+        request.id, t2.id, merch.id, UserRole.MERCHANDISER
+    )
+    updated = await svc.transition_status(
+        request.id, RequestStatus.CANCELLED_BY_MERCHANDISER, merch.id, UserRole.MERCHANDISER
+    )
+    assert updated.current_status == RequestStatus.CANCELLED_BY_MERCHANDISER

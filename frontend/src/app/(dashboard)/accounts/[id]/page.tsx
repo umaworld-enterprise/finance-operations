@@ -86,7 +86,12 @@ export default function AccountsPaymentPage() {
     req?.current_status === "hold_by_merchandiser" ||
     req?.current_status === "cancelled_by_merchandiser";
 
-  const canHold   = req?.current_status === "pending_payment"      && !req.is_locked && !isFinance;
+  // Once ANY tranche is paid, whole-request Hold and Reject disappear
+  // (19 Aug 2026): money is already out, so holding/rejecting the request
+  // would record wrong information — act per tranche instead. The backend
+  // refuses these transitions on partially-paid requests regardless.
+  const anyTranchePaid = (req?.tranches ?? []).some((t) => t.status === "paid");
+  const canHold   = req?.current_status === "pending_payment"      && !req.is_locked && !isFinance && !anyTranchePaid;
   // "reopened" must also offer Resume — otherwise a reopened request is
   // stranded with no path back to the payment queue.
   const canResume = (req?.current_status === "hold_by_accounts" || req?.current_status === "reopened") && !req.is_locked && !isFinance;
@@ -96,7 +101,7 @@ export default function AccountsPaymentPage() {
   // allowed while pending or on accounts hold; reason is mandatory.
   const canReject =
     (req?.current_status === "pending_payment" || req?.current_status === "hold_by_accounts") &&
-    !req.is_locked && !isFinance;
+    !req.is_locked && !isFinance && !anyTranchePaid;
 
   const doReject = async (remarks: string) => {
     try {
