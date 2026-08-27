@@ -357,6 +357,51 @@ class DepositRequestService:
         assert_transition_allowed(request.current_status, target, role)
         assert_record_not_locked(request.is_locked, role)
 
+        # Tranche-derived guards (19 Aug 2026):
+        # 1. Once ANY tranche is paid, whole-request Hold/Reject would record
+        #    wrong information (money already left) — act per tranche instead.
+        # 2. A file carrying a rejected tranche plus unpaid tranche(s) cannot
+        #    be closed by the merchandiser in one click — the unpaid
+        #    tranche(s) must be deleted explicitly first, so nothing is
+        #    closed silently.
+        _GUARDED = {
+            RequestStatus.HOLD_BY_ACCOUNTS,
+            RequestStatus.REJECTED_BY_ACCOUNTS,
+            RequestStatus.CANCELLED_BY_MERCHANDISER,
+        }
+        if target in _GUARDED:
+            from app.models.enums import TrancheStatus
+            from app.models.tranche import PaymentTranche
+
+            result = await self._session.execute(
+                select(PaymentTranche).where(
+                    PaymentTranche.deposit_request_id == request.id
+                )
+            )
+            tranches = list(result.scalars().all())
+            has_paid = any(t.status == TrancheStatus.PAID for t in tranches)
+            has_unpaid = any(t.status == TrancheStatus.UNPAID for t in tranches)
+            has_rejected = any(t.status == TrancheStatus.REJECTED for t in tranches)
+            if (
+                target in (RequestStatus.HOLD_BY_ACCOUNTS, RequestStatus.REJECTED_BY_ACCOUNTS)
+                and has_paid
+            ):
+                raise BusinessRuleError(
+                    "A tranche on this request has already been paid — the whole "
+                    "request can no longer be placed on hold or rejected. Act on "
+                    "the remaining tranches individually instead."
+                )
+            if (
+                target == RequestStatus.CANCELLED_BY_MERCHANDISER
+                and has_rejected
+                and has_unpaid
+            ):
+                raise BusinessRuleError(
+                    "This request has a rejected tranche and unpaid tranche(s). "
+                    "Delete the unpaid tranche(s) first — then the file can be "
+                    "closed."
+                )
+
         old_status = request.current_status
         request = await self._repo.update(request, current_status=target)
 

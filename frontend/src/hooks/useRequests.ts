@@ -7,10 +7,14 @@ import requestService, {
 } from "@/services/requestService";
 import type { DepositRequest, RequestStatus } from "@/types";
 
-const STALE      = 5 * 60 * 1000;
-const STALE_PAGED = 2 * 60 * 1000;
+// Near-live tuning (19 Aug 2026): requests are the app's hot data — poll
+// every 10 s and treat anything older than 10 s as stale, so cross-user
+// changes appear without a manual refresh (executives saw stale queues and
+// risked double actions).
+const STALE      = 10 * 1000;
+const STALE_PAGED = 10 * 1000;
 const GC         = 30 * 60 * 1000;
-const POLL       = 30 * 1000;
+const POLL       = 10 * 1000;
 
 export const REQUESTS_KEY = ["requests"] as const;
 

@@ -59,9 +59,12 @@ export function RequestsTable({
           {requests.map((req) => (
             <TableRow key={req.id}>
               <TableCell>
-                <span className="font-mono text-xs text-foreground font-semibold">
+                <Link
+                  href={`${basePath}/${req.id}`}
+                  className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2"
+                >
                   {requestDisplayNumber(req)}
-                </span>
+                </Link>
               </TableCell>
               <TableCell className="hidden sm:table-cell font-mono text-xs text-muted-foreground">
                 {req.sunshine_invoice_number || "—"}

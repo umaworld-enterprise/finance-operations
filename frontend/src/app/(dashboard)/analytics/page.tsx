@@ -809,6 +809,15 @@ function OutstandingTrackerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo
 
 function WeeklyTrackerTab() {
   const { data: groups = [], isLoading } = useWeeklyDeposits();
+  const { user } = useAuth();
+  // Request numbers link to the viewer's own detail page (19 Aug 2026,
+  // app-wide hyperlinks).
+  const requestHref = (id: string) =>
+    user?.role === "merchandiser"
+      ? `/merchandiser/${id}`
+      : user?.role === "head_of_merchandiser"
+        ? `/hom/${id}`
+        : `/accounts/${id}`;
 
   return (
     <div className="space-y-4">
@@ -856,7 +865,12 @@ function WeeklyTrackerTab() {
                   {g.rows.map((row, i) => (
                     <TableRow key={`${row.request_id}-${row.tranche_label}-${i}`}>
                       <TableCell className="font-mono text-xs font-semibold whitespace-nowrap">
-                        {row.request_number}
+                        <Link
+                          href={requestHref(row.request_id)}
+                          className="hover:underline underline-offset-2"
+                        >
+                          {row.request_number}
+                        </Link>
                       </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">
                         {row.sunshine_invoice_number || "—"}

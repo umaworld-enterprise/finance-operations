@@ -42,7 +42,7 @@ interface NavItem {
 // now (item 15) — the backend module stays intact pending further discussion.
 const NAV_ITEMS: NavItem[] = [
   { href: "/admin",         label: "Admin Overview", icon: LayoutDashboard, roles: ["super_admin"],                                                                      group: "main"  },
-  { href: "/accounts",      label: "Payment Queue",  icon: CreditCard,      roles: ["accounts_team", "super_admin"],                                                     group: "main"  },
+  { href: "/accounts",      label: "Accounts Workspace", icon: CreditCard,  roles: ["accounts_team", "super_admin"],                                                     group: "main"  },
   { href: "/merchandiser",  label: "My Requests",    icon: ClipboardList,   roles: ["merchandiser"],                                                                     group: "main"  },
   { href: "/hom",           label: "HoM Workspace",  icon: UserCog,         roles: ["head_of_merchandiser", "super_admin"],                                              group: "main"  },
   { href: "/finance",       label: "Supplier Risk",  icon: ShieldAlert,     roles: ["finance_admin", "super_admin"],                                                     group: "main"  },

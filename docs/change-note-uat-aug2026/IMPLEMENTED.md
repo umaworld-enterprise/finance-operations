@@ -911,6 +911,44 @@ No migration; 273 tests green, tsc clean.
    request table's newest-first default; subtitle updated. Merchandiser and
    HoM queues already defaulted to newest-first.
 
+## Follow-up (19 Aug 2026) — Queue columns, paid-tranche action gating, hyperlinks, cancel validation
+
+1. **Request Date column** added to the Payment Queue pending table (desktop
+   column after Request #, "Requested:" line on the mobile cards).
+2. **Hold/Reject hidden once any tranche is paid** — on the accounts request
+   view, "Place on Hold" and "Reject Request" disappear when a tranche is
+   PAID, and `transition_status` refuses hold_by_accounts /
+   rejected_by_accounts server-side on partially-paid requests ("act on the
+   remaining tranches individually").
+3. **Hyperlinked request numbers app-wide**: Payment Queue pending table +
+   mobile cards, On Hold/Rejected/Cancelled tabs, All Requests, the
+   merchandiser RequestsTable, and the analytics Weekly Tracker (role-aware
+   destination). HoM queue, Shipments snapshot and File Remarks already
+   linked. Merchandiser-frozen rows keep their non-clickable state.
+4. **Cancel validation (rejected + unpaid tranches)** — closing a file that
+   has a rejected tranche AND unpaid tranche(s) is refused until the
+   merchandiser deletes the unpaid tranche(s); nothing closes silently.
+   Server-side in `transition_status` (cancelled_by_merchandiser), surfaced
+   as the error toast on the cancel action.
+
+275 tests green (2 new guard tests), tsc clean; no migration.
+
+## Follow-up (19 Aug 2026) — "Accounts Workspace" rename + near-live refresh
+
+1. **"Payment Queue" → "Accounts Workspace"** in the sidebar and the page
+   header.
+2. **Near-live refresh** (executives saw stale data on other users' PWAs
+   and risked double actions): global React Query defaults now poll EVERY
+   query every 15 s while its page is visible (staleTime 10 s, was 60 s
+   with no global poll), and the workflow-critical hooks (request lists +
+   details + queues, notifications, file remarks) poll every 10 s (was
+   30 s). Focus/mount refetches stay on, so returning to the PWA catches up
+   immediately; hidden tabs still don't poll. True instant (sub-second)
+   sync would need a WebSocket/SSE push layer — flagged as a possible
+   future phase.
+
+Frontend-only; tsc clean.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
