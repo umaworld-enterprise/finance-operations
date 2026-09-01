@@ -47,6 +47,13 @@ async def list_suppliers(db: DB, _: User) -> list[SupplierResponse]:
     return [SupplierResponse.model_validate(s) for s in suppliers]
 
 
+@router.get("/all", response_model=list[SupplierResponse])
+async def list_all_suppliers(db: DB, _: FinanceAdmin) -> list[SupplierResponse]:
+    """Admin endpoint (19 Aug 2026 masters page) — active AND inactive."""
+    result = await db.execute(select(Supplier).order_by(Supplier.name))
+    return [SupplierResponse.model_validate(s) for s in result.scalars().all()]
+
+
 @router.post("", response_model=SupplierResponse, status_code=status.HTTP_201_CREATED)
 async def create_supplier(data: SupplierCreate, current_user: FinanceAdmin, db: DB, request: Request) -> SupplierResponse:
     repo = SupplierRepository(db)

@@ -61,6 +61,67 @@ const masterService = {
     return data;
   },
 
+  // ── Masters admin page (19 Aug 2026): active + inactive lists, create,
+  //    update — suppliers, customers and verticals. ─────────────────────────
+
+  getAllSuppliers: async (): Promise<Supplier[]> => {
+    const { data } = await api.get<Supplier[]>("/masters/suppliers/all");
+    return data;
+  },
+
+  createSupplier: async (payload: {
+    supplier_code: string;
+    name: string;
+    country?: string;
+  }): Promise<Supplier> => {
+    const { data } = await api.post<Supplier>("/masters/suppliers", payload);
+    return data;
+  },
+
+  updateSupplier: async (
+    id: string,
+    payload: { name?: string; country?: string; is_active?: boolean },
+  ): Promise<Supplier> => {
+    const { data } = await api.patch<Supplier>(`/masters/suppliers/${id}`, payload);
+    return data;
+  },
+
+  getAllCustomers: async (): Promise<Customer[]> => {
+    const { data } = await api.get<Customer[]>("/masters/customers/all");
+    return data;
+  },
+
+  createCustomer: async (name: string): Promise<Customer> => {
+    const { data } = await api.post<Customer>("/masters/customers", { name });
+    return data;
+  },
+
+  updateCustomer: async (
+    id: string,
+    payload: { name?: string; is_active?: boolean },
+  ): Promise<Customer> => {
+    const { data } = await api.patch<Customer>(`/masters/customers/${id}`, payload);
+    return data;
+  },
+
+  getAllVerticals: async (): Promise<Vertical[]> => {
+    const { data } = await api.get<Vertical[]>("/masters/verticals/all");
+    return data;
+  },
+
+  createVertical: async (name: string): Promise<Vertical> => {
+    const { data } = await api.post<Vertical>("/masters/verticals", { name });
+    return data;
+  },
+
+  updateVertical: async (
+    id: string,
+    payload: { name?: string; is_active?: boolean },
+  ): Promise<Vertical> => {
+    const { data } = await api.patch<Vertical>(`/masters/verticals/${id}`, payload);
+    return data;
+  },
+
   // ── Bank master (Aug 2026) ────────────────────────────────────────────────
 
   getBanks: async (): Promise<Bank[]> => {

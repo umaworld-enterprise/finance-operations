@@ -33,6 +33,15 @@ async def list_verticals(db: DB, _: User) -> list[VerticalResponse]:
     return [VerticalResponse.model_validate(v) for v in verticals]
 
 
+@router.get("/all", response_model=list[VerticalResponse])
+async def list_all_verticals(db: DB, _: FinanceAdmin) -> list[VerticalResponse]:
+    """Admin endpoint (19 Aug 2026 masters page) — active AND inactive."""
+    from sqlalchemy import select
+
+    result = await db.execute(select(Vertical).order_by(Vertical.name))
+    return [VerticalResponse.model_validate(v) for v in result.scalars().all()]
+
+
 @router.post("", response_model=VerticalResponse, status_code=status.HTTP_201_CREATED)
 async def create_vertical(data: VerticalCreate, current_user: FinanceAdmin, db: DB, request: Request) -> VerticalResponse:
     repo = BaseRepository(db, Vertical)
