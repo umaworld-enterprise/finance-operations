@@ -94,6 +94,13 @@ export default function MerchandiserDashboard() {
     setPage(1);
   }
 
+  // KPI tiles are links to their listing tab (19 Aug 2026): clicking a tile
+  // opens the matching tab and brings the table into view.
+  function goToTab(tab: string) {
+    changeTab(tab);
+    document.getElementById("status-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   function changeSearch(value: string) {
     setSearch(value);
     setPage(1);
@@ -138,14 +145,15 @@ export default function MerchandiserDashboard() {
           )}
         </Card>
 
-        {/* One card per bucket — together they sum to Total Requests. */}
+        {/* One card per bucket — together they sum to Total Requests. Each
+            tile opens its listing tab (19 Aug 2026). */}
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-          <StatCard label="Total Requests"   value={allData?.total ?? "—"}       icon={ClipboardList} />
-          <StatCard label="Pending"          value={pendingData?.total ?? "—"}   icon={Clock} />
-          <StatCard label="On Hold"          value={holdData?.total ?? "—"}      icon={PauseCircle} />
-          <StatCard label="Processed"        value={processedData?.total ?? "—"} icon={CheckCircle} />
-          <StatCard label="Rejected"         value={rejectedData?.total ?? "—"}  icon={XCircle}       subtext="By HoM or Accounts" />
-          <StatCard label="Cancelled"        value={cancelledData?.total ?? "—"} icon={Ban} />
+          <StatCard label="Total Requests"   value={allData?.total ?? "—"}       icon={ClipboardList} onClick={() => goToTab("all")} />
+          <StatCard label="Pending"          value={pendingData?.total ?? "—"}   icon={Clock}         onClick={() => goToTab("pending")} />
+          <StatCard label="On Hold"          value={holdData?.total ?? "—"}      icon={PauseCircle}   onClick={() => goToTab("hold")} />
+          <StatCard label="Processed"        value={processedData?.total ?? "—"} icon={CheckCircle}   onClick={() => goToTab("processed")} />
+          <StatCard label="Rejected"         value={rejectedData?.total ?? "—"}  icon={XCircle}       subtext="By HoM or Accounts" onClick={() => goToTab("rejected")} />
+          <StatCard label="Cancelled"        value={cancelledData?.total ?? "—"} icon={Ban}           onClick={() => goToTab("cancelled")} />
         </div>
 
         {/* Tranche release tile (19 Aug 2026) — tranches 2+ awaiting this
@@ -227,7 +235,7 @@ export default function MerchandiserDashboard() {
           <SortSelect value={sort} onChange={changeSort} className="sm:w-52" />
         </div>
 
-        <Tabs value={activeTab} onValueChange={changeTab}>
+        <Tabs value={activeTab} onValueChange={changeTab} id="status-tabs" className="scroll-mt-4">
           <TabsList className="w-full">
             <TabsTrigger value="all">All {allData ? `(${allData.total})` : ""}</TabsTrigger>
             <TabsTrigger value="pending">Pending {pendingData ? `(${pendingData.total})` : ""}</TabsTrigger>

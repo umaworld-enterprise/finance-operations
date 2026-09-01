@@ -529,6 +529,7 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
 
 export default function AccountsDashboard() {
   const [holdPage, setHoldPage] = useState(1);
+  const [processedPage, setProcessedPage] = useState(1);
   const [rejectedPage, setRejectedPage] = useState(1);
   const [cancelledPage, setCancelledPage] = useState(1);
   const [allPage, setAllPage]   = useState(1);
@@ -554,6 +555,12 @@ export default function AccountsDashboard() {
     status: ["hold_by_accounts", "hold_by_merchandiser"],
     ...listParams,
   });
+  // Processed gets its own tab too (19 Aug 2026 — the KPI tiles are links
+  // and every tile needs the listing it references).
+  const { data: processedData, isLoading: processedLoading } = useRequestsPaginated(processedPage, PAGE_SIZE, {
+    status: "payment_processed",
+    ...listParams,
+  });
   // Rejected and cancelled get their own heads — never mixed into Pending
   // (UAT Aug 2026, items 17 & 19).
   const { data: rejectedData, isLoading: rejectedLoading } = useRequestsPaginated(rejectedPage, PAGE_SIZE, {
@@ -575,6 +582,7 @@ export default function AccountsDashboard() {
   function changeSearch(value: string) {
     setSearch(value);
     setHoldPage(1);
+    setProcessedPage(1);
     setRejectedPage(1);
     setCancelledPage(1);
     setAllPage(1);
@@ -583,6 +591,7 @@ export default function AccountsDashboard() {
   function changeSort(value: RequestSort) {
     setSort(value);
     setHoldPage(1);
+    setProcessedPage(1);
     setRejectedPage(1);
     setCancelledPage(1);
     setAllPage(1);
@@ -591,6 +600,10 @@ export default function AccountsDashboard() {
   const holdItems = holdData?.items ?? [];
   const holdTotal = holdData?.total ?? 0;
   const holdTotalPages = Math.ceil(holdTotal / PAGE_SIZE);
+
+  const processedItems = processedData?.items ?? [];
+  const processedTotal = processedData?.total ?? 0;
+  const processedTotalPages = Math.ceil(processedTotal / PAGE_SIZE);
 
   const rejectedItems = rejectedData?.items ?? [];
   const rejectedTotal = rejectedData?.total ?? 0;
@@ -607,6 +620,13 @@ export default function AccountsDashboard() {
   // Label refinement (10 Aug): plain "YTD", not "FY 2026–27 to date".
   const fySubtext = "YTD";
 
+  // KPI tiles are links to their listing tab (19 Aug 2026): clicking a tile
+  // opens the matching tab and brings the table into view.
+  function goToTab(tab: string) {
+    setActiveTab(tab);
+    document.getElementById("status-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   return (
     <RoleGuard allowedRoles={["accounts_team", "super_admin"]}>
       <TopNav
@@ -622,36 +642,42 @@ export default function AccountsDashboard() {
             value={kpis?.pending_payment ?? queue.length}
             icon={Clock}
             subtext={fySubtext}
+            onClick={() => goToTab("pending")}
           />
           <StatCard
             label="On Hold"
             value={kpis?.on_hold ?? "—"}
             icon={AlertTriangle}
             subtext={fySubtext}
+            onClick={() => goToTab("hold")}
           />
           <StatCard
             label="Processed"
             value={kpis?.processed ?? "—"}
             icon={CheckCircle}
             subtext={fySubtext}
+            onClick={() => goToTab("processed")}
           />
           <StatCard
             label="Rejected"
             value={kpis?.rejected ?? "—"}
             icon={XCircle}
             subtext={fySubtext}
+            onClick={() => goToTab("rejected")}
           />
           <StatCard
             label="Cancelled"
             value={kpis?.cancelled ?? "—"}
             icon={Ban}
             subtext={fySubtext}
+            onClick={() => goToTab("cancelled")}
           />
           <StatCard
             label="Total Requests"
             value={kpis?.total ?? "—"}
             icon={ClipboardList}
             subtext={fySubtext}
+            onClick={() => goToTab("all")}
           />
           {/* Live bucket, not FY (19 Aug 2026): future tranches waiting on
               the merchandiser's release — not payable yet. */}
@@ -660,6 +686,7 @@ export default function AccountsDashboard() {
             value={pendingRelease.length}
             icon={CalendarClock}
             subtext="Live — tranches awaiting release"
+            onClick={() => goToTab("yet-to-release")}
           />
         </div>
 
@@ -678,7 +705,7 @@ export default function AccountsDashboard() {
           />
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={setActiveTab} id="status-tabs" className="scroll-mt-4">
           <TabsList className="mb-1">
             <TabsTrigger value="pending">
               Pending
@@ -693,6 +720,14 @@ export default function AccountsDashboard() {
               {holdTotal > 0 && (
                 <span className="ml-1.5 bg-secondary text-secondary-foreground border border-border text-[10px] font-bold px-1.5 py-0.5 rounded-full">
                   {holdTotal}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="processed">
+              Processed
+              {processedTotal > 0 && (
+                <span className="ml-1.5 bg-secondary text-secondary-foreground border border-border text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                  {processedTotal}
                 </span>
               )}
             </TabsTrigger>
@@ -734,8 +769,41 @@ export default function AccountsDashboard() {
               rows={filteredQueue}
               loading={queueLoading}
               title="Pending Payment"
-              subtitle="Sorted oldest first — the Tentative Payment column shows each file's next due date"
+              subtitle="Latest requests first — the Tentative Payment column shows each file's next due date"
             />
+          </TabsContent>
+
+          <TabsContent value="processed">
+            {processedLoading ? (
+              <Card className="overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Request #</TableHead><TableHead>Invoice #</TableHead>
+                      <TableHead>Supplier</TableHead><TableHead>Customer</TableHead>
+                      <TableHead>Deposit</TableHead><TableHead>Status</TableHead><TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody><TableSkeleton rows={5} cols={7} /></TableBody>
+                </Table>
+              </Card>
+            ) : (
+              <>
+                <StatusTable
+                  rows={processedItems}
+                  title="Processed"
+                  subtitle="Payment-completed requests"
+                  emptyTitle="No processed requests"
+                />
+                <Pagination
+                  page={processedPage}
+                  totalPages={processedTotalPages}
+                  total={processedTotal}
+                  pageSize={PAGE_SIZE}
+                  onChange={setProcessedPage}
+                />
+              </>
+            )}
           </TabsContent>
 
           <TabsContent value="hold">
