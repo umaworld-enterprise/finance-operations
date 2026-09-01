@@ -1049,6 +1049,22 @@ approved splits only, FULL chain depth.
 consumed parent gone, open remark holds a file back, non-live file
 refused); tsc clean. No migration; deploy backend + frontend together.
 
+## Follow-up (19 Aug 2026) — KPI tiles link to their listing tab
+
+Every payment-status tile is now clickable and opens the matching table
+tab, smooth-scrolling it into view (StatCard gained an `onClick` mode).
+
+- **Accounts Workspace**: Pending Payment → Pending, On Hold → On Hold,
+  Processed → NEW Processed tab (StatusTable + pagination — the tile had no
+  listing before), Rejected → Rejected, Cancelled → Cancelled, Total →
+  All Requests, Yet to be Released tile → its tab.
+- **Merchandiser Workspace**: all six cards open their matching tab
+  (Total → All, Pending, On Hold, Processed, Rejected, Cancelled).
+- Fixed in passing: the pending table subtitle still said "Sorted oldest
+  first" after the latest-first change.
+
+Frontend-only; tsc clean.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
