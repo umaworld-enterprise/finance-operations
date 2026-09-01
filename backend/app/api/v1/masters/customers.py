@@ -33,6 +33,15 @@ async def list_customers(db: DB, _: User) -> list[CustomerResponse]:
     return [CustomerResponse.model_validate(c) for c in customers]
 
 
+@router.get("/all", response_model=list[CustomerResponse])
+async def list_all_customers(db: DB, _: FinanceAdmin) -> list[CustomerResponse]:
+    """Admin endpoint (19 Aug 2026 masters page) — active AND inactive."""
+    from sqlalchemy import select
+
+    result = await db.execute(select(Customer).order_by(Customer.name))
+    return [CustomerResponse.model_validate(c) for c in result.scalars().all()]
+
+
 @router.post("", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED)
 async def create_customer(data: CustomerCreate, current_user: FinanceAdmin, db: DB, request: Request) -> CustomerResponse:
     repo = BaseRepository(db, Customer)

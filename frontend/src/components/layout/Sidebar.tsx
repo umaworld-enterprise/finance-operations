@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   BarChart3,
+  Boxes,
   BrainCircuit,
   ClipboardList,
   CreditCard,
@@ -53,6 +54,7 @@ const NAV_ITEMS: NavItem[] = [
   // Banking module (Aug 2026) — super admin and accounts team.
   { href: "/bank",          label: "Bank Statements", icon: Landmark,       roles: ["super_admin", "accounts_team"],                                                     group: "main", module: "banking" },
   { href: "/admin/users",   label: "Users",          icon: Users,           roles: ["super_admin"],                                                                      group: "admin" },
+  { href: "/admin/masters", label: "Masters",        icon: Boxes,           roles: ["super_admin", "finance_admin"],                                                     group: "admin" },
   { href: "/admin/audit",   label: "Audit Logs",     icon: ScrollText,      roles: ["super_admin", "finance_admin"],                                                     group: "admin" },
   { href: "/admin/ai",      label: "AI Settings",    icon: BrainCircuit,    roles: ["super_admin"],                                                                      group: "admin" },
 ];

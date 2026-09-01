@@ -1065,6 +1065,23 @@ tab, smooth-scrolling it into view (StatCard gained an `onClick` mode).
 
 Frontend-only; tsc clean.
 
+## Follow-up (19 Aug 2026) — Masters admin page (Suppliers / Customers / Verticals)
+
+The create/update endpoints existed since the initial schema but no UI was
+ever built — suppliers only entered via imports. New **Admin → Masters**
+page (super admin + finance admin), three tabs:
+
+- **Suppliers**: add (code required + name + optional country; code is
+  create-only), edit name/country, activate/deactivate.
+- **Customers / Verticals**: add by name, rename, activate/deactivate.
+- All tabs: active + inactive rows (new `GET /masters/{x}/all` admin
+  endpoints, mirroring banks), search/sort/pagination, audit-logged
+  server-side (pre-existing). Deactivating hides an entry from the request
+  form dropdowns without touching history. Sidebar "Masters" entry + admin
+  overview card added; dropdown caches invalidated on change.
+
+No migration; 280 tests green, tsc clean.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
