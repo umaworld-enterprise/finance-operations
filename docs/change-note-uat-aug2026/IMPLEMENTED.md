@@ -1147,6 +1147,16 @@ balance. Fixes (analysed against the real DBS HKD/USD June samples):
 filter, DBS date formats). Re-upload the DBS statements after deploy —
 delete the bad rows first (delete + re-upload is the correction path).
 
+## Follow-up (19 Aug 2026) — Deactivated users were unreachable
+
+Deactivating a user removed them from the admin Users list (backend
+returned active-only) while their email stayed reserved — no Activate path,
+and re-creating threw "already exists". The admin page always knew how to
+render inactive rows with an Activate toggle; the list endpoint now returns
+active AND deactivated users (super-admin-only endpoint), and creating a
+user whose email belongs to a DEACTIVATED account now says so explicitly
+and points at the Activate button. Backend-only; 287 tests green.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

@@ -19,8 +19,11 @@ SuperAdmin = Annotated[CurrentUser, RequireSuperAdmin]
 
 @router.get("", response_model=list[UserResponse])
 async def list_users(current_user: SuperAdmin, db: DB) -> list[UserResponse]:
+    """Active AND deactivated (19 Aug 2026 fix) — the admin page shows
+    inactive users greyed with an Activate toggle; deactivation previously
+    made a user unreachable (hidden here, email still reserved)."""
     svc = UserService(db)
-    users = await svc.list_active()
+    users = await svc.list_all()
     return [UserResponse.model_validate(u) for u in users]
 
 
