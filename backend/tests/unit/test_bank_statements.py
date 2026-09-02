@@ -235,3 +235,59 @@ async def test_duplicate_period_is_refused(db_session, engine, monkeypatch):
     row = await db_session.get(BankStatement, statement_id)
     assert row.status == "failed"
     assert "already exists" in (row.extraction_note or "")
+
+
+# ── Thorough verification pass (19 Aug 2026, DBS fix) ─────────────────────────
+
+
+async def test_safe_date_accepts_dbs_style():
+    from app.services.bank_statement_service import safe_date
+
+    assert safe_date("31-May-26") == date(2026, 5, 31)
+    assert safe_date("01-Jun-2026") == date(2026, 6, 1)
+    assert safe_date("2026-06-30") == date(2026, 6, 30)
+
+
+async def test_summary_rows_are_not_transactions():
+    from app.services.bank_statement_service import is_non_transaction
+
+    for text in (
+        "承上結餘 Balance Brought Forward",
+        "戶口結餘 Closing Balance",
+        "總額 Grand Total",
+        "BALANCE CARRIED FORWARD",
+    ):
+        assert is_non_transaction({"category": text, "detail": None})
+    assert not is_non_transaction(
+        {"category": "TRADE SERVICES", "detail": "025030197298PAY001"}
+    )
+
+
+async def test_reconcile_flips_direction_against_running_balance():
+    """DBS prints a running balance per row — a withdrawal recorded as a
+    credit is mathematically impossible and gets flipped."""
+    from app.services.bank_statement_service import reconcile_directions
+
+    txns = [
+        # 528178.66 → 487678.66: money OUT, but the model put it in credit.
+        {"debit": None, "credit": Decimal("40500.00"), "balance": Decimal("487678.66")},
+        # correct debit row — untouched
+        {"debit": Decimal("2182.35"), "credit": None, "balance": Decimal("485496.31")},
+        # amount missing entirely — recovered from the delta (+1000)
+        {"debit": None, "credit": None, "balance": Decimal("486496.31")},
+    ]
+    corrections, last = reconcile_directions(Decimal("528178.66"), txns)
+    assert corrections == 2
+    assert txns[0]["debit"] == Decimal("40500.00") and txns[0]["credit"] is None
+    assert txns[1]["debit"] == Decimal("2182.35")  # untouched
+    assert txns[2]["credit"] == Decimal("1000.00")
+    assert last == Decimal("486496.31")
+
+
+async def test_reconcile_without_balances_changes_nothing():
+    from app.services.bank_statement_service import reconcile_directions
+
+    txns = [{"debit": Decimal("10.00"), "credit": None, "balance": None}]
+    corrections, last = reconcile_directions(Decimal("100.00"), txns)
+    assert corrections == 0 and last is None
+    assert txns[0]["debit"] == Decimal("10.00")

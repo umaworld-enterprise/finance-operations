@@ -25,46 +25,63 @@ import structlog
 logger = structlog.get_logger()
 
 MAX_PAGES = 80
-RENDER_DPI = 150
+# 200 dpi (was 150, 19 Aug 2026): bilingual (Chinese/English) statements such
+# as DBS HK carry dense CJK text and long digit runs — the higher resolution
+# measurably reduces misread digits.
+RENDER_DPI = 200
 
 _SYSTEM_PROMPT = (
     "You are a precise bank-statement data extractor. You read scanned pages "
-    "of an account statement and return STRICT JSON only — no markdown, no "
-    "code fences, no commentary. Numbers must be plain decimals without "
-    "thousands separators. Dates must be ISO format YYYY-MM-DD. If a value "
-    "is absent use null. Never invent rows."
+    "of an account statement — which may be bilingual (English and Chinese) — "
+    "and return STRICT JSON only — no markdown, no code fences, no "
+    "commentary. Numbers must be plain decimals without thousands "
+    "separators. Dates must be ISO format YYYY-MM-DD. If a value is absent "
+    "use null. Never invent rows. Copy every amount digit-for-digit from the "
+    "page."
 )
 
 _PAGE_PROMPT = """Extract this bank statement page into JSON with this exact shape:
 {{
   "header": {{
-    "bank_name": string|null,        // e.g. "CITI" — only if visible on this page
-    "account_number": string|null,
-    "account_title": string|null,
-    "currency": string|null,         // e.g. "HKD"
+    "bank_name": string|null,        // e.g. "CITI", "DBS" — only if visible on this page
+    "account_number": string|null,   // 戶口號碼 / Account No
+    "account_title": string|null,    // the account holder name
+    "currency": string|null,         // e.g. "HKD" (貨幣 Currency)
     "period_start": "YYYY-MM-DD"|null,
     "period_end": "YYYY-MM-DD"|null,
-    "beginning_balance": number|null,
-    "ending_balance": number|null
+    "beginning_balance": number|null, // opening / BALANCE BROUGHT FORWARD / 承上結餘
+    "ending_balance": number|null,    // closing / CLOSING BALANCE / 戶口結餘
+    "total_debits": number|null,      // printed totals row (Grand Total / 總額) — debit/withdrawal side
+    "total_credits": number|null      // printed totals row (Grand Total / 總額) — credit/deposit side
   }},
   "transactions": [
     {{
       "date": "YYYY-MM-DD"|null,
-      "category": string,            // the transaction type line, e.g. "IMPORT AND EXPORT BILLS - DEBIT"
-      "reference": string|null,      // the "Ref:" value
-      "detail": string|null,         // remaining description lines joined with " | " (counterparty, bills reference, value date...)
-      "debit": number|null,
-      "credit": number|null
+      "category": string,            // the transaction type line, e.g. "TRADE SERVICES", "CASH PAYMENT"
+      "reference": string|null,      // the reference / cheque number if shown
+      "detail": string|null,         // remaining description lines joined with " | "
+      "debit": number|null,          // money OUT of the account
+      "credit": number|null,         // money INTO the account
+      "balance": number|null         // the running balance printed on THIS row (結餘 / Balance column), if any
     }}
   ],
   "closing_balances": [
-    {{ "date": "YYYY-MM-DD", "balance": number }}   // one per "CLOSING BALANCE" row on this page
+    {{ "date": "YYYY-MM-DD", "balance": number }}   // one per per-day "CLOSING BALANCE" row (Citi style); empty if the statement has none
   ]
 }}
-Rules:
-- "BALANCE CARRIED FORWARD" and "CLOSING BALANCE" rows are NOT transactions — closing balances go in closing_balances only.
-- Dates printed as MM/DD/YYYY must be converted to YYYY-MM-DD.
-- Every real transaction row has a debit OR a credit amount — copy it exactly.
+Column mapping — get the direction RIGHT:
+- 支出 / Withdrawal / Debit / 借方 → "debit" (money out).
+- 存入 / Deposit / Credit / 貸方 → "credit" (money in).
+- 結餘 / Balance → "balance" (the running balance AFTER the row). NEVER put a running balance into debit or credit.
+- A transaction row has exactly ONE of debit or credit — decide by which COLUMN the amount is printed in, and sanity-check against the balance column: the balance DECREASES after a debit and INCREASES after a credit.
+Rows that are NOT transactions (do not list them under "transactions"):
+- "BALANCE BROUGHT FORWARD" / 承上結餘 → its amount is header.beginning_balance (first page of the table only).
+- "BALANCE CARRIED FORWARD" / 結轉下頁 → ignore (page-break artifact).
+- "CLOSING BALANCE" / 戶口結餘 → header.ending_balance (or closing_balances for per-day Citi rows).
+- "Grand Total" / 總額 → header.total_debits and header.total_credits.
+Other rules:
+- Dates printed as MM/DD/YYYY or DD-Mon-YY (e.g. 31-May-26) must be converted to YYYY-MM-DD.
+- Amounts printed with commas (1,563,722.30) → plain 1563722.30.
 - This is page {page_no} of {page_count}."""
 
 
@@ -97,10 +114,82 @@ def safe_decimal(value) -> Decimal | None:  # type: ignore[no-untyped-def]
 def safe_date(value) -> date | None:  # type: ignore[no-untyped-def]
     if not value:
         return None
+    text = str(value).strip()
+    # ISO first (truncated: tolerates a trailing time part); then the
+    # DD-Mon-YYYY / DD-Mon-YY styles DBS prints (31-May-26) as belt-and-braces
+    # fallbacks when the model copies instead of converting. Four-digit year
+    # BEFORE two-digit: "01-Jun-2026"[:9] would otherwise parse as 2020.
     try:
-        return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+        return datetime.strptime(text[:10], "%Y-%m-%d").date()
     except ValueError:
-        return None
+        pass
+    for fmt in ("%d-%b-%Y", "%d-%b-%y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+# Rows the model must NOT return as transactions — filtered again here as a
+# safety net (19 Aug 2026, DBS fix): a brought-forward / closing-balance /
+# grand-total row slipping into the list wrecks every total downstream.
+_NON_TXN_RE = re.compile(
+    r"balance\s+brought\s+forward|balance\s+carried\s+forward|closing\s+balance"
+    r"|grand\s+total|承上結餘|結轉|戶口結餘|總額",
+    re.IGNORECASE,
+)
+
+
+def is_non_transaction(txn: dict) -> bool:
+    text = f"{txn.get('category') or ''} {txn.get('detail') or ''}"
+    return bool(_NON_TXN_RE.search(text))
+
+
+def reconcile_directions(
+    beginning: Decimal | None, txns: list[dict]
+) -> tuple[int, Decimal | None]:
+    """Thorough per-row verification (19 Aug 2026, DBS fix): statements like
+    DBS print a running balance on every row, which makes each transaction's
+    DIRECTION mathematically checkable — the balance drops after a debit and
+    rises after a credit. Walks the rows in order and, wherever the printed
+    running balance contradicts the recorded side but matches the flipped
+    side, flips it. Also fills a missing amount from an unambiguous balance
+    delta. Returns (corrections_made, last_running_balance).
+
+    txns rows carry Decimal|None 'debit'/'credit'/'balance' and are mutated
+    in place. Rows without a printed balance advance the expected balance by
+    their recorded amounts and are left untouched.
+    """
+    tolerance = Decimal("0.01")
+    corrections = 0
+    prev: Decimal | None = beginning
+    last_balance: Decimal | None = None
+    for txn in txns:
+        debit: Decimal | None = txn.get("debit")
+        credit: Decimal | None = txn.get("credit")
+        balance: Decimal | None = txn.get("balance")
+        if balance is not None and prev is not None:
+            delta = balance - prev
+            recorded = (credit or Decimal("0")) - (debit or Decimal("0"))
+            if abs(delta - recorded) > tolerance:
+                flipped = (debit or Decimal("0")) - (credit or Decimal("0"))
+                if abs(delta - flipped) <= tolerance and (debit or credit):
+                    txn["debit"], txn["credit"] = credit, debit
+                    corrections += 1
+                elif debit is None and credit is None:
+                    # Amount missing entirely — recover it from the delta.
+                    if delta > 0:
+                        txn["credit"] = delta
+                    else:
+                        txn["debit"] = -delta
+                    corrections += 1
+        if balance is not None:
+            prev = balance
+            last_balance = balance
+        elif prev is not None:
+            prev = prev + (txn.get("credit") or Decimal("0")) - (txn.get("debit") or Decimal("0"))
+    return corrections, last_balance
 
 
 def integrity_note(
@@ -234,13 +323,50 @@ async def extract_statement(statement_id: UUID, pdf_bytes: bytes) -> None:
                             "delete it first to re-upload."
                         )
 
+                # ── Thorough verification pass (19 Aug 2026, DBS fix) ──────
+                # 1. Normalise amounts + drop summary rows the model may have
+                #    mistaken for transactions (brought-forward / closing /
+                #    grand-total — bilingual patterns).
+                normalized: list[dict] = []
+                dropped_summary = 0
+                for t in transactions:
+                    if is_non_transaction(t):
+                        dropped_summary += 1
+                        continue
+                    normalized.append(
+                        {
+                            **t,
+                            "debit": safe_decimal(t.get("debit")),
+                            "credit": safe_decimal(t.get("credit")),
+                            "balance": safe_decimal(t.get("balance")),
+                        }
+                    )
+
+                beginning = safe_decimal(header.get("beginning_balance"))
+                ending = safe_decimal(header.get("ending_balance"))
+                # Fallbacks from the running-balance column when the header
+                # values weren't printed / extracted.
+                if beginning is None and normalized:
+                    first = normalized[0]
+                    if first["balance"] is not None:
+                        beginning = (
+                            first["balance"]
+                            + (first["debit"] or Decimal("0"))
+                            - (first["credit"] or Decimal("0"))
+                        )
+
+                # 2. Per-row direction check against the running balance —
+                #    flips debit/credit wherever the math proves the side
+                #    wrong, and recovers missing amounts from balance deltas.
+                corrections, last_balance = reconcile_directions(beginning, normalized)
+                if ending is None and last_balance is not None:
+                    ending = last_balance
+
                 total_debits = Decimal("0")
                 total_credits = Decimal("0")
-                for t in transactions:
-                    debit = safe_decimal(t.get("debit"))
-                    credit = safe_decimal(t.get("credit"))
-                    total_debits += debit or Decimal("0")
-                    total_credits += credit or Decimal("0")
+                for t in normalized:
+                    total_debits += t["debit"] or Decimal("0")
+                    total_credits += t["credit"] or Decimal("0")
                     session.add(
                         BankTransaction(
                             statement_id=statement.id,
@@ -248,8 +374,8 @@ async def extract_statement(statement_id: UUID, pdf_bytes: bytes) -> None:
                             category=(t.get("category") or "")[:200] or None,
                             reference=(t.get("reference") or "")[:200] or None,
                             detail=t.get("detail") or None,
-                            debit=debit,
-                            credit=credit,
+                            debit=t["debit"],
+                            credit=t["credit"],
                         )
                     )
                 for d, b in closing.items():
@@ -259,9 +385,34 @@ async def extract_statement(statement_id: UUID, pdf_bytes: bytes) -> None:
                         )
                     )
 
-                beginning = safe_decimal(header.get("beginning_balance"))
-                ending = safe_decimal(header.get("ending_balance"))
+                # 3. Integrity: beginning − debits + credits vs ending, PLUS
+                #    the statement's own printed Grand Total when present.
                 _, note = integrity_note(beginning, ending, total_debits, total_credits)
+                extras: list[str] = []
+                if corrections:
+                    extras.append(
+                        f"{corrections} row(s) auto-corrected against the running balance."
+                    )
+                if dropped_summary:
+                    extras.append(f"{dropped_summary} summary row(s) excluded.")
+                printed_debits = safe_decimal(header.get("total_debits"))
+                printed_credits = safe_decimal(header.get("total_credits"))
+                if printed_debits is not None and printed_credits is not None:
+                    if (
+                        abs(printed_debits - total_debits) <= Decimal("0.01")
+                        and abs(printed_credits - total_credits) <= Decimal("0.01")
+                    ):
+                        extras.append(
+                            "Extracted totals MATCH the statement's printed Grand Total."
+                        )
+                    else:
+                        extras.append(
+                            f"Grand Total MISMATCH: statement prints debits "
+                            f"{printed_debits} / credits {printed_credits}, extracted "
+                            f"{total_debits} / {total_credits} — review the rows."
+                        )
+                if extras:
+                    note = f"{note} {' '.join(extras)}"
 
                 statement.bank_name = (header.get("bank_name") or statement.bank_name)[:100]
                 statement.account_number = account_number
@@ -272,7 +423,7 @@ async def extract_statement(statement_id: UUID, pdf_bytes: bytes) -> None:
                 statement.beginning_balance = beginning
                 statement.ending_balance = ending
                 statement.status = BankStatementStatus.EXTRACTED.value
-                statement.extraction_note = f"{len(transactions)} transactions. {note}"
+                statement.extraction_note = f"{len(normalized)} transactions. {note}"
                 await session.commit()
             except Exception as exc:
                 await session.rollback()
