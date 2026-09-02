@@ -1157,6 +1157,20 @@ active AND deactivated users (super-admin-only endpoint), and creating a
 user whose email belongs to a DEACTIVATED account now says so explicitly
 and points at the Activate button. Backend-only; 287 tests green.
 
+## Follow-up (2 Sep 2026) — Tracker import script (FY sheet, 1,011 rows)
+
+`scripts/seed_tracker.py` loads `seed_data/Deposit Sunshine Tracker - Form
+Submission.csv` — one-time load that REFUSES to run if any deposit request
+exists. Numbering sequential by request date (Dep-2025-0001…0049,
+Dep-2026-0001…0962). Status mapping: Payment Processed (971) → processed +
+locked + paid legacy tranche + payment_details (payment/ship dates, bank —
+SCB'/CIT/ciit normalised to SCB/CITI/DBS); Cancelled (21), Holds (2+2),
+blank (15) → pending_payment. Missing staff emails become ACTIVE
+merchandiser users (existing users NEVER touched); masters get-or-created
+by normalised name with generated supplier codes. StatusHistory seeded;
+submission_source=google_form; --dry-run reports without writing. Parsing
+validated offline: 0 issues across 1,011 rows.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
