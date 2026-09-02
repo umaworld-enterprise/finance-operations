@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/
+COPY scripts/ ./scripts/
+COPY seed_data/ ./seed_data/
 COPY alembic.ini .
 
 # Ownership
