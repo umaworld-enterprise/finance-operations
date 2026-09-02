@@ -1171,6 +1171,12 @@ by normalised name with generated supplier codes. StatusHistory seeded;
 submission_source=google_form; --dry-run reports without writing. Parsing
 validated offline: 0 issues across 1,011 rows.
 
+**Cutoff (2 Sep)**: only rows with Request Date ≤ **31 Aug 2026** import
+(default `--cutoff 2026-08-31`, overridable). On the current file that is
+985 rows in (Dep-2025-0001…0049, Dep-2026-0001…0936) and 26 skipped
+(dated 1–2 Sep 2026), reported in the run output. Skipped rows consume no
+request numbers.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
