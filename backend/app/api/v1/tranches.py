@@ -35,6 +35,7 @@ from app.schemas.tranche import (
 )
 from app.services.adjustment_service import AdjustmentService
 from app.services.notification_service import (
+    email_tt_copy_uploaded,
     notify_tranche_added,
     notify_tranche_event,
     notify_tranche_rejected,
@@ -317,9 +318,10 @@ async def upload_tranche_tt_copy(
     """Upload the bank's TT copy against a specific tranche.
 
     Attach only — the tranche's status does NOT change (Aug 2026, item 3.1),
-    and NO notification is sent (4 Aug bug fix: the merchandiser is notified
-    once, when the tranche is explicitly marked paid — that notification
-    carries the TT link).
+    and NO bell/push notification is sent (4 Aug bug fix: the merchandiser is
+    notified once, when the tranche is explicitly marked paid — that
+    notification carries the TT link). An EMAIL with the document attached
+    goes to every active user (19 Aug 2026 executive requirement).
     """
     content = await file.read()
     error = validate_tt_copy(file.content_type, len(content))
@@ -355,6 +357,12 @@ async def upload_tranche_tt_copy(
         user_agent=request.headers.get("user-agent"),
     )
     background_tasks.add_task(seed_snapshot_for_request, request_id)
+    # Executive email (19 Aug 2026) — attach the document while the bytes are
+    # still in hand; recipients are ALL active users.
+    background_tasks.add_task(
+        email_tt_copy_uploaded, request_id, tranche.id, content,
+        file.content_type or "application/octet-stream", filename,
+    )
     return _tranche_response(tranche, deposit_request.total_supplier_invoice_amount)
 
 
