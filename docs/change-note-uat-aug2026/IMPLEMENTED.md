@@ -1115,6 +1115,38 @@ reactivated (skip with `--no-reactivate`); `--dry-run` reports without
 writing. Idempotent — a second run adds nothing. Touches no users, no
 requests, deletes nothing.
 
+## Follow-up (19 Aug 2026) — Bank extraction hardened for Chinese DBS statements
+
+DBS HK statements (bilingual, 支出 Withdrawal / 存入 Deposit / 結餘 running
+Balance per row, 承上結餘 brought-forward opening, 總額 Grand Total +
+戶口結餘 Closing Balance at the end) broke the Citi-shaped extraction:
+flipped debit/credit, summary rows counted as transactions, wrong ending
+balance. Fixes (analysed against the real DBS HKD/USD June samples):
+
+1. **Bilingual layout-aware prompt**: explicit CN/EN column mapping
+   (支出→debit, 存入→credit, 結餘→running balance — never an amount),
+   summary-row exclusions with their Chinese labels, printed Grand Total →
+   header totals, DD-Mon-YY date conversion.
+2. **Per-row running balance captured** and used for a deterministic
+   `reconcile_directions` pass: a debit/credit whose direction contradicts
+   the balance delta is auto-flipped; a missing amount is recovered from an
+   unambiguous delta. Corrections are counted in the extraction note.
+3. **Summary-row safety net** (`is_non_transaction`, bilingual regex) drops
+   brought-forward/closing/total rows the model still returns.
+4. **Fallbacks**: beginning derived from the first row's balance, ending
+   from the last running balance, when the header misses them.
+5. **Printed-totals cross-check**: extracted debit/credit sums are compared
+   with the statement's own 總額 Grand Total — MATCH or MISMATCH stated
+   loudly in the note, alongside the existing beginning/ending integrity
+   check.
+6. Render DPI 150 → 200 (denser CJK pages, fewer misread digits);
+   `safe_date` accepts 31-May-26 / 01-Jun-2026 (4-digit year tried first —
+   truncation ambiguity fixed).
+
+287 tests green (direction flip, delta recovery, bilingual summary-row
+filter, DBS date formats). Re-upload the DBS statements after deploy —
+delete the bad rows first (delete + re-upload is the correction path).
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

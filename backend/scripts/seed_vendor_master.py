@@ -90,7 +90,9 @@ def make_code(name: str, seq: int, taken: set[str]) -> tuple[str, int]:
         seq += 1
 
 
-async def run(csv_path: Path, dry_run: bool, reactivate: bool) -> None:
+async def run(
+    csv_path: Path, dry_run: bool, reactivate: bool, flush_suppliers: bool = False
+) -> None:
     suppliers, verticals, customers = read_csv(csv_path)
     print(f"CSV: {len(suppliers)} suppliers, {len(verticals)} verticals, {len(customers)} customers\n")
 
@@ -141,16 +143,65 @@ async def run(csv_path: Path, dry_run: bool, reactivate: bool) -> None:
             else:
                 stat["unchanged"] += 1
 
+        # --flush-suppliers: the CSV is the complete supplier list — remove
+        # everything else. Suppliers with NO references (no requests, no
+        # default flags) are hard-deleted; referenced ones are deactivated so
+        # history stays intact. Verticals/customers are never flushed.
+        if flush_suppliers:
+            from sqlalchemy import func as sa_func
+
+            from app.models.deposit_request import DepositRequest
+            from app.models.integrations import DefaultedSupplier
+
+            csv_keys = {norm(n) for n in suppliers}
+            stat.setdefault("deleted", 0)
+            stat.setdefault("deactivated", 0)
+            for row in existing_suppliers:
+                if norm(row.name) in csv_keys:
+                    continue
+                req_count = (
+                    await session.execute(
+                        select(sa_func.count()).select_from(DepositRequest).where(
+                            DepositRequest.supplier_id == row.id
+                        )
+                    )
+                ).scalar_one()
+                flag_count = (
+                    await session.execute(
+                        select(sa_func.count()).select_from(DefaultedSupplier).where(
+                            DefaultedSupplier.supplier_id == row.id
+                        )
+                    )
+                ).scalar_one()
+                if req_count == 0 and flag_count == 0:
+                    stat["deleted"] += 1
+                    plans.append(("supplier", "DELETE", row.name))
+                    if not dry_run:
+                        await session.delete(row)
+                elif row.is_active:
+                    stat["deactivated"] += 1
+                    plans.append(
+                        ("supplier", "DEACTIVATE",
+                         f"{row.name}  [kept: {req_count} request(s), {flag_count} flag(s)]")
+                    )
+                    if not dry_run:
+                        row.is_active = False
+
         await sync_simple("vertical", Vertical, verticals)
         await sync_simple("customer", Customer, customers)
 
         for kind, action, name in plans:
             print(f"  {action:<10} {kind:<9} {name}")
         print()
-        for kind, stat in stats.items():
+        for kind, s in stats.items():
+            extra = (
+                f", {s['deleted']} deleted, {s['deactivated']} deactivated"
+                if "deleted" in s
+                else ""
+            )
             print(
-                f"{kind}s: {stat['added']} added, {stat['reactivated']} reactivated, "
-                f"{stat['unchanged']} already present"
+                f"{kind}s: {s['added']} added, {s['reactivated']} reactivated, "
+                f"{s['unchanged']} already present{extra}"
             )
 
         if dry_run:
@@ -169,7 +220,19 @@ if __name__ == "__main__":
         "--no-reactivate", action="store_true",
         help="leave deactivated rows inactive even when the CSV lists them",
     )
+    parser.add_argument(
+        "--flush-suppliers", action="store_true",
+        help="the CSV is the COMPLETE supplier list: delete unreferenced "
+             "suppliers not in it, deactivate referenced ones",
+    )
     args = parser.parse_args()
     if not args.csv.exists():
         sys.exit(f"CSV not found: {args.csv}")
-    asyncio.run(run(args.csv, dry_run=args.dry_run, reactivate=not args.no_reactivate))
+    asyncio.run(
+        run(
+            args.csv,
+            dry_run=args.dry_run,
+            reactivate=not args.no_reactivate,
+            flush_suppliers=args.flush_suppliers,
+        )
+    )
