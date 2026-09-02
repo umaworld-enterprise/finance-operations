@@ -23,6 +23,15 @@ class UserService:
     async def create(self, data: UserCreate, created_by: UUID) -> User:
         existing = await self._repo.get_by_email(data.email)
         if existing:
+            # A deactivated account keeps its email (audit trails reference
+            # it) — point the admin at Reactivate instead of a dead end
+            # (19 Aug 2026 fix).
+            if not existing.is_active:
+                raise ConflictError(
+                    f"A deactivated user with email '{data.email}' already "
+                    "exists — use Activate on their row in the Users list "
+                    "instead of creating a new account."
+                )
             raise ConflictError(f"A user with email '{data.email}' already exists.")
         user = await self._repo.create(**data.model_dump())
         await self._audit.record_create("users", user.id, created_by)
@@ -42,6 +51,9 @@ class UserService:
 
     async def list_active(self) -> list[User]:
         return await self._repo.list_active()
+
+    async def list_all(self) -> list[User]:
+        return await self._repo.list_all()
 
     async def get(self, user_id: UUID) -> User:
         return await self._get_or_404(user_id)

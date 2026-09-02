@@ -24,3 +24,9 @@ class UserRepository(BaseRepository[User]):
             select(User).where(User.is_active == True).order_by(User.full_name)  # noqa: E712
         )
         return list(result.scalars().all())
+
+    async def list_all(self) -> list[User]:
+        """Active AND deactivated — the admin Users page needs both so a
+        deactivated user can be reactivated (19 Aug 2026 fix)."""
+        result = await self._session.execute(select(User).order_by(User.full_name))
+        return list(result.scalars().all())
