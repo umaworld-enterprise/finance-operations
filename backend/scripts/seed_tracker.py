@@ -16,6 +16,10 @@ Scoping decisions (2 Sep 2026):
   existing users). Suppliers / customers / verticals are get-or-created by
   normalised name, same rules as scripts.seed_vendor_master.
 
+Cutoff (2 Sep 2026): only rows with a Request Date on or before 31 Aug 2026
+are imported — later rows are skipped and reported. Override with
+--cutoff YYYY-MM-DD if the limit ever moves.
+
 Usage (from backend/):
     python -m scripts.seed_tracker --dry-run   # report only
     python -m scripts.seed_tracker             # apply
@@ -26,6 +30,7 @@ import asyncio
 import csv
 import os
 import sys
+from datetime import date as date_cls
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -117,10 +122,13 @@ def map_status(status_raw: str, cancellation: str) -> RequestStatus:
     return RequestStatus.PENDING_PAYMENT
 
 
-async def run(csv_path: Path, dry_run: bool) -> None:
+DEFAULT_CUTOFF = date_cls(2026, 8, 31)
+
+
+async def run(csv_path: Path, dry_run: bool, cutoff: date_cls = DEFAULT_CUTOFF) -> None:
     raw = list(csv.reader(open(csv_path, encoding="utf-8-sig")))
     rows = [r for r in raw[1:] if any(c.strip() for c in r)]
-    print(f"CSV rows: {len(rows)}")
+    print(f"CSV rows: {len(rows)} (cutoff: request date ≤ {cutoff.isoformat()})")
 
     engine = create_async_engine(settings.database_url, echo=False)
     factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -197,6 +205,7 @@ async def run(csv_path: Path, dry_run: bool) -> None:
         counters: dict[int, int] = {}
         status_counts: dict[str, int] = {}
         imported = 0
+        skipped_after_cutoff = 0
 
         for line_no, row in enumerate(rows, start=2):
             request_date = parse_date(row[1])
@@ -207,6 +216,10 @@ async def run(csv_path: Path, dry_run: bool) -> None:
             )
             if request_date is None or created_at is None:
                 warnings.append(f"line {line_no}: unparseable request date/timestamp — SKIPPED")
+                continue
+            # Import limit (2 Sep 2026): nothing beyond the cutoff date.
+            if request_date > cutoff:
+                skipped_after_cutoff += 1
                 continue
             deposit = parse_amount(row[13])
             total = parse_amount(row[17])
@@ -322,6 +335,8 @@ async def run(csv_path: Path, dry_run: bool) -> None:
             imported += 1
 
         print(f"\nrequests imported: {imported}")
+        if skipped_after_cutoff:
+            print(f"skipped (request date after {cutoff.isoformat()}): {skipped_after_cutoff}")
         for value, count in sorted(status_counts.items()):
             print(f"  {value}: {count}")
         print(
@@ -351,7 +366,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--csv", type=Path, default=DEFAULT_CSV)
     parser.add_argument("--dry-run", action="store_true", help="report only, write nothing")
+    parser.add_argument(
+        "--cutoff",
+        type=lambda v: datetime.strptime(v, "%Y-%m-%d").date(),
+        default=DEFAULT_CUTOFF,
+        help="import rows with Request Date on or before this date (default 2026-08-31)",
+    )
     args = parser.parse_args()
     if not args.csv.exists():
         sys.exit(f"CSV not found: {args.csv}")
-    asyncio.run(run(args.csv, dry_run=args.dry_run))
+    asyncio.run(run(args.csv, dry_run=args.dry_run, cutoff=args.cutoff))
