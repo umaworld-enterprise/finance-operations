@@ -1082,6 +1082,28 @@ page (super admin + finance admin), three tabs:
 
 No migration; 280 tests green, tsc clean.
 
+## Follow-up (19 Aug 2026) — Executive emails: TT upload + Mark Paid, with attachment
+
+Scoping answers: recipients = EVERYONE (all active users), both events,
+real attachment.
+
+- **TT copy uploaded** → email to every active user with the document
+  (PDF/JPG/PNG) attached — bytes are in hand at upload, no Drive
+  round-trip. Bell/push behaviour unchanged (uploads still don't ping).
+- **Tranche marked paid** → email to every active user: tranche, amount,
+  payment date, bank, completion note when it was the final tranche, and
+  the TT copy attached (new `download_tt_copy_from_drive` fetches it back;
+  falls back to the Drive view link on failure). Replaces the old
+  completion-only HoM/super email — everyone includes them, so no
+  duplicates.
+- `send_email` gained attachment support; two new pure builders
+  (`build_tt_uploaded_email`, `build_tranche_paid_email`).
+- **Deploy prerequisite**: SMTP must be configured (`SMTP_HOST` etc.) or
+  emails are skipped silently (logged) — same gate as before. TT files are
+  ≤ 10 MB, safely under normal mail-size limits.
+
+283 tests green (builder wording + everyone-audience/attachment test).
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

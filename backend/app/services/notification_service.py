@@ -501,15 +501,102 @@ async def notify_tranche_event(request_id: UUID, tranche_id: UUID, event: str) -
                 await session.commit()
                 await _push_to_user(session, target.id, message)
                 await session.commit()
-            # Full payment completion keeps the existing admin email behaviour.
-            if (
-                type_ == TYPE_TRANCHE_PAID
-                and request.current_status == RequestStatus.PAYMENT_PROCESSED
-            ):
-                await _email_admins(session, request.request_number, tranche.tt_copy_url)
+            # Executive email on EVERY mark-paid (19 Aug 2026): all active
+            # users, TT copy attached (downloaded back from Drive; falls back
+            # to the link when the download fails). Replaces the old
+            # completion-only admin email — everyone includes those admins.
+            await _email_tranche_paid(session, request, tranche)
     except Exception as exc:
         logger.error(
             "notify_tranche_event failed",
+            request_id=str(request_id), tranche_id=str(tranche_id), error=str(exc),
+        )
+
+
+async def _all_active_emails(session: AsyncSession) -> list[str]:
+    """Every active user's email — the 'everyone' audience for the TT-upload
+    and mark-paid executive emails (19 Aug 2026)."""
+    result = await session.execute(
+        select(User.email).where(User.is_active == True)  # noqa: E712
+    )
+    return [row[0] for row in result.all() if row[0]]
+
+
+async def _email_tranche_paid(session: AsyncSession, request, tranche) -> None:  # type: ignore[no-untyped-def]
+    import asyncio as _asyncio
+
+    from app.integrations.google_drive.drive_service import download_tt_copy_from_drive
+    from app.services.email_service import build_tranche_paid_email, send_email
+
+    recipients = await _all_active_emails(session)
+    if not recipients:
+        return
+    completed = request.current_status == RequestStatus.PAYMENT_PROCESSED
+    subject, text, html = build_tranche_paid_email(
+        request.request_number,
+        tranche.label,
+        amount=f"{tranche.amount} {request.currency.value if request.currency else ''}".strip(),
+        payment_date=(
+            tranche.payment_date.strftime("%d/%m/%Y") if tranche.payment_date else None
+        ),
+        bank=tranche.bank,
+        tt_copy_url=tranche.tt_copy_url,
+        completed=completed,
+    )
+    attachments = None
+    if tranche.tt_copy_file_id:
+        content = await _asyncio.to_thread(
+            download_tt_copy_from_drive, tranche.tt_copy_file_id
+        )
+        if content:
+            filename = tranche.tt_copy_filename or "tt-copy.pdf"
+            mime = {
+                ".pdf": "application/pdf",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png": "image/png",
+            }.get("." + filename.rsplit(".", 1)[-1].lower(), "application/octet-stream")
+            attachments = [(filename, mime, content)]
+    await send_email(recipients, subject, text, html, attachments)
+
+
+async def email_tt_copy_uploaded(
+    request_id: UUID,
+    tranche_id: UUID,
+    content: bytes,
+    mime_type: str,
+    filename: str,
+) -> None:
+    """After a TT copy upload (19 Aug 2026 executive emails): email EVERY
+    active user with the document attached — the bytes are still in hand from
+    the upload, no Drive round-trip needed. In-app/bell behaviour is
+    unchanged (uploads deliberately do not ping the bell; the paid event
+    does).
+
+    Own session; failures logged and swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+    from app.models.tranche import PaymentTranche
+    from app.services.email_service import build_tt_uploaded_email, send_email
+
+    try:
+        async with AsyncSessionFactory() as session:
+            request = await _load_request(session, request_id)
+            tranche = await session.get(PaymentTranche, tranche_id)
+            if request is None or tranche is None:
+                return
+            recipients = await _all_active_emails(session)
+            if not recipients:
+                return
+            subject, text, html = build_tt_uploaded_email(
+                request.request_number, tranche.label, tranche.tt_copy_url
+            )
+            await send_email(
+                recipients, subject, text, html, [(filename, mime_type, content)]
+            )
+    except Exception as exc:
+        logger.error(
+            "email_tt_copy_uploaded failed",
             request_id=str(request_id), tranche_id=str(tranche_id), error=str(exc),
         )
 

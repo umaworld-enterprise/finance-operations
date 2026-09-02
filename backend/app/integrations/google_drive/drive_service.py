@@ -99,3 +99,23 @@ def upload_tt_copy_to_drive(content: bytes, filename: str, mime_type: str) -> tu
     link = created.get("webViewLink") or f"https://drive.google.com/file/d/{file_id}/view"
     logger.info("TT copy uploaded to Drive", file_id=file_id, filename=filename)
     return file_id, link
+
+
+def download_tt_copy_from_drive(file_id: str) -> bytes | None:
+    """Fetch a TT copy back from Drive so it can travel as an email
+    attachment (19 Aug 2026 executive emails). Returns None on any failure —
+    callers fall back to the view link.
+
+    Synchronous (blocking network I/O) — run in a thread from async code.
+    """
+    try:
+        if not settings.google_service_account_json:
+            return None
+        creds_dict = json.loads(settings.google_service_account_json)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        drive = build("drive", "v3", credentials=creds)
+        content = drive.files().get_media(fileId=file_id, supportsAllDrives=True).execute()
+        return content if isinstance(content, bytes) else bytes(content)
+    except Exception as exc:
+        logger.error("TT copy download failed", file_id=file_id, error=str(exc))
+        return None
