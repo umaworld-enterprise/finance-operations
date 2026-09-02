@@ -1104,6 +1104,17 @@ real attachment.
 
 283 tests green (builder wording + everyone-audience/attachment test).
 
+## Follow-up (19 Aug 2026) — Vendor Master (FY 2025-26) seed script
+
+`scripts/seed_vendor_master.py` imports `seed_data/Vendor Master
+(FY 2025-26).csv` (371 suppliers / 23 verticals / 31 customers) into the
+masters WITHOUT duplicates: name-matched case-/whitespace-insensitively;
+missing rows inserted (new suppliers get generated `ABC-00042`-style codes
+continuing the existing sequence); deactivated rows the CSV still lists are
+reactivated (skip with `--no-reactivate`); `--dry-run` reports without
+writing. Idempotent — a second run adds nothing. Touches no users, no
+requests, deletes nothing.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
