@@ -14,7 +14,27 @@ from app.models.deposit_request import DepositRequest
 from app.models.enums import CurrencyCode, RequestStatus, UserRole
 from app.models.integrations import DefaultedSupplier
 from app.models.masters import Customer, Supplier, User, Vertical
+from app.models.payment import PaymentDetails
 from app.repositories.analytics_repo import AnalyticsRepository
+
+# Cancelled / rejected PIs are excluded from every dashboard screen
+# (Formula Reference §4, 2 Sep 2026).
+_DASH_EXCLUDED_STATUSES = (
+    RequestStatus.CANCELLED_BY_MERCHANDISER,
+    RequestStatus.CANCELLED_BY_ACCOUNTS,
+    RequestStatus.REJECTED_BY_HOM,
+    RequestStatus.REJECTED_BY_ACCOUNTS,
+)
+
+
+def _days_from_etd_expr():
+    """SQL expression: days overdue counted from the ORIGINAL Est ETD —
+    etd_grace_overdue_days is anchored at the Grace ETD, so add the grace
+    window span back (grace_etd − estimated_etd). Meaningful for Delayed rows
+    (overdue > 0), where the sheet's TODAY() − Est ETD applies."""
+    return AnalyticsSnapshot.etd_grace_overdue_days + (
+        AnalyticsSnapshot.grace_etd - DepositRequest.estimated_etd
+    )
 from app.schemas.analytics import AnalyticsFilters, AnalyticsSummary, FlaggedSupplierNpa, MerchandiserNpa, NpaResponse
 
 # ── Analytics section keys (must stay in sync with frontend) ─────────────────
@@ -268,21 +288,40 @@ class AnalyticsService:
         return list(result.scalars().all())
 
     # ── New dashboard endpoints ───────────────────────────────────────────────
+    # Aligned to the Deposit Dashboard Formula Reference (2 Sep 2026):
+    # cancelled/rejected PIs are excluded from every screen; "Delayed" =
+    # etd_grace_overdue_days > 0 (paid + graced ETD passed + unshipped); day
+    # counts shown to users run from the ORIGINAL Est ETD (overdue +
+    # grace-window span), matching the sheet's TODAY() − Est ETD.
 
     async def get_overdue_by_currency(self, date_from: Date | None = None, date_to: Date | None = None) -> list[dict]:
-        """Overdue deposit totals and notional gain split by currency."""
+        """Overdue deposit totals per currency (Delayed rows only) and
+        notional gain per currency over ALL live rows — the formula reference
+        (§3.A) sums Notional Gain unfiltered by status."""
         stmt = (
             select(
                 DepositRequest.currency,
-                func.count(DepositRequest.id).label("cases"),
-                func.coalesce(func.sum(DepositRequest.deposit_amount), 0).label("overdue_amount"),
+                func.count(DepositRequest.id).filter(
+                    AnalyticsSnapshot.etd_grace_overdue_days > 0
+                ).label("cases"),
+                func.coalesce(func.sum(
+                    case(
+                        (AnalyticsSnapshot.etd_grace_overdue_days > 0, DepositRequest.deposit_amount),
+                        else_=0,
+                    )
+                ), 0).label("overdue_amount"),
                 func.coalesce(func.sum(AnalyticsSnapshot.cost_of_fund_amount), 0).label("notional_gain"),
             )
             .join(AnalyticsSnapshot, AnalyticsSnapshot.deposit_request_id == DepositRequest.id)
             .where(DepositRequest.is_deleted == False)  # noqa: E712
-            .where(AnalyticsSnapshot.etd_grace_overdue_days > 0)
+            .where(DepositRequest.current_status.notin_(_DASH_EXCLUDED_STATUSES))
             .group_by(DepositRequest.currency)
-            .order_by(func.sum(DepositRequest.deposit_amount).desc())
+            .order_by(func.sum(
+                case(
+                    (AnalyticsSnapshot.etd_grace_overdue_days > 0, DepositRequest.deposit_amount),
+                    else_=0,
+                )
+            ).desc())
         )
         if date_from:
             stmt = stmt.where(DepositRequest.created_at >= date_from)
@@ -311,57 +350,65 @@ class AnalyticsService:
         Merchandisers see only their own requests — this section is in their
         DEFAULT_PERMISSIONS allow-list, so the data itself must be scoped.
         """
+        # Formula Reference §3.B (2 Sep 2026) — the five counters follow the
+        # sheet's per-row STATUS, all derived from payment + ship dates:
+        #   Delayed        = etd_grace_overdue_days > 0 (paid, unshipped, past grace)
+        #   Graced ETD     = paid, unshipped, Est ETD < TODAY ≤ Grace ETD
+        #   Shipped        = ship date recorded
+        #   Yet to be Shipped = paid, unshipped, Est ETD not passed (or none)
+        #   Total Active   = paid rows (the sheet's "Payt Date not blank")
+        # Cancelled / rejected PIs are excluded from every counter.
         merch_filter = _merchandiser_scope(role, user_id)
-        req_stmt = (
-            select(
-                func.count(DepositRequest.id).label("total_active"),
-                func.count(DepositRequest.id).filter(
-                    DepositRequest.current_status == RequestStatus.PAYMENT_PROCESSED
-                ).label("total_shipped"),
-                func.count(DepositRequest.id).filter(
-                    DepositRequest.current_status == RequestStatus.PENDING_PAYMENT
-                ).label("yet_to_ship"),
-            ).where(DepositRequest.is_deleted == False)  # noqa: E712
+        today = Date.today()
+        paid = PaymentDetails.payment_date.isnot(None)
+        unshipped = PaymentDetails.ship_date.is_(None)
+        etd_passed = and_(
+            DepositRequest.estimated_etd.isnot(None),
+            DepositRequest.estimated_etd < today,
         )
-        if merch_filter is not None:
-            req_stmt = req_stmt.where(merch_filter)
-        if date_from:
-            req_stmt = req_stmt.where(DepositRequest.created_at >= date_from)
-        if date_to:
-            req_stmt = req_stmt.where(DepositRequest.created_at <= date_to)
-        req_r = await self._session.execute(req_stmt)
-        req_row = req_r.one()
-
-        # Use deposit_requests as base with outer-join so requests without a
-        # snapshot row still count toward the total (they just aren't overdue).
-        snap_stmt = (
+        stmt = (
             select(
+                func.count(DepositRequest.id).filter(paid).label("total_active"),
+                func.count(DepositRequest.id).filter(
+                    PaymentDetails.ship_date.isnot(None)
+                ).label("total_shipped"),
                 func.count(DepositRequest.id).filter(
                     AnalyticsSnapshot.etd_grace_overdue_days > 0
                 ).label("total_overdue"),
                 func.count(DepositRequest.id).filter(
-                    AnalyticsSnapshot.etd_grace_overdue_days.between(-10, 0)
+                    and_(paid, unshipped, etd_passed, AnalyticsSnapshot.grace_etd >= today)
                 ).label("etd_grace_pending"),
+                func.count(DepositRequest.id).filter(
+                    and_(
+                        paid,
+                        unshipped,
+                        or_(
+                            DepositRequest.estimated_etd.is_(None),
+                            DepositRequest.estimated_etd >= today,
+                        ),
+                    )
+                ).label("yet_to_ship"),
             )
             .select_from(DepositRequest)
             .outerjoin(AnalyticsSnapshot, AnalyticsSnapshot.deposit_request_id == DepositRequest.id)
+            .outerjoin(PaymentDetails, PaymentDetails.deposit_request_id == DepositRequest.id)
             .where(DepositRequest.is_deleted == False)  # noqa: E712
+            .where(DepositRequest.current_status.notin_(_DASH_EXCLUDED_STATUSES))
         )
         if merch_filter is not None:
-            snap_stmt = snap_stmt.where(merch_filter)
+            stmt = stmt.where(merch_filter)
         if date_from:
-            snap_stmt = snap_stmt.where(DepositRequest.created_at >= date_from)
+            stmt = stmt.where(DepositRequest.created_at >= date_from)
         if date_to:
-            snap_stmt = snap_stmt.where(DepositRequest.created_at <= date_to)
-        snap_r = await self._session.execute(snap_stmt)
-        snap_row = snap_r.one()
+            stmt = stmt.where(DepositRequest.created_at <= date_to)
+        row = (await self._session.execute(stmt)).one()
 
         return {
-            "total_overdue":    snap_row.total_overdue or 0,
-            "etd_grace_pending": snap_row.etd_grace_pending or 0,
-            "total_shipped":    req_row.total_shipped or 0,
-            "yet_to_ship":      req_row.yet_to_ship or 0,
-            "total_active":     req_row.total_active or 0,
+            "total_overdue":    row.total_overdue or 0,
+            "etd_grace_pending": row.etd_grace_pending or 0,
+            "total_shipped":    row.total_shipped or 0,
+            "yet_to_ship":      row.yet_to_ship or 0,
+            "total_active":     row.total_active or 0,
         }
 
     async def get_delay_buckets(
@@ -372,11 +419,17 @@ class AnalyticsService:
         vertical_id: UUID | None = None,
         customer_id: UUID | None = None,
     ) -> list[dict]:
-        """Aging analysis with dynamic 15-day buckets — extends automatically beyond 150 days
-        based on the actual maximum overdue days found in the data."""
-        BASE_BUCKETS: list[tuple[str, int | None, int]] = [
-            ("Graced ETD",   None,  0),
-            ("G-15 Days",    1,    15),
+        """Aging analysis per the Formula Reference §2.2/§2.3/§3.C
+        (2 Sep 2026): 15-day buckets over days counted from the ORIGINAL Est
+        ETD (the sheet's TODAY() − Est ETD). The Cases/Overdue columns cover
+        only Graced/Delayed rows (paid, unshipped, ETD passed); Shipped and
+        Yet-to-be-Shipped rows carry no delay range. The Notional columns are
+        keyed off the Actual-ETD-Overdue days instead (§2.3) — they include
+        shipped rows, deliberately a different row set. '% of Delayed' keeps
+        the sheet's denominator (delayed buckets only, Graced excluded)."""
+        BUCKETS: list[tuple[str, int | None, int | None]] = [
+            ("Graced ETD",   None,  10),
+            ("G-15 Days",    10,    15),
             ("15-30 Days",   15,   30),
             ("30-45 Days",   30,   45),
             ("45-60 Days",   45,   60),
@@ -386,18 +439,25 @@ class AnalyticsService:
             ("105-120 Days", 105, 120),
             ("120-135 Days", 120, 135),
             ("135-150 Days", 135, 150),
+            (">150 Days",    150, None),
         ]
 
-        # Pull all snapshots with their deposit request data
         bucket_stmt = (
             select(
                 AnalyticsSnapshot.etd_grace_overdue_days,
+                AnalyticsSnapshot.actual_etd_overdue_days,
+                AnalyticsSnapshot.grace_etd,
+                DepositRequest.estimated_etd,
+                PaymentDetails.payment_date,
+                PaymentDetails.ship_date,
                 DepositRequest.deposit_amount,
                 DepositRequest.currency,
                 AnalyticsSnapshot.cost_of_fund_amount,
             )
             .join(DepositRequest, AnalyticsSnapshot.deposit_request_id == DepositRequest.id)
+            .outerjoin(PaymentDetails, PaymentDetails.deposit_request_id == DepositRequest.id)
             .where(DepositRequest.is_deleted == False)  # noqa: E712
+            .where(DepositRequest.current_status.notin_(_DASH_EXCLUDED_STATUSES))
         )
         if date_from:
             bucket_stmt = bucket_stmt.where(DepositRequest.created_at >= date_from)
@@ -409,50 +469,55 @@ class AnalyticsService:
             bucket_stmt = bucket_stmt.where(DepositRequest.vertical_id == vertical_id)
         if customer_id:
             bucket_stmt = bucket_stmt.where(DepositRequest.customer_id == customer_id)
-        rows_r = await self._session.execute(bucket_stmt)
-        all_rows = rows_r.fetchall()
+        all_rows = (await self._session.execute(bucket_stmt)).fetchall()
 
-        # Find max overdue days to auto-generate extra buckets
-        max_overdue = max(
-            (r.etd_grace_overdue_days or 0 for r in all_rows),
-            default=0,
-        )
+        today = Date.today()
 
-        # Extend in 15-day increments beyond 150 until max is covered
-        buckets: list[tuple[str, int | None, int]] = list(BASE_BUCKETS)
-        upper = 150
-        while upper < max_overdue:
-            lower = upper
-            upper = lower + 15
-            buckets.append((f"{lower}-{upper} Days", lower, upper))
+        def delay_days(r) -> int | None:  # type: ignore[no-untyped-def]
+            """Days from Est ETD for Graced/Delayed rows only — None for
+            Shipped / Yet-to-be-Shipped / unpaid rows (no delay range)."""
+            if r.payment_date is None or r.ship_date is not None:
+                return None
+            if r.estimated_etd is None or r.estimated_etd >= today:
+                return None
+            return (today - r.estimated_etd).days
+
+        def in_bucket(days: int, low: int | None, high: int | None) -> bool:
+            if low is not None and days <= low:
+                return False
+            return high is None or days <= high
 
         total_delayed = sum(
             1 for r in all_rows if r.etd_grace_overdue_days and r.etd_grace_overdue_days > 0
         )
 
         result = []
-        for label, low, high in buckets:
-            if label == "Graced ETD":
-                matched = [r for r in all_rows if not r.etd_grace_overdue_days or r.etd_grace_overdue_days <= 0]
-            else:
-                matched = [
-                    r for r in all_rows
-                    if r.etd_grace_overdue_days and low < r.etd_grace_overdue_days <= high  # type: ignore[operator]
-                ]
-
+        for label, low, high in BUCKETS:
+            matched = [
+                r for r in all_rows
+                if (d := delay_days(r)) is not None and in_bucket(d, low, high)
+            ]
             cases = len(matched)
             by_cur: dict[str, float] = {}
-            notional: dict[str, float] = {}
             for r in matched:
                 cur = r.currency.value if hasattr(r.currency, "value") else str(r.currency)
                 by_cur[cur] = by_cur.get(cur, 0.0) + float(r.deposit_amount or 0)
+
+            # Notional per bucket keys off Actual-ETD-Overdue days (§2.3):
+            # every live row with the field, shipped ones included.
+            notional: dict[str, float] = {}
+            for r in all_rows:
+                ae = r.actual_etd_overdue_days
+                if ae is None or not in_bucket(ae, low, high):
+                    continue
+                cur = r.currency.value if hasattr(r.currency, "value") else str(r.currency)
                 notional[cur] = notional.get(cur, 0.0) + float(r.cost_of_fund_amount or 0)
 
             pct_cases = round(cases / total_delayed * 100, 1) if total_delayed > 0 else 0.0
             result.append({
                 "delay_range": label,
-                "bucket_min": low,    # None for "Graced ETD", int for all others
-                "bucket_max": high,
+                "bucket_min": low,    # None for "Graced ETD"; days from Est ETD
+                "bucket_max": high,   # None for ">150 Days"
                 "cases": cases,
                 "overdue_usd": by_cur.get("USD", 0.0),
                 "overdue_cny": by_cur.get("CNY", 0.0),
@@ -473,7 +538,10 @@ class AnalyticsService:
         etd_min: int | None = None,
         etd_max: int | None = None,
     ) -> list[dict]:
-        """Overdue metrics grouped by merchandiser (user who created the request)."""
+        """Overdue metrics grouped by merchandiser — Formula Reference §3.D
+        (2 Sep 2026): Contribution % is CASES-based; Avg Delay counts days
+        from the ORIGINAL Est ETD; Notional Gain sums over ALL of the
+        merchandiser's live USD rows, not just the Delayed ones."""
         merch_stmt = (
             select(
                 User.full_name,
@@ -487,31 +555,48 @@ class AnalyticsService:
                 func.coalesce(func.sum(
                     case((DepositRequest.currency == CurrencyCode.EUR, DepositRequest.deposit_amount), else_=0)
                 ), 0).label("overdue_eur"),
-                func.coalesce(func.avg(AnalyticsSnapshot.etd_grace_overdue_days), 0).label("avg_delay"),
+                func.coalesce(func.avg(_days_from_etd_expr()), 0).label("avg_delay"),
+            )
+            .join(AnalyticsSnapshot, AnalyticsSnapshot.deposit_request_id == DepositRequest.id)
+            .join(User, User.id == DepositRequest.created_by)
+            .where(DepositRequest.is_deleted == False)  # noqa: E712
+            .where(DepositRequest.current_status.notin_(_DASH_EXCLUDED_STATUSES))
+            .where(AnalyticsSnapshot.etd_grace_overdue_days > 0)
+            .group_by(User.full_name)
+            .order_by(func.sum(DepositRequest.deposit_amount).desc())
+        )
+        # Notional gain per §3.D: every live USD row of the merchandiser.
+        notional_stmt = (
+            select(
+                User.full_name,
                 func.coalesce(func.sum(AnalyticsSnapshot.cost_of_fund_amount), 0).label("notional_gain"),
             )
             .join(AnalyticsSnapshot, AnalyticsSnapshot.deposit_request_id == DepositRequest.id)
             .join(User, User.id == DepositRequest.created_by)
             .where(DepositRequest.is_deleted == False)  # noqa: E712
-            .where(AnalyticsSnapshot.etd_grace_overdue_days > 0)
+            .where(DepositRequest.current_status.notin_(_DASH_EXCLUDED_STATUSES))
+            .where(DepositRequest.currency == CurrencyCode.USD)
             .group_by(User.full_name)
-            .order_by(func.sum(DepositRequest.deposit_amount).desc())
         )
-        if date_from:
-            merch_stmt = merch_stmt.where(DepositRequest.created_at >= date_from)
-        if date_to:
-            merch_stmt = merch_stmt.where(DepositRequest.created_at <= date_to)
-        if vertical_id:
-            merch_stmt = merch_stmt.where(DepositRequest.vertical_id == vertical_id)
-        if customer_id:
-            merch_stmt = merch_stmt.where(DepositRequest.customer_id == customer_id)
+        for col_filter in (
+            (DepositRequest.created_at >= date_from) if date_from else None,
+            (DepositRequest.created_at <= date_to) if date_to else None,
+            (DepositRequest.vertical_id == vertical_id) if vertical_id else None,
+            (DepositRequest.customer_id == customer_id) if customer_id else None,
+        ):
+            if col_filter is not None:
+                merch_stmt = merch_stmt.where(col_filter)
+                notional_stmt = notional_stmt.where(col_filter)
         if etd_min is not None:
-            merch_stmt = merch_stmt.where(AnalyticsSnapshot.etd_grace_overdue_days > etd_min)
+            merch_stmt = merch_stmt.where(_days_from_etd_expr() > etd_min)
         if etd_max is not None:
-            merch_stmt = merch_stmt.where(AnalyticsSnapshot.etd_grace_overdue_days <= etd_max)
-        rows_r = await self._session.execute(merch_stmt)
-        rows = rows_r.fetchall()
-        total_usd = sum(float(r.overdue_usd) for r in rows)
+            merch_stmt = merch_stmt.where(_days_from_etd_expr() <= etd_max)
+        rows = (await self._session.execute(merch_stmt)).fetchall()
+        notional_by_name = {
+            r.full_name: float(r.notional_gain)
+            for r in (await self._session.execute(notional_stmt)).fetchall()
+        }
+        total_cases = sum(r.overdue_cases for r in rows)
         return [
             {
                 "merchandiser": r.full_name,
@@ -519,9 +604,9 @@ class AnalyticsService:
                 "overdue_usd": float(r.overdue_usd),
                 "overdue_cny": float(r.overdue_cny),
                 "overdue_eur": float(r.overdue_eur),
-                "contribution_pct": round(float(r.overdue_usd) / total_usd * 100, 1) if total_usd else 0.0,
+                "contribution_pct": round(r.overdue_cases / total_cases * 100, 1) if total_cases else 0.0,
                 "avg_delay_days": round(float(r.avg_delay), 0),
-                "notional_gain": float(r.notional_gain),
+                "notional_gain": notional_by_name.get(r.full_name, 0.0),
             }
             for r in rows
         ]
@@ -549,30 +634,47 @@ class AnalyticsService:
                 func.coalesce(func.sum(
                     case((DepositRequest.currency == CurrencyCode.EUR, DepositRequest.deposit_amount), else_=0)
                 ), 0).label("overdue_eur"),
-                func.coalesce(func.avg(AnalyticsSnapshot.etd_grace_overdue_days), 0).label("avg_delay"),
+                func.coalesce(func.avg(_days_from_etd_expr()), 0).label("avg_delay"),
+            )
+            .join(AnalyticsSnapshot, AnalyticsSnapshot.deposit_request_id == DepositRequest.id)
+            .join(Vertical, Vertical.id == DepositRequest.vertical_id)
+            .where(DepositRequest.is_deleted == False)  # noqa: E712
+            .where(DepositRequest.current_status.notin_(_DASH_EXCLUDED_STATUSES))
+            .where(AnalyticsSnapshot.etd_grace_overdue_days > 0)
+            .group_by(Vertical.name)
+            .order_by(func.count(DepositRequest.id).desc())
+        )
+        # Notional gain per §3.E: every live USD row of the vertical.
+        notional_stmt = (
+            select(
+                Vertical.name,
                 func.coalesce(func.sum(AnalyticsSnapshot.cost_of_fund_amount), 0).label("notional_gain"),
             )
             .join(AnalyticsSnapshot, AnalyticsSnapshot.deposit_request_id == DepositRequest.id)
             .join(Vertical, Vertical.id == DepositRequest.vertical_id)
             .where(DepositRequest.is_deleted == False)  # noqa: E712
-            .where(AnalyticsSnapshot.etd_grace_overdue_days > 0)
+            .where(DepositRequest.current_status.notin_(_DASH_EXCLUDED_STATUSES))
+            .where(DepositRequest.currency == CurrencyCode.USD)
             .group_by(Vertical.name)
-            .order_by(func.count(DepositRequest.id).desc())
         )
-        if date_from:
-            vert_stmt = vert_stmt.where(DepositRequest.created_at >= date_from)
-        if date_to:
-            vert_stmt = vert_stmt.where(DepositRequest.created_at <= date_to)
-        if staff_id:
-            vert_stmt = vert_stmt.where(DepositRequest.created_by == staff_id)
-        if customer_id:
-            vert_stmt = vert_stmt.where(DepositRequest.customer_id == customer_id)
+        for col_filter in (
+            (DepositRequest.created_at >= date_from) if date_from else None,
+            (DepositRequest.created_at <= date_to) if date_to else None,
+            (DepositRequest.created_by == staff_id) if staff_id else None,
+            (DepositRequest.customer_id == customer_id) if customer_id else None,
+        ):
+            if col_filter is not None:
+                vert_stmt = vert_stmt.where(col_filter)
+                notional_stmt = notional_stmt.where(col_filter)
         if etd_min is not None:
-            vert_stmt = vert_stmt.where(AnalyticsSnapshot.etd_grace_overdue_days > etd_min)
+            vert_stmt = vert_stmt.where(_days_from_etd_expr() > etd_min)
         if etd_max is not None:
-            vert_stmt = vert_stmt.where(AnalyticsSnapshot.etd_grace_overdue_days <= etd_max)
-        rows_r = await self._session.execute(vert_stmt)
-        rows = rows_r.fetchall()
+            vert_stmt = vert_stmt.where(_days_from_etd_expr() <= etd_max)
+        rows = (await self._session.execute(vert_stmt)).fetchall()
+        notional_by_name = {
+            r.name: float(r.notional_gain)
+            for r in (await self._session.execute(notional_stmt)).fetchall()
+        }
         total_cases = sum(r.overdue_cases for r in rows)
         return [
             {
@@ -583,7 +685,7 @@ class AnalyticsService:
                 "overdue_eur": float(r.overdue_eur),
                 "contribution_pct": round(r.overdue_cases / total_cases * 100, 1) if total_cases else 0.0,
                 "avg_delay_days": round(float(r.avg_delay), 0),
-                "notional_gain": float(r.notional_gain),
+                "notional_gain": notional_by_name.get(r.name, 0.0),
             }
             for r in rows
         ]
@@ -1021,34 +1123,67 @@ class AnalyticsService:
                 func.coalesce(func.sum(
                     case((DepositRequest.currency == CurrencyCode.EUR, DepositRequest.deposit_amount), else_=0)
                 ), 0).label("overdue_eur"),
-                func.coalesce(func.avg(AnalyticsSnapshot.etd_grace_overdue_days), 0).label("avg_delay"),
-                func.coalesce(func.max(AnalyticsSnapshot.etd_grace_overdue_days), 0).label("max_delay"),
-                func.coalesce(func.sum(AnalyticsSnapshot.cost_of_fund_amount), 0).label("notional_gain"),
-                func.count(
-                    case((DepositRequest.current_status == RequestStatus.PENDING_PAYMENT, 1))
-                ).label("etd_pending"),
+                func.coalesce(func.avg(_days_from_etd_expr()), 0).label("avg_delay"),
+                func.coalesce(func.max(_days_from_etd_expr()), 0).label("max_delay"),
             )
             .join(AnalyticsSnapshot, AnalyticsSnapshot.deposit_request_id == DepositRequest.id)
             .join(Customer, Customer.id == DepositRequest.customer_id)
             .where(DepositRequest.is_deleted == False)  # noqa: E712
+            .where(DepositRequest.current_status.notin_(_DASH_EXCLUDED_STATUSES))
             .where(AnalyticsSnapshot.etd_grace_overdue_days > 0)
             .group_by(Customer.name)
             .order_by(func.count(DepositRequest.id).desc())
         )
-        if date_from:
-            cust_stmt = cust_stmt.where(DepositRequest.created_at >= date_from)
-        if date_to:
-            cust_stmt = cust_stmt.where(DepositRequest.created_at <= date_to)
-        if staff_id:
-            cust_stmt = cust_stmt.where(DepositRequest.created_by == staff_id)
-        if vertical_id:
-            cust_stmt = cust_stmt.where(DepositRequest.vertical_id == vertical_id)
+        # ETD Pending per §3.F = STATUS "Yet to be Shipped" (paid, unshipped,
+        # Est ETD not passed / none) — counted over ALL live rows, not just
+        # the Delayed ones. Notional per §3.D pattern: all live USD rows.
+        today = Date.today()
+        pending_stmt = (
+            select(
+                Customer.name,
+                func.count(DepositRequest.id).filter(
+                    and_(
+                        PaymentDetails.payment_date.isnot(None),
+                        PaymentDetails.ship_date.is_(None),
+                        or_(
+                            DepositRequest.estimated_etd.is_(None),
+                            DepositRequest.estimated_etd >= today,
+                        ),
+                    )
+                ).label("etd_pending"),
+                func.coalesce(func.sum(
+                    case(
+                        (DepositRequest.currency == CurrencyCode.USD, AnalyticsSnapshot.cost_of_fund_amount),
+                        else_=0,
+                    )
+                ), 0).label("notional_gain"),
+            )
+            .select_from(DepositRequest)
+            .join(Customer, Customer.id == DepositRequest.customer_id)
+            .outerjoin(AnalyticsSnapshot, AnalyticsSnapshot.deposit_request_id == DepositRequest.id)
+            .outerjoin(PaymentDetails, PaymentDetails.deposit_request_id == DepositRequest.id)
+            .where(DepositRequest.is_deleted == False)  # noqa: E712
+            .where(DepositRequest.current_status.notin_(_DASH_EXCLUDED_STATUSES))
+            .group_by(Customer.name)
+        )
+        for col_filter in (
+            (DepositRequest.created_at >= date_from) if date_from else None,
+            (DepositRequest.created_at <= date_to) if date_to else None,
+            (DepositRequest.created_by == staff_id) if staff_id else None,
+            (DepositRequest.vertical_id == vertical_id) if vertical_id else None,
+        ):
+            if col_filter is not None:
+                cust_stmt = cust_stmt.where(col_filter)
+                pending_stmt = pending_stmt.where(col_filter)
         if etd_min is not None:
-            cust_stmt = cust_stmt.where(AnalyticsSnapshot.etd_grace_overdue_days > etd_min)
+            cust_stmt = cust_stmt.where(_days_from_etd_expr() > etd_min)
         if etd_max is not None:
-            cust_stmt = cust_stmt.where(AnalyticsSnapshot.etd_grace_overdue_days <= etd_max)
-        rows_r = await self._session.execute(cust_stmt)
-        rows = rows_r.fetchall()
+            cust_stmt = cust_stmt.where(_days_from_etd_expr() <= etd_max)
+        rows = (await self._session.execute(cust_stmt)).fetchall()
+        extras = {
+            r.name: (r.etd_pending, float(r.notional_gain))
+            for r in (await self._session.execute(pending_stmt)).fetchall()
+        }
         total_cases = sum(r.overdue_cases for r in rows)
         return [
             {
@@ -1060,8 +1195,8 @@ class AnalyticsService:
                 "contribution_pct": round(r.overdue_cases / total_cases * 100, 1) if total_cases else 0.0,
                 "avg_delay_days": round(float(r.avg_delay), 0),
                 "max_delay_days": int(r.max_delay),
-                "etd_pending": r.etd_pending,
-                "notional_gain": float(r.notional_gain),
+                "etd_pending": extras.get(r.name, (0, 0.0))[0],
+                "notional_gain": extras.get(r.name, (0, 0.0))[1],
             }
             for r in rows
         ]

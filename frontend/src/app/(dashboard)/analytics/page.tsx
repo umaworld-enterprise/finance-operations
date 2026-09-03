@@ -109,7 +109,9 @@ function buildQs(params: Record<string, string | number | undefined | null>) {
 
 // Delay-bucket dropdown options shared across the 4 cross-filter tabs.
 const DELAY_BUCKET_OPTIONS = [
-  { label: "G-15 Days",    etd_min: 1,   etd_max: 15  },
+  // Bucket bounds are days from the ORIGINAL Est ETD (Formula Reference,
+  // 2 Sep 2026) — G-15 covers 11–15 days after ETD (just past the grace).
+  { label: "G-15 Days",    etd_min: 10,  etd_max: 15  },
   { label: "15-30 Days",   etd_min: 15,  etd_max: 30  },
   { label: "30-45 Days",   etd_min: 30,  etd_max: 45  },
   { label: "45-60 Days",   etd_min: 45,  etd_max: 60  },
@@ -511,8 +513,9 @@ function DelayBucketsTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: str
                 : data.length === 0 ? <EmptyTable cols={9} />
                 : data.map((row: any) => {
                   const minPart = row.bucket_min !== null && row.bucket_min !== undefined ? `&min=${row.bucket_min}` : "";
+                  const maxPart = row.bucket_max !== null && row.bucket_max !== undefined ? `&max=${row.bucket_max}` : "";
                   const xf = (staffId ? `&staff_id=${staffId}` : "") + (verticalId ? `&vertical_id=${verticalId}` : "") + (customerId ? `&customer_id=${customerId}` : "");
-                  const drillUrl = `/analytics/drill?section=delay_buckets&label=${encodeURIComponent(row.delay_range)}${minPart}&max=${row.bucket_max}${xf}`;
+                  const drillUrl = `/analytics/drill?section=delay_buckets&label=${encodeURIComponent(row.delay_range)}${minPart}${maxPart}${xf}`;
                   return (
                   <TableRow key={row.delay_range} className="hover:bg-muted/40 cursor-pointer">
                     <TableCell className="font-medium text-sm">

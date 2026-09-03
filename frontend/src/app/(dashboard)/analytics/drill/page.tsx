@@ -301,19 +301,56 @@ function DrillContent() {
   const rows = useMemo(() => {
     const joined = requests.map((req) => ({ req, snap: snapshotMap.get(req.id) ?? null }));
 
+    // Formula Reference alignment (2 Sep 2026): cancelled/rejected PIs are
+    // excluded from every dashboard drill; day counts run from the ORIGINAL
+    // Est ETD (grace-anchored overdue + the grace-window span).
+    const isLive = (req: (typeof joined)[number]["req"]) =>
+      !["cancelled_by_merchandiser", "cancelled_by_accounts", "rejected_by_hom", "rejected_by_accounts"].includes(
+        req.current_status,
+      );
+    const daysFromEtd = (item: (typeof joined)[number]): number | null => {
+      const overdue = item.snap?.etd_grace_overdue_days;
+      if (overdue == null || overdue <= 0) return null;
+      const grace = item.snap?.grace_etd;
+      const est = item.req.estimated_etd;
+      const span =
+        grace && est
+          ? Math.round((new Date(grace).getTime() - new Date(est).getTime()) / 86400000)
+          : 10;
+      return overdue + span;
+    };
+    const today = new Date().toISOString().slice(0, 10);
+    const paid = (s: (typeof joined)[number]["snap"]) => s?.payment_to_request_days != null;
+    const shipped = (s: (typeof joined)[number]["snap"]) => s?.payment_to_ship_days != null;
+
     if (section === "overdue_kpis" && currency) {
       return joined.filter(({ req, snap }) =>
-        req.currency === currency && snap !== null && (snap.etd_grace_overdue_days ?? 0) > 0,
+        isLive(req) && req.currency === currency && snap !== null && (snap.etd_grace_overdue_days ?? 0) > 0,
       );
     }
 
     if (section === "shipment_kpis") {
+      const live = joined.filter(({ req }) => isLive(req));
       switch (filter) {
-        case "overdue":    return joined.filter(({ snap }) => snap && (snap.etd_grace_overdue_days ?? 0) > 0);
-        case "etd_grace":  return joined.filter(({ snap }) => snap && (snap.etd_grace_overdue_days ?? 0) >= -10 && (snap.etd_grace_overdue_days ?? 0) <= 0);
-        case "shipped":    return joined.filter(({ req }) => req.current_status === "payment_processed");
-        case "yet_to_ship":return joined.filter(({ req }) => req.current_status === "pending_payment");
-        case "active":     return joined;
+        case "overdue":
+          return live.filter(({ snap }) => snap && (snap.etd_grace_overdue_days ?? 0) > 0);
+        case "etd_grace":
+          // Paid, unshipped, Est ETD passed but Grace ETD not yet.
+          return live.filter(({ req, snap }) =>
+            paid(snap) && !shipped(snap) &&
+            !!req.estimated_etd && req.estimated_etd < today &&
+            !!snap?.grace_etd && snap.grace_etd >= today,
+          );
+        case "shipped":
+          return live.filter(({ snap }) => shipped(snap));
+        case "yet_to_ship":
+          // Paid, unshipped, Est ETD not passed (or none).
+          return live.filter(({ req, snap }) =>
+            paid(snap) && !shipped(snap) &&
+            (!req.estimated_etd || req.estimated_etd >= today),
+          );
+        case "active":
+          return live.filter(({ snap }) => paid(snap));
       }
     }
 
@@ -322,8 +359,8 @@ function DrillContent() {
         if ((req.creator?.full_name ?? req.creator?.email ?? "Unknown") !== name) return false;
         if (xfVerticalId && req.vertical?.id !== xfVerticalId) return false;
         if (xfCustomerId && req.customer?.id !== xfCustomerId) return false;
-        if (xfEtdMin !== null && (snap?.etd_grace_overdue_days ?? 0) <= xfEtdMin) return false;
-        if (xfEtdMax !== null && (snap?.etd_grace_overdue_days ?? 0) > xfEtdMax) return false;
+        if (xfEtdMin !== null && (daysFromEtd({ req, snap }) ?? 0) <= xfEtdMin) return false;
+        if (xfEtdMax !== null && (daysFromEtd({ req, snap }) ?? 0) > xfEtdMax) return false;
         return true;
       });
     }
@@ -333,8 +370,8 @@ function DrillContent() {
         if (req.vertical?.name !== name) return false;
         if (xfStaffId && req.created_by !== xfStaffId) return false;
         if (xfCustomerId && req.customer?.id !== xfCustomerId) return false;
-        if (xfEtdMin !== null && (snap?.etd_grace_overdue_days ?? 0) <= xfEtdMin) return false;
-        if (xfEtdMax !== null && (snap?.etd_grace_overdue_days ?? 0) > xfEtdMax) return false;
+        if (xfEtdMin !== null && (daysFromEtd({ req, snap }) ?? 0) <= xfEtdMin) return false;
+        if (xfEtdMax !== null && (daysFromEtd({ req, snap }) ?? 0) > xfEtdMax) return false;
         return true;
       });
     }
@@ -344,20 +381,36 @@ function DrillContent() {
         if (req.customer?.name !== name) return false;
         if (xfStaffId && req.created_by !== xfStaffId) return false;
         if (xfVerticalId && req.vertical?.id !== xfVerticalId) return false;
-        if (xfEtdMin !== null && (snap?.etd_grace_overdue_days ?? 0) <= xfEtdMin) return false;
-        if (xfEtdMax !== null && (snap?.etd_grace_overdue_days ?? 0) > xfEtdMax) return false;
+        if (xfEtdMin !== null && (daysFromEtd({ req, snap }) ?? 0) <= xfEtdMin) return false;
+        if (xfEtdMax !== null && (daysFromEtd({ req, snap }) ?? 0) > xfEtdMax) return false;
         return true;
       });
     }
 
     if (section === "delay_buckets") {
       return joined.filter(({ req, snap }) => {
-        const days = snap?.etd_grace_overdue_days ?? 0;
+        if (!isLive(req)) return false;
+        // Graced/Delayed rows only, days counted from the ORIGINAL Est ETD
+        // (Formula Reference §2.2, 2 Sep 2026).
+        let days: number | null = daysFromEtd({ req, snap });
+        if (days === null) {
+          // Graced rows have overdue 0 — derive days when paid, unshipped
+          // and Est ETD already passed.
+          if (
+            paid(snap) && !shipped(snap) &&
+            req.estimated_etd && req.estimated_etd < today
+          ) {
+            days = Math.round((Date.now() - new Date(req.estimated_etd).getTime()) / 86400000);
+          }
+        }
+        if (days === null) return false;
         let matchBucket: boolean;
         if (bucketMin === null && bucketMax !== null) {
           matchBucket = days <= bucketMax;
         } else if (bucketMin !== null && bucketMax !== null) {
           matchBucket = days > bucketMin && days <= bucketMax;
+        } else if (bucketMin !== null && bucketMax === null) {
+          matchBucket = days > bucketMin;
         } else {
           matchBucket = false;
         }
