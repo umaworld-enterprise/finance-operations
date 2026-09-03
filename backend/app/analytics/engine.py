@@ -81,23 +81,27 @@ def compute(inp: AnalyticsInput) -> AnalyticsResult:
     if inp.estimated_etd:
         actual_etd_overdue_days = ((inp.ship_date or today) - inp.estimated_etd).days
 
-    # Cost of fund — client rule confirmed 2026-07-10 (supersedes the raw sheet
-    # formula for within-grace rows): deposit × rate × days / 365 where days =
-    # (ship_date or today) − Est ETD, but the charge only starts once the
-    # etd_grace_days window is EXCEEDED — and then counts retroactively from
-    # Est ETD itself (day 1, not day 11). Shipping 0..grace days late costs
-    # nothing; shipping EARLY keeps the sheet's negative "notional gain";
-    # unshipped rows stay at 0 until grace is exceeded, then accrue daily.
-    # Applies only once the advance has been paid (pre-payment accrual pending
-    # client confirmation). cost_of_fund_grace_days is intentionally unused —
-    # etd_grace_days is the gate.
+    # Cost of fund — client's FINAL sheet formulas (2 Sep 2026, supersedes the
+    # 10 Jul rule):
+    #   AF = IF(AND(paid, TODAY() > Grace ETD), deposit × rate / 365 × days, "")
+    # where days = (ship_date or today) − Est ETD, SIGNED (the
+    # actual_etd_overdue_days above): anchored at ORIGINAL ETD, growing daily
+    # while unshipped, frozen at the ship date once recorded (negative =
+    # shipped early, the sheet's "notional gain"). The GATE is calendar-based:
+    # nothing is charged until TODAY crosses the Grace ETD — after that even a
+    # shipped-within-grace file carries its (small or negative) T→Z figure.
+    # Unpaid files never charge. cost_of_fund_grace_days stays intentionally
+    # unused — Grace ETD (Est ETD + etd_grace_days) is the gate.
     cost_of_fund_applicable = False
     cost_of_fund_amount = Decimal("0.00")
-    if inp.payment_date and inp.estimated_etd and actual_etd_overdue_days is not None:
+    if (
+        inp.payment_date
+        and inp.estimated_etd
+        and grace_etd
+        and actual_etd_overdue_days is not None
+    ):
         cost_of_fund_applicable = True
-        past_grace = actual_etd_overdue_days > inp.etd_grace_days
-        shipped_early = inp.ship_date is not None and actual_etd_overdue_days < 0
-        if past_grace or shipped_early:
+        if today > grace_etd:
             cost_of_fund_amount = (
                 inp.deposit_amount
                 * Decimal(str(inp.cost_of_fund_rate))
