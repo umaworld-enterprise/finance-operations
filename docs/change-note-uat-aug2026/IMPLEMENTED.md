@@ -1231,6 +1231,46 @@ deposit × rate/365 × days)`:
 290 tests green (2 golden rows updated to sheet values; 2 engine tests
 retargeted; new gate-timing test).
 
+## Follow-up (2 Sep 2026) — Analytics aligned to the Deposit Dashboard Formula Reference
+
+Full audit of the Analytics screens against the client's Formula Reference
+(.md handoff). Already matching: Delayed definition (paid + graced ETD
+passed + unshipped ⇔ etd_grace_overdue_days > 0), Overdue-amount KPIs,
+"% of Delayed" denominator quirk (kept as the sheet has it), the
+Outstanding weekly tab (request-date weeks, unpaid tranches, per-currency —
+including both ⚠ items the doc asked to confirm), RMB→CNY label handling,
+TODAY()-based recompute. Fixed to match:
+
+1. **Cancelled/rejected PIs excluded from every screen** (§4) — new
+   `_DASH_EXCLUDED_STATUSES` on all dashboard queries + drill filters.
+2. **Overdue KPIs (§3.A)**: Notional Gain per currency now sums ALL live
+   rows, not just Delayed ones.
+3. **Shipment KPIs (§3.B)** rebuilt on the sheet's STATUS: Graced = paid,
+   unshipped, Est ETD < today ≤ Grace ETD (the old between(−10,0) had been
+   dead since the 11 Aug engine change); Shipped = ship date recorded (was
+   status processed); Yet to Ship = paid, unshipped, ETD not passed (was
+   status pending); Total Active = PAID rows (was all rows).
+4. **Delay Buckets (§2.2/2.3/3.C)**: day counts anchored at ORIGINAL Est
+   ETD (Graced 0-10, G-15 = 11-15, …, terminal ">150 Days" replacing the
+   dynamic extension); Cases/Overdue columns cover Graced/Delayed rows only
+   (shipped / yet-to-ship rows carry no delay range — previously everything
+   landed in "Graced ETD"); Notional columns keyed off Actual-ETD-Overdue
+   days (shipped rows included), deliberately a different row set.
+5. **By Merchandiser (§3.D)**: Contribution % now CASES-based (was USD);
+   Avg Delay from Est ETD; Notional Gain = ALL live USD rows of the staff.
+   **By Vertical (§3.E)**: same avg/notional fixes. **By Customer (§3.F)**:
+   avg/max from Est ETD; ETD Pending = "Yet to be Shipped" rows over ALL
+   live rows (the old count looked for pending_payment among delayed rows —
+   the doc's flagged always-0 bug, now per the doc's stated intent);
+   notional aligned.
+6. **Frontend**: bucket filter G-15 bounds now 10–15 (est-anchored); drill
+   cross-filters and bucket matching compute days-from-Est-ETD
+   (overdue + grace span); shipment drills mirror the new STATUS
+   definitions; ">150 Days" (null max) handled in drill URLs.
+
+290 tests green, tsc clean; no migration; deploy backend + frontend
+together.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
