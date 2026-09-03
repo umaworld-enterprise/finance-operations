@@ -95,6 +95,7 @@ export function ShipmentsTable({ linkBase }: { linkBase: "/hom" | "/accounts" })
                   <TableHead>Invoice #</TableHead>
                   <TableHead>Supplier</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Payment Date</TableHead>
                   <TableHead>Original ETD</TableHead>
                   <TableHead>Days Delayed</TableHead>
                   <TableHead>Status</TableHead>
@@ -117,6 +118,10 @@ export function ShipmentsTable({ linkBase }: { linkBase: "/hom" | "/accounts" })
                     <TableCell className="text-sm">{s.supplier_name}</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">
                       {formatCurrency(s.amount, s.currency)}
+                    </TableCell>
+                    {/* Payment date beside every paid amount (2 Sep 2026). */}
+                    <TableCell className="text-sm whitespace-nowrap text-muted-foreground">
+                      {s.payment_date ? formatDate(s.payment_date) : "—"}
                     </TableCell>
                     <TableCell className="text-sm whitespace-nowrap">
                       {s.estimated_etd ? formatDate(s.estimated_etd) : "—"}

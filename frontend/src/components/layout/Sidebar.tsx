@@ -203,6 +203,22 @@ export function Sidebar() {
               {renderItems(adminItems)}
             </div>
           )}
+
+          {/* Logout lives at the END of the menu (2 Sep 2026) — moved out of
+              the fixed footer so it scrolls with the navigation. */}
+          {user && (
+            <div className="mt-6 space-y-0.5">
+              <div className="border-t border-white/10 mb-4" />
+              <button
+                type="button"
+                onClick={signOut}
+                className="group flex w-full items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all text-blue-200/60 hover:bg-white/8 hover:text-white touch-manipulation"
+              >
+                <LogOut className="h-4 w-4 shrink-0 text-blue-200/50 group-hover:text-white transition-colors" />
+                Logout
+              </button>
+            </div>
+          )}
         </nav>
 
         {/* User footer */}
@@ -222,14 +238,6 @@ export function Sidebar() {
                   {user.role.replace(/_/g, " ")}
                 </p>
               </div>
-              <button
-                onClick={signOut}
-                aria-label="Sign out"
-                title="Sign out"
-                className="p-1.5 rounded-lg text-blue-200/50 hover:text-white hover:bg-white/10 transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-              </button>
             </div>
           </div>
         )}

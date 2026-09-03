@@ -2,7 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/contexts/auth-context";
 
@@ -15,6 +15,17 @@ const ReactQueryDevtools =
     : () => null;
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  // 2 Sep 2026: scrolling the page while a number input has focus must not
+  // change its value — blur the input the moment the wheel moves, app-wide.
+  useEffect(() => {
+    const onWheel = () => {
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement && el.type === "number") el.blur();
+    };
+    document.addEventListener("wheel", onWheel, { passive: true });
+    return () => document.removeEventListener("wheel", onWheel);
+  }, []);
+
   const [queryClient] = useState(
     () =>
       new QueryClient({

@@ -1177,6 +1177,36 @@ validated offline: 0 issues across 1,011 rows.
 (dated 1–2 Sep 2026), reported in the run output. Skipped rows consume no
 request numbers.
 
+## Follow-up (2 Sep 2026) — Five-change batch
+
+1. **Excel export**: Export button on every Accounts Workspace tab (incl.
+   Yet to be Released) and the merchandiser tabs — exports the CURRENT
+   filtered view via SheetJS (lazy-loaded; new `xlsx` dependency). Columns =
+   bank ledger + context (Request #, Request Date, Supplier, Proforma #,
+   Sunshine #, Customer, Currency, Deposit, Status, Payment Date). Note:
+   server-paginated tabs export the visible page (50 rows).
+2. **Payment date beside every paid amount** + request date: Live Exposure
+   tables (exposure endpoint now returns payment_date + request_date),
+   Accounts Processed tab, the merchandiser requests table, and the
+   All-Shipments snapshot (endpoint gained payment_date via PaymentDetails
+   join).
+3. **Number inputs**: spinner arrows hidden app-wide and wheel-scroll can
+   no longer change a focused number field (global blur-on-wheel).
+4. **Merchandiser form editing**: the OWNER edits the full form (supplier —
+   new in the update schema —, customer, vertical, invoice numbers,
+   currency, ETD, invoice total) while the request is pending AND Accounts
+   have not acted (no request-wide write, no tranche paid/TT'd/detailed) —
+   server-gated in DepositRequestService.update; invoice-number endpoint
+   guard now admits the merchandiser (ownership + gate enforced by the
+   service). New collapsible "Edit Request" card on the merchandiser detail
+   view, shown only while the gate is open. Deposit amount stays
+   tranche-derived. Super admin unchanged.
+5. **Sidebar**: Logout moved from the fixed footer to the END of the menu
+   (scrolls with it); the footer keeps avatar/name/role.
+
+289 tests green (edit-gate pair), tsc clean; no migration; deploy backend +
+frontend together (new exposure/shipments fields, update-schema change).
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,

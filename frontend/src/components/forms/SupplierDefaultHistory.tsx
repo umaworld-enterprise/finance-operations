@@ -63,6 +63,8 @@ function ExposureRows({
               r.request_number
             )}
           </TableCell>
+          {/* Request date on every exposure row (2 Sep 2026). */}
+          <TableCell className="text-xs whitespace-nowrap">{formatDate(r.request_date)}</TableCell>
           {/* Overdue files carry the Sunshine Invoice No. so the risk rows
               can be chased by invoice (19 Aug 2026). */}
           {overdue && (
@@ -72,6 +74,11 @@ function ExposureRows({
           )}
           <TableCell className="text-right tabular-nums text-sm">
             {formatCurrency(Number(r.deposit_amount), r.currency)}
+          </TableCell>
+          {/* Payment date beside every paid amount (2 Sep 2026) — processed
+              rows show when the money left; unpaid rows show a dash. */}
+          <TableCell className="text-xs whitespace-nowrap">
+            {r.payment_date ? formatDate(r.payment_date) : "—"}
           </TableCell>
           <TableCell><StatusBadge status={r.current_status} /></TableCell>
           <TableCell className="text-xs whitespace-nowrap">{formatDate(r.grace_etd)}</TableCell>
@@ -111,8 +118,10 @@ function ExposureSection({
           <TableHeader>
             <TableRow>
               <TableHead>Request #</TableHead>
+              <TableHead>Request Date</TableHead>
               {overdue && <TableHead>Sunshine Invoice #</TableHead>}
               <TableHead className="text-right">Deposit</TableHead>
+              <TableHead>Payment Date</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Grace ETD</TableHead>
               <TableHead>Overdue</TableHead>

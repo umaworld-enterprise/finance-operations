@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { amountPayable, formatCurrency, formatDate, requestDisplayNumber } from "@/lib/utils";
+import { latestPaymentDate } from "@/lib/exportExcel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,7 @@ export function RequestsTable({
             <TableHead className="hidden sm:table-cell text-right">Amount Payable</TableHead>
             <TableHead className="text-right">Deposit</TableHead>
             <TableHead>Status</TableHead>
+            <TableHead className="hidden md:table-cell">Payment Date</TableHead>
             <TableHead className="hidden lg:table-cell">Submitted</TableHead>
             <TableHead />
           </TableRow>
@@ -82,6 +84,10 @@ export function RequestsTable({
               </TableCell>
               <TableCell>
                 <StatusBadge status={req.current_status} />
+              </TableCell>
+              {/* Payment date beside every paid amount (2 Sep 2026). */}
+              <TableCell className="hidden md:table-cell text-muted-foreground text-xs whitespace-nowrap">
+                {latestPaymentDate(req) ? formatDate(latestPaymentDate(req)) : "—"}
               </TableCell>
               <TableCell className="hidden lg:table-cell text-muted-foreground text-xs">
                 {formatDate(req.created_at)}

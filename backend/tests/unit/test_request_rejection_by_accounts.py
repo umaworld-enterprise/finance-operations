@@ -310,3 +310,43 @@ async def test_release_reminders_countdown(db_session, engine, monkeypatch):
     for n in rows:
         assert n.url == f"/merchandiser/{request.id}"
         assert "Yet to be Released" in n.body
+
+
+# ── Merchandiser form editing (2 Sep 2026): pending + untouched only ─────────
+
+
+async def test_merchandiser_edits_form_while_pending_untouched(db_session):
+    """The owner edits form fields (invoice numbers included) while the
+    request is pending and Accounts have not acted."""
+    merch, _, request = await _setup(db_session)
+    svc = DepositRequestService(db_session)
+    updated = await svc.update(
+        request.id,
+        DepositRequestUpdate(
+            sunshine_invoice_number="SUN-EDIT-1",
+            total_supplier_invoice_amount=Decimal("12000.00"),
+            estimated_etd=date(2026, 10, 1),
+        ),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert updated.sunshine_invoice_number == "SUN-EDIT-1"
+    assert Decimal(str(updated.total_supplier_invoice_amount)) == Decimal("12000.00")
+
+
+async def test_merchandiser_form_edit_blocked_after_accounts_touch(db_session):
+    """Once Accounts act on any tranche (paid here), the form locks for the
+    merchandiser — super admin keeps the broader rights."""
+    from app.models.enums import TrancheStatus
+    from tests.factories import make_tranche
+
+    merch, _, request = await _setup(db_session)
+    t1 = await make_tranche(db_session, request, number=1, amount=Decimal("400.00"))
+    t1.status = TrancheStatus.PAID
+    await db_session.flush()
+    svc = DepositRequestService(db_session)
+    with pytest.raises(BusinessRuleError, match="no longer be edited"):
+        await svc.update(
+            request.id,
+            DepositRequestUpdate(sunshine_invoice_number="SUN-EDIT-2"),
+            merch.id, UserRole.MERCHANDISER,
+        )

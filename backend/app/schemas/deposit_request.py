@@ -58,6 +58,9 @@ class DepositRequestCreate(BaseModel):
 
 
 class DepositRequestUpdate(BaseModel):
+    # supplier_id editable since 2 Sep 2026 (merchandiser form editing —
+    # owner may fix a wrong supplier while the request is pending untouched).
+    supplier_id: UUID | None = None
     customer_id: UUID | None = None
     vertical_id: UUID | None = None
     supplier_invoice_number: str | None = None
