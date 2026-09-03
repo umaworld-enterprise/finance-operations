@@ -99,9 +99,10 @@ def test_actual_etd_overdue_accrues_while_unshipped():
     assert result.actual_etd_overdue_days == 40
 
 
-# ── Cost of fund — gated on grace, then retroactive from Est ETD, signed
-# (client rule confirmed 2026-07-10: 0 within grace; past grace counts from
-# Est ETD itself; early shipment keeps the negative notional gain)
+# ── Cost of fund — FINAL sheet formulas (2 Sep 2026, supersedes 10 Jul):
+# charge = paid AND TODAY > Grace ETD; days = (ship or today) − Est ETD,
+# SIGNED, frozen at ship date. Once today crosses grace, even a
+# shipped-within-grace file carries its (small or negative) T→Z figure.
 
 
 def test_cost_of_fund_shipped_after_grace():
@@ -125,16 +126,30 @@ def test_cost_of_fund_client_worked_example():
     assert result.cost_of_fund_amount == _cof("2000.00", "0.18", 30)
 
 
-def test_cost_of_fund_zero_within_grace():
-    # Shipped 4 days after ETD — inside the 10-day grace → no charge.
+def test_cost_of_fund_shipped_within_grace_charges_after_today_crosses_grace():
+    # Shipped 4 days after ETD — inside the 10-day grace — but TODAY has long
+    # crossed the Grace ETD (2025 dates): the final sheet rule charges the
+    # frozen T→Z figure, 4 days (2 Sep 2026 change; previously 0 forever).
     result = compute(_base_input(ship_date=date(2025, 6, 5)))
     assert result.cost_of_fund_applicable is True
-    assert result.cost_of_fund_amount == Decimal("0.00")
+    assert result.cost_of_fund_amount == _cof("10000.00", "0.18", 4)
 
 
-def test_cost_of_fund_zero_on_grace_boundary():
-    # Shipped exactly on the last grace day (ETD + 10 = Jun 11) → still 0.
+def test_cost_of_fund_on_grace_boundary_charges_ten_days():
+    # Shipped exactly on the last grace day (ETD + 10 = Jun 11); today is past
+    # the grace → the frozen 10-day figure is charged (2 Sep 2026 rule).
     result = compute(_base_input(ship_date=date(2025, 6, 11)))
+    assert result.cost_of_fund_amount == _cof("10000.00", "0.18", 10)
+
+
+def test_cost_of_fund_blank_until_today_crosses_grace_even_if_shipped():
+    # Shipped EARLY, but today has not crossed the Grace ETD yet → nothing is
+    # shown (the sheet's AF stays blank until TODAY > Y).
+    etd = date.today() + timedelta(days=5)
+    result = compute(_base_input(
+        estimated_etd=etd, ship_date=date.today() - timedelta(days=2),
+    ))
+    assert result.cost_of_fund_applicable is True
     assert result.cost_of_fund_amount == Decimal("0.00")
 
 

@@ -1207,6 +1207,30 @@ request numbers.
 289 tests green (edit-gate pair), tsc clean; no migration; deploy backend +
 frontend together (new exposure/shipments fields, update-schema change).
 
+## Follow-up (2 Sep 2026) — Cost of Fund aligned to the client's FINAL sheet formulas
+
+Verification first: contrary to the client-side note, the engine already
+anchored the day-count at ORIGINAL ETD ((ship or today) − Est ETD, signed,
+frozen at ship date) and already required payment — the grace-anchored
+metric is the separate defaulter column. The one REAL difference was the
+charge gate. Changed to match `AF = IF(AND(paid, TODAY() > Grace ETD),
+deposit × rate/365 × days)`:
+
+- Gate is now calendar-based: nothing until TODAY crosses Grace ETD; after
+  that the signed T→(ship|today) figure applies — including the small
+  charge for shipped-within-grace rows and the negative early-ship gain
+  (which now also waits for the grace crossing). This REMOVES the 10 Jul
+  zero-within-grace divergence; the golden fixture now matches the client
+  sheet exactly (27.70/13.85 rows restored).
+- Unshipped behaviour unchanged (gate identical there); unpaid rows still
+  never charge; day-count/freeze unchanged.
+- Note for ops: the sheet uses 12% — `cost_of_fund_rate` in system config
+  must be 0.12 for totals to match. Stored snapshots recompute via the
+  30-min job / admin Recalculate.
+
+290 tests green (2 golden rows updated to sheet values; 2 engine tests
+retargeted; new gate-timing test).
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
