@@ -38,14 +38,16 @@ settings = get_settings()
 # the tracker rows of 1–2 Sep 2026, exactly as entered (typos included:
 # "20026-27", "396" — they must match what is stored).
 REASSIGNMENTS: list[tuple[str, str, str]] = [
-    ("1156", "zy0011/0013/0015/0017", "tricia@sunshineltd.com"),
+    # Sunshine numbers below were updated IN THE SYSTEM after entry — the
+    # keys are the current stored values (2 Sep 2026 re-run).
+    ("1156/3387+3112+3455+3651+3609/2026-27", "zy0011/0013/0015/0017", "tricia@sunshineltd.com"),
     ("1895/3817/2026-27", "2026EX0196", "anil@sunshineltd.com"),
     ("1871/3794/20026-27", "EST-001761", "joey@sunshineltd.com"),
-    ("1893/5005/26-27", "AL/IO/SPD/ROC/2025/01", "shilpali@sunshineltd.com"),
+    ("1893/5005/2026-27", "AL/IO/SPD/ROC/2025/01", "shilpali@sunshineltd.com"),
     ("1872/3795/2026-27", "EST-001755", "joey@sunshineltd.com"),
     ("1873/396/2026-27", "EST-001756", "joey@sunshineltd.com"),
     ("1874/3797/2026-27", "EST-001757", "joey@sunshineltd.com"),
-    ("1907", "GCINV260825-1", "shilpali@sunshineltd.com"),
+    ("1907/6004/2026-27", "GCINV260825-1", "shilpali@sunshineltd.com"),
     ("938/3299/2026/27", "JP-SS-WM-2603BN", "yogesh.tulsiani@sunshineltd.com"),
     ("1882/3806/2026-27", "26FAWT1345", "joey@sunshineltd.com"),
     ("1609/3656/2026-27", "CMP/THT/GN-2603", "joey@sunshineltd.com"),
@@ -54,7 +56,7 @@ REASSIGNMENTS: list[tuple[str, str, str]] = [
     ("864/3263/2026-27", "FMSUNS260528TBR-1", "joey@sunshineltd.com"),
     ("865/3264/2026-27", "FMSUNS260528TBR-1", "joey@sunshineltd.com"),
     ("929/3265/2026-27", "FMSUNS260528TBR-1", "joey@sunshineltd.com"),
-    ("1731/3725/2026-27", "PI260903", "joey@sunshineltd.com"),
+    ("001/3725/2027-28", "PI260903", "joey@sunshineltd.com"),
     ("1898/3819/2026-27", "26YCA110", "joey@sunshineltd.com"),
     ("1899/3820/2026-27", "26YCA111", "joey@sunshineltd.com"),
     ("1900/3821/2026-27", "26YCA112", "joey@sunshineltd.com"),
