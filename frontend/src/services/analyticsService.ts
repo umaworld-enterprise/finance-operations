@@ -53,6 +53,8 @@ export interface ShipmentRow {
   current_status: string;
   /** Request creation date — drives the "Request date (new → old)" sort. */
   created_at: string | null;
+  /** Payment date beside every paid amount (2 Sep 2026). */
+  payment_date: string | null;
 }
 
 export const analyticsService = {

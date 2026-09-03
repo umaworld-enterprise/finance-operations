@@ -43,3 +43,17 @@
     -moz-osx-font-smoothing: grayscale;
   }
 }
+
+/* 2 Sep 2026: number inputs must not change value on mouse wheel (fields on
+   the merchandiser form were being nudged while scrolling the page), and the
+   spinner arrows are hidden for clean alignment. The wheel itself is blurred
+   away globally in Providers. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

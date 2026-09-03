@@ -148,6 +148,9 @@ class SupplierExposureRow(BaseModel):
     current_status: str
     grace_etd: date | None = None
     etd_grace_overdue_days: int | None = None
+    # 2 Sep 2026: payment date beside every paid amount; request date on all.
+    payment_date: date | None = None
+    request_date: date | None = None
 
 
 class SupplierExposureResponse(BaseModel):

@@ -785,6 +785,7 @@ class AnalyticsService:
         from datetime import date as _date
 
         from app.models.masters import Supplier
+        from app.models.payment import PaymentDetails as _Payment
 
         _EXCLUDED = (
             RequestStatus.CANCELLED_BY_MERCHANDISER,
@@ -802,8 +803,10 @@ class AnalyticsService:
                 DepositRequest.current_status,
                 DepositRequest.created_at,
                 Supplier.name.label("supplier_name"),
+                _Payment.payment_date,
             )
             .join(Supplier, Supplier.id == DepositRequest.supplier_id)
+            .outerjoin(_Payment, _Payment.deposit_request_id == DepositRequest.id)
             .where(
                 DepositRequest.is_deleted == False,  # noqa: E712
                 DepositRequest.current_status.notin_(_EXCLUDED),
@@ -835,6 +838,8 @@ class AnalyticsService:
                 # Request date — drives the "Request date (new → old)" sort
                 # on the Analytical Snapshot tables (19 Aug 2026).
                 "created_at": r.created_at.isoformat() if r.created_at else None,
+                # Payment date beside every paid amount (2 Sep 2026).
+                "payment_date": r.payment_date.isoformat() if r.payment_date else None,
             }
 
         out = [to_row(r) for r in rows]

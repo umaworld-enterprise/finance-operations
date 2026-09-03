@@ -288,12 +288,16 @@ async def update_request(
     # proforma number are editable). Setting them at creation via the forms
     # is unaffected. Every change is audited per-field with its old and new
     # value by the service layer; duplicate validation applies regardless.
-    _INVOICE_EDIT_ROLES = {UserRole.SUPER_ADMIN, UserRole.ACCOUNTS_TEAM}
+    # Merchandiser added 2 Sep 2026: the owner edits the full form (invoice
+    # numbers included) while pending and untouched — the service enforces
+    # ownership and the accounts-untouched gate.
+    _INVOICE_EDIT_ROLES = {UserRole.SUPER_ADMIN, UserRole.ACCOUNTS_TEAM, UserRole.MERCHANDISER}
     if current_user.role not in _INVOICE_EDIT_ROLES and (
         data.sunshine_invoice_number is not None or data.supplier_invoice_number is not None
     ):
         raise AuthorizationError(
-            "Invoice numbers can only be updated by a Super Admin or the Accounts Team."
+            "Invoice numbers can only be updated by a Super Admin, the Accounts "
+            "Team, or the request's merchandiser."
         )
     svc = DepositRequestService(db)
     req = await svc.update(

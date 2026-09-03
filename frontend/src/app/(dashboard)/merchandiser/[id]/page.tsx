@@ -15,6 +15,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { TrancheList } from "@/components/tranches/TrancheList";
 import { StatusHistoryCard } from "@/components/tranches/StatusHistoryCard";
 import { SupplierDefaultHistory } from "@/components/forms/SupplierDefaultHistory";
+import { EditRequestForm } from "@/components/forms/EditRequestForm";
 import { RequestAuditTrail } from "@/components/tranches/RequestAuditTrail";
 import { RequestAdjustments } from "@/components/tranches/RequestAdjustments";
 import { useRequest, useRequestAction, useFieldVisibility, useUpdateRemarks, usePayment, useTranchesModifiable, useUpdateRequest } from "@/hooks/useRequests";
@@ -273,6 +274,19 @@ export default function MerchandiserRequestDetail() {
 
         {/* Advance Payment Tranches — unpaid tranches stay editable by the
             request owner; paid tranches are locked. */}
+        {/* Merchandiser form editing (2 Sep 2026): owner edits the form
+            fields while pending and untouched by Accounts — same gate the
+            backend enforces. */}
+        {(modifiable?.modifiable ?? false) &&
+          !(req.tranches ?? []).some(
+            (t) =>
+              t.status === "paid" ||
+              !!t.tt_copy_url ||
+              !!t.payment_date ||
+              !!t.bank ||
+              !!t.payment_reference_number,
+          ) && <EditRequestForm request={req} />}
+
         <Card>
           <CardContent className="p-5 md:p-6">
             <h2 className="text-sm font-semibold text-foreground mb-1">Advance Payment Tranches</h2>

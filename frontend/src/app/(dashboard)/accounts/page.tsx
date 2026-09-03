@@ -28,6 +28,8 @@ import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
 import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, cn, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
 import { differenceInDays } from "date-fns";
 import { needsRelease } from "@/components/tranches/TrancheList";
+import { ExportButton } from "@/components/ui/ExportButton";
+import { exportPendingReleaseToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
 import { Clock, CheckCircle, AlertTriangle, CalendarClock, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
 import Link from "next/link";
 import type { DepositRequest, PendingReleaseRow } from "@/types";
@@ -263,6 +265,7 @@ function StatusTable({
   subtitle,
   emptyTitle,
   showPayable = false,
+  showPaymentDate = false,
 }: {
   rows: DepositRequest[];
   title: string;
@@ -271,6 +274,8 @@ function StatusTable({
   /** Show the Amount Payable column — meaningful for live requests (On
    * Hold), noise for closed ones (Rejected/Cancelled). */
   showPayable?: boolean;
+  /** Payment Date column (2 Sep 2026) — for the Processed tab. */
+  showPaymentDate?: boolean;
 }) {
   return (
     <Card className="overflow-hidden">
@@ -331,6 +336,7 @@ function StatusTable({
               <TableHead>Customer</TableHead>
               {showPayable && <TableHead className="text-right">Amount Payable</TableHead>}
               <TableHead className="text-right">Deposit</TableHead>
+              {showPaymentDate && <TableHead>Payment Date</TableHead>}
               <TableHead>Status</TableHead>
               <TableHead>By</TableHead>
               <TableHead className="hidden lg:table-cell">Submitted</TableHead>
@@ -339,7 +345,7 @@ function StatusTable({
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <tr><td colSpan={showPayable ? 10 : 9}><EmptyState icon={AlertTriangle} title={emptyTitle} /></td></tr>
+              <tr><td colSpan={(showPayable ? 10 : 9) + (showPaymentDate ? 1 : 0)}><EmptyState icon={AlertTriangle} title={emptyTitle} /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id} className={cn(frozenForAccounts(req) && "opacity-50 pointer-events-none select-none")}>
                 <TableCell>
@@ -354,6 +360,11 @@ function StatusTable({
                   <TableCell className="text-right font-semibold text-foreground">{formatCurrency(amountPayable(req), req.currency)}</TableCell>
                 )}
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
+                {showPaymentDate && (
+                  <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                    {latestPaymentDate(req) ? formatDate(latestPaymentDate(req)) : "—"}
+                  </TableCell>
+                )}
                 <TableCell><StatusBadge status={req.current_status} showFull /></TableCell>
                 <TableCell className="text-muted-foreground text-xs">{req.last_status_change_by ?? "—"}</TableCell>
                 <TableCell className="hidden lg:table-cell text-muted-foreground text-xs">{formatDate(req.created_at)}</TableCell>
@@ -759,12 +770,24 @@ export default function AccountsDashboard() {
           </TabsList>
 
           <TabsContent value="yet-to-release">
+            <div className="flex justify-end mb-2">
+              <ExportButton
+                count={pendingRelease.length}
+                onExport={() => exportPendingReleaseToExcel(pendingRelease, "yet-to-be-released.xlsx")}
+              />
+            </div>
             <YetToReleaseTable rows={pendingRelease} />
           </TabsContent>
 
           <TabsContent value="pending">
             {/* Single pending table (11 Aug — the > 10 days split was
                 removed); the Tentative Payment column carries the date. */}
+            <div className="flex justify-end mb-2">
+              <ExportButton
+                count={filteredQueue.length}
+                onExport={() => exportRequestsToExcel(filteredQueue, "pending-payments.xlsx")}
+              />
+            </div>
             <PendingTable
               rows={filteredQueue}
               loading={queueLoading}
@@ -774,6 +797,12 @@ export default function AccountsDashboard() {
           </TabsContent>
 
           <TabsContent value="processed">
+            <div className="flex justify-end mb-2">
+              <ExportButton
+                count={processedItems.length}
+                onExport={() => exportRequestsToExcel(processedItems, "processed-requests.xlsx")}
+              />
+            </div>
             {processedLoading ? (
               <Card className="overflow-hidden">
                 <Table>
@@ -794,6 +823,7 @@ export default function AccountsDashboard() {
                   title="Processed"
                   subtitle="Payment-completed requests"
                   emptyTitle="No processed requests"
+                  showPaymentDate
                 />
                 <Pagination
                   page={processedPage}
@@ -807,6 +837,12 @@ export default function AccountsDashboard() {
           </TabsContent>
 
           <TabsContent value="hold">
+            <div className="flex justify-end mb-2">
+              <ExportButton
+                count={holdItems.length}
+                onExport={() => exportRequestsToExcel(holdItems, "on-hold-requests.xlsx")}
+              />
+            </div>
             {holdLoading ? (
               <Card className="overflow-hidden">
                 <Table>
@@ -841,6 +877,12 @@ export default function AccountsDashboard() {
           </TabsContent>
 
           <TabsContent value="rejected">
+            <div className="flex justify-end mb-2">
+              <ExportButton
+                count={rejectedItems.length}
+                onExport={() => exportRequestsToExcel(rejectedItems, "rejected-requests.xlsx")}
+              />
+            </div>
             {rejectedLoading ? (
               <Card className="overflow-hidden">
                 <Table>
@@ -874,6 +916,12 @@ export default function AccountsDashboard() {
           </TabsContent>
 
           <TabsContent value="cancelled">
+            <div className="flex justify-end mb-2">
+              <ExportButton
+                count={cancelledItems.length}
+                onExport={() => exportRequestsToExcel(cancelledItems, "cancelled-requests.xlsx")}
+              />
+            </div>
             {cancelledLoading ? (
               <Card className="overflow-hidden">
                 <Table>
@@ -907,6 +955,12 @@ export default function AccountsDashboard() {
           </TabsContent>
 
           <TabsContent value="all">
+            <div className="flex justify-end mb-2">
+              <ExportButton
+                count={allItems.length}
+                onExport={() => exportRequestsToExcel(allItems, "all-requests.xlsx")}
+              />
+            </div>
             {allLoading ? (
               <Card className="overflow-hidden">
                 <Table>

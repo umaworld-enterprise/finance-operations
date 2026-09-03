@@ -139,7 +139,7 @@ async def get_supplier_exposure(supplier_id: UUID, db: DB, _: User) -> SupplierE
         RequestStatus.REJECTED_BY_ACCOUNTS,
     )
     stmt = (
-        select(DepositRequest, AnalyticsSnapshot)
+        select(DepositRequest, AnalyticsSnapshot, PaymentDetails.payment_date)
         .outerjoin(
             AnalyticsSnapshot,
             AnalyticsSnapshot.deposit_request_id == DepositRequest.id,
@@ -164,7 +164,7 @@ async def get_supplier_exposure(supplier_id: UUID, db: DB, _: User) -> SupplierE
     passed: list[SupplierExposureRow] = []
     pending: list[SupplierExposureRow] = []
     totals: dict[str, Decimal] = {}
-    for req, snap in rows:
+    for req, snap, payment_date in rows:
         row = SupplierExposureRow(
             request_id=req.id,
             request_number=req.request_number,
@@ -174,6 +174,10 @@ async def get_supplier_exposure(supplier_id: UUID, db: DB, _: User) -> SupplierE
             current_status=req.current_status.value,
             grace_etd=snap.grace_etd if snap else None,
             etd_grace_overdue_days=snap.etd_grace_overdue_days if snap else None,
+            # 2 Sep 2026: paid amounts always carry their payment date, and
+            # every exposure row shows when the request was raised.
+            payment_date=payment_date,
+            request_date=req.created_at.date() if req.created_at else None,
         )
         if snap and snap.grace_etd and snap.grace_etd < today:
             passed.append(row)

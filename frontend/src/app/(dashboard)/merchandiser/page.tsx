@@ -11,6 +11,8 @@ import { Pagination } from "@/components/ui/Pagination";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { RequestsTable } from "@/components/tables/RequestsTable";
+import { ExportButton } from "@/components/ui/ExportButton";
+import { exportRequestsToExcel } from "@/lib/exportExcel";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
 import { useRequestsPaginated, useMyActivity, usePendingRelease } from "@/hooks/useRequests";
@@ -225,7 +227,7 @@ export default function MerchandiserDashboard() {
           </Button>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
           <SearchInput
             value={search}
             onChange={changeSearch}
@@ -233,6 +235,10 @@ export default function MerchandiserDashboard() {
             className="sm:max-w-md flex-1"
           />
           <SortSelect value={sort} onChange={changeSort} className="sm:w-52" />
+          <ExportButton
+            count={requests.length}
+            onExport={() => exportRequestsToExcel(requests, `my-requests-${activeTab}.xlsx`)}
+          />
         </div>
 
         <Tabs value={activeTab} onValueChange={changeTab} id="status-tabs" className="scroll-mt-4">

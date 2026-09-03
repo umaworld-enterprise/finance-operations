@@ -323,6 +323,45 @@ class DepositRequestService:
                 "This request can no longer be edited "
                 f"(current status: {request.current_status.value})."
             )
+        # Merchandiser form editing (2 Sep 2026): the OWNER may edit the form
+        # fields while the request is still pending (HoM approval or the
+        # payment queue) AND Accounts have not acted on it in any way — no
+        # request-wide write and no tranche paid / TT'd / detailed. Super
+        # admin keeps the pre-existing broader rights.
+        if role == UserRole.MERCHANDISER:
+            from app.models.enums import TrancheStatus
+            from app.services.tranche_service import (
+                _MERCHANDISER_EDITABLE_STATUSES,
+                TrancheService,
+            )
+
+            if request.current_status not in _MERCHANDISER_EDITABLE_STATUSES:
+                raise BusinessRuleError(
+                    "The form can only be edited while the request is still "
+                    f"pending (current status: {request.current_status.value})."
+                )
+            svc_t = TrancheService(self._session)
+            reason = await svc_t.accounts_touched_reason(request_id)
+            if reason is None:
+                live = [
+                    t
+                    for t in await svc_t.list_for_request(request_id)
+                    if t.status != TrancheStatus.REJECTED
+                ]
+                if any(
+                    t.status == TrancheStatus.PAID
+                    or t.tt_copy_url
+                    or t.payment_date
+                    or t.bank
+                    or t.payment_reference_number
+                    or t.accounts_remarks
+                    for t in live
+                ):
+                    reason = "the Accounts team has started processing a tranche"
+            if reason:
+                raise BusinessRuleError(
+                    f"The form can no longer be edited — {reason}."
+                )
 
         changes = data.model_dump(exclude_unset=True)
 

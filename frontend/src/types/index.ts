@@ -93,6 +93,9 @@ export interface SupplierExposureRow {
   current_status: RequestStatus;
   grace_etd: string | null;
   etd_grace_overdue_days: number | null;
+  /** Payment date beside every paid amount + request date (2 Sep 2026). */
+  payment_date: string | null;
+  request_date: string | null;
 }
 
 export interface SupplierExposure {
