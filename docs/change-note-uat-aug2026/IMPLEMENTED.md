@@ -1271,6 +1271,24 @@ TODAY()-based recompute. Fixed to match:
 290 tests green, tsc clean; no migration; deploy backend + frontend
 together.
 
+## Validation (3 Sep 2026) — Sunshine Deposits Analysis V2.xlsx replay
+
+Replayed the app engine over ALL 991 non-cancelled rows of the client's
+live workbook (sheet TODAY = 2026-09-03), comparing every cached computed
+column. Result: **exact match, no code changes needed** —
+- Actual-ETD-Overdue days (AE): 991/991 identical.
+- Cost of Fund (AF): 991/991 identical (±2 cents rounding).
+- Row STATUS (Delayed/Graced/Shipped/Yet-to-be-Shipped/blank): 991/991.
+- Delay Range buckets (AI): 991/991.
+- Overall Range (AJ): the sheet leaves it blank wherever CoF is blank;
+  every such row carries zero CoF, so bucket notional sums are identical —
+  functional match, no change.
+Dashboard SUMIFS/COUNTIF formulas confirmed = the 2 Sep alignment
+(unfiltered notional, paid-rows Total Active, cases-%, AJ-keyed notional,
+excl-graced denominator). For the DATA to match in the app:
+`cost_of_fund_rate` must be 0.12 in system config, and snapshots must be
+recalculated after deploying the 2 Sep CoF gate change.
+
 Deploy checklist:
 1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
 2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
@@ -1278,3 +1296,30 @@ Deploy checklist:
    `/file-remarks/{id}/approve|reject`, `/reports/bank-ledger`; removed:
    `/file-remarks/{id}/resolve`).
 3. Final state: 257 backend unit tests green, `tsc` clean.
+
+## Follow-up (4 Sep 2026) — Excel export: Bank Ledger option
+
+Executive request: the payment-queue "Export Excel" button now opens a
+2-option menu — **Export in Bank Ledger** and **Export** (unchanged
+standard format).
+
+Bank Ledger format (`exportBankLedgerToExcel`, `lib/exportExcel.ts`) —
+columns exactly as the executives' ledger:
+`Date | Supplier | Voucher No. | File Nos. | Customer | Curr | EURO/CNY |
+Rate | Debit | Credit | BALANCE`
+- **One row per tranche** (rejected tranches excluded), sorted
+  chronologically (oldest first).
+- Paid tranche: Date = its payment date, EURO/CNY = amount, Debit = amount.
+- Unpaid tranche: Date = request date, EURO/CNY = amount, Debit blank
+  (an upcoming entry).
+- Voucher No., Rate, Credit, BALANCE export **blank** — no such data in
+  the system; maintained manually in Excel (confirmed with client).
+- Exports the current filtered view, like the standard export.
+
+Scope: all six request tabs of the Accounts Workspace (Pending, Processed,
+On Hold, Rejected, Cancelled, All). The Yet-to-be-Released tab and the
+merchandiser export keep the single-option button (ledger format doesn't
+apply). `ExportButton` gained an optional `onExportLedger` prop — a small
+self-contained dropdown (no new dependency), closes on outside click.
+
+tsc clean; frontend-only change.

@@ -47,6 +47,44 @@ export async function exportRequestsToExcel(
   );
 }
 
+// Bank-ledger export (4 Sep 2026, executive request): the exact ledger
+// columns the executives keep in Excel. One row per tranche — a paid tranche
+// is a ledger entry dated by its payment date with the amount in Debit; an
+// unpaid tranche is an upcoming entry dated by the request date with Debit
+// left empty. Voucher No., Rate, Credit and BALANCE are maintained manually
+// in Excel (no such data in the system) and are exported blank.
+export async function exportBankLedgerToExcel(
+  rows: DepositRequest[], filename: string,
+): Promise<void> {
+  const entries = rows.flatMap((r) =>
+    (r.tranches ?? [])
+      .filter((t) => t.status !== "rejected")
+      .map((t) => {
+        const paid = t.status === "paid";
+        const date = paid && t.payment_date ? t.payment_date : r.created_at;
+        return {
+          sortKey: date ?? "",
+          row: {
+            "Date": date ? formatDate(date) : "",
+            "Supplier": r.supplier?.name ?? "",
+            "Voucher No.": "",
+            "File Nos.": r.sunshine_invoice_number ?? "",
+            "Customer": r.customer?.name ?? "",
+            "Curr": r.currency ?? "",
+            "EURO/CNY": Number(t.amount),
+            "Rate": "",
+            "Debit": paid ? Number(t.amount) : "",
+            "Credit": "",
+            "BALANCE": "",
+          },
+        };
+      }),
+  );
+  // A ledger reads chronologically — oldest entry first.
+  entries.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+  await writeSheet(entries.map((e) => e.row), filename, "Bank Ledger");
+}
+
 export async function exportPendingReleaseToExcel(
   rows: PendingReleaseRow[], filename: string,
 ): Promise<void> {

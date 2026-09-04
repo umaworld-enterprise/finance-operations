@@ -29,7 +29,7 @@ import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, cn, re
 import { differenceInDays } from "date-fns";
 import { needsRelease } from "@/components/tranches/TrancheList";
 import { ExportButton } from "@/components/ui/ExportButton";
-import { exportPendingReleaseToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
+import { exportBankLedgerToExcel, exportPendingReleaseToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
 import { Clock, CheckCircle, AlertTriangle, CalendarClock, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
 import Link from "next/link";
 import type { DepositRequest, PendingReleaseRow } from "@/types";
@@ -786,6 +786,7 @@ export default function AccountsDashboard() {
               <ExportButton
                 count={filteredQueue.length}
                 onExport={() => exportRequestsToExcel(filteredQueue, "pending-payments.xlsx")}
+                onExportLedger={() => exportBankLedgerToExcel(filteredQueue, "pending-payments-bank-ledger.xlsx")}
               />
             </div>
             <PendingTable
@@ -801,6 +802,7 @@ export default function AccountsDashboard() {
               <ExportButton
                 count={processedItems.length}
                 onExport={() => exportRequestsToExcel(processedItems, "processed-requests.xlsx")}
+                onExportLedger={() => exportBankLedgerToExcel(processedItems, "processed-requests-bank-ledger.xlsx")}
               />
             </div>
             {processedLoading ? (
@@ -841,6 +843,7 @@ export default function AccountsDashboard() {
               <ExportButton
                 count={holdItems.length}
                 onExport={() => exportRequestsToExcel(holdItems, "on-hold-requests.xlsx")}
+                onExportLedger={() => exportBankLedgerToExcel(holdItems, "on-hold-requests-bank-ledger.xlsx")}
               />
             </div>
             {holdLoading ? (
@@ -881,6 +884,7 @@ export default function AccountsDashboard() {
               <ExportButton
                 count={rejectedItems.length}
                 onExport={() => exportRequestsToExcel(rejectedItems, "rejected-requests.xlsx")}
+                onExportLedger={() => exportBankLedgerToExcel(rejectedItems, "rejected-requests-bank-ledger.xlsx")}
               />
             </div>
             {rejectedLoading ? (
@@ -920,6 +924,7 @@ export default function AccountsDashboard() {
               <ExportButton
                 count={cancelledItems.length}
                 onExport={() => exportRequestsToExcel(cancelledItems, "cancelled-requests.xlsx")}
+                onExportLedger={() => exportBankLedgerToExcel(cancelledItems, "cancelled-requests-bank-ledger.xlsx")}
               />
             </div>
             {cancelledLoading ? (
@@ -959,6 +964,7 @@ export default function AccountsDashboard() {
               <ExportButton
                 count={allItems.length}
                 onExport={() => exportRequestsToExcel(allItems, "all-requests.xlsx")}
+                onExportLedger={() => exportBankLedgerToExcel(allItems, "all-requests-bank-ledger.xlsx")}
               />
             </div>
             {allLoading ? (
