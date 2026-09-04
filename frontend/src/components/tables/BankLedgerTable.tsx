@@ -44,15 +44,11 @@ export function BankLedgerTable({
   const rows = entries.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   // Total value (4 Sep 2026, executive request) — per currency, over ALL
-  // entries (not just the visible page): the Currency amounts and the Debit
-  // (paid) portion. Currencies cannot be summed together.
-  const totals = new Map<string, { amount: number; debit: number }>();
+  // entries (not just the visible page). Currencies cannot be summed together.
+  const totals = new Map<string, number>();
   for (const e of entries) {
     const key = e.curr || "—";
-    const row = totals.get(key) ?? { amount: 0, debit: 0 };
-    row.amount += e.amount;
-    row.debit += e.debit ?? 0;
-    totals.set(key, row);
+    totals.set(key, (totals.get(key) ?? 0) + e.amount);
   }
   const totalRows = [...totals.entries()].sort(([a], [b]) => a.localeCompare(b));
 
@@ -61,9 +57,9 @@ export function BankLedgerTable({
       <div className="px-5 py-4 border-b border-border">
         <h3 className="font-semibold text-foreground text-sm">Pending Payments — Bank Ledger</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          One row per tranche, oldest first — paid tranches carry their payment date and Debit;
-          unpaid tranches show the request date. Voucher No., Rate, Credit and BALANCE are
-          maintained in Excel and stay empty here.
+          One row per tranche, oldest first — the tranche amount sits in Debit; paid tranches
+          carry their payment date, unpaid ones the request date. Voucher No., Rate, Credit and
+          BALANCE are maintained in Excel and stay empty here.
         </p>
       </div>
       {!loading && entries.length === 0 ? (
@@ -86,8 +82,7 @@ export function BankLedgerTable({
                   <TableHead className="text-background whitespace-nowrap">Voucher No.</TableHead>
                   <TableHead className="text-background whitespace-nowrap">File Nos.</TableHead>
                   <TableHead className="text-background">Customer</TableHead>
-                  <TableHead className="text-background">Curr</TableHead>
-                  <TableHead className="text-background text-right whitespace-nowrap">Currency</TableHead>
+                  <TableHead className="text-background">Currency</TableHead>
                   <TableHead className="text-background text-right">Rate</TableHead>
                   <TableHead className="text-background text-right">Debit</TableHead>
                   <TableHead className="text-background text-right">Credit</TableHead>
@@ -96,7 +91,7 @@ export function BankLedgerTable({
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableSkeleton rows={6} cols={11} />
+                  <TableSkeleton rows={6} cols={10} />
                 ) : (
                   rows.map((e, i) => (
                     <TableRow key={i}>
@@ -108,9 +103,8 @@ export function BankLedgerTable({
                       <TableCell className="whitespace-nowrap text-sm">{e.file_nos}</TableCell>
                       <TableCell className="text-sm">{e.customer}</TableCell>
                       <TableCell className="text-sm">{e.curr}</TableCell>
-                      <TableCell className="text-right text-sm tabular-nums">{num(e.amount)}</TableCell>
                       <TableCell />
-                      <TableCell className="text-right text-sm tabular-nums">{num(e.debit)}</TableCell>
+                      <TableCell className="text-right text-sm tabular-nums">{num(e.amount)}</TableCell>
                       <TableCell />
                       <TableCell />
                     </TableRow>
@@ -119,17 +113,14 @@ export function BankLedgerTable({
                 {/* Total value per currency — over the whole ledger, not
                     just this page. */}
                 {!loading &&
-                  totalRows.map(([curr, sums]) => (
+                  totalRows.map(([curr, sum]) => (
                     <TableRow key={`total-${curr}`} className="bg-muted/60 hover:bg-muted/60 font-semibold">
                       <TableCell className="text-sm" colSpan={5}>
                         Total value{totalRows.length > 1 || curr !== "—" ? ` (${curr})` : ""}
                       </TableCell>
                       <TableCell className="text-sm">{curr}</TableCell>
-                      <TableCell className="text-right text-sm tabular-nums">{num(sums.amount)}</TableCell>
                       <TableCell />
-                      <TableCell className="text-right text-sm tabular-nums">
-                        {sums.debit > 0 ? num(sums.debit) : ""}
-                      </TableCell>
+                      <TableCell className="text-right text-sm tabular-nums">{num(sum)}</TableCell>
                       <TableCell />
                       <TableCell />
                     </TableRow>

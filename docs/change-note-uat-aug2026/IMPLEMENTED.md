@@ -1400,3 +1400,65 @@ apply guards — not-approved/second-apply/wrong-category/role, schema
 proposed-amount requirement, secondary-currency pair validation, bare bank
 name accepted); tsc clean. Deploy: `alembic upgrade head` (0033) + backend
 and frontend together.
+
+### Amendment (4 Sep 2026): Bank Ledger column mapping corrected — the
+"Currency" column carries the currency CODE, "Debit" carries the tranche
+amount, and the redundant "Curr" column is removed. Final columns:
+Date | Supplier | Voucher No. | File Nos. | Customer | Currency | Rate |
+Debit | Credit | BALANCE. Applied to the on-screen tab (totals now sum
+under Debit, per currency) AND the Excel export.
+
+## Fixes + validation (4 Sep 2026) — Analytics: empty By-Merchandiser/Vertical
+## tabs, per-currency CoF columns, Sunshine Deposits Analysis V2 (1).xlsx replay
+
+**Root cause of the empty tabs (real bug, fixed):** the 2 Sep alignment's
+separate notional query in `get_by_merchandiser` / `get_by_vertical` selected
+`User.full_name` (resp. `Vertical.name`) first without `select_from`, so
+SQLAlchemy emitted `FROM users JOIN … JOIN users …, deposit_requests` —
+Postgres rejects the duplicate table, the endpoint 500'd, and the frontend
+swallowed the error into the "No data yet" empty state. `get_by_customer`
+already had `select_from(DepositRequest)`, which is why only those two tabs
+died. Fixed with explicit `select_from`; regression tests added
+(`test_analytics_grouped_tables.py`, 4 tests); the three tabs now render an
+explicit error row (`ErrorTable`) instead of masquerading as empty.
+
+**Cost of Fund in the grouped tables:** By Merchandiser / By Vertical /
+By Customer now carry per-currency "(Notional Gain)/Loss" = Cost of Fund
+columns (USD / CNY / EUR), summed over ALL live rows of the group — matching
+the new sheet's U:W / AG:AI / AU:AW columns. `notional_gain` (USD) kept for
+API compatibility. Headers read "CoF / Notional (USD|CNY|EUR)".
+
+**Validation replay (sheet TODAY = 2026-09-04, 991 non-cancelled rows):**
+- Actual-ETD-Overdue days (AE): 991/991 exact.
+- Cost of Fund (AF): 991/991 exact (±2¢).
+- STATUS: matches semantically (sheet adds decorations "⚠ Delayed by N days",
+  "⏰ Graced ETD — N days"); only nuance: 2 rows shipped-but-never-paid show
+  blank in the sheet (its STATUS is paid-first) vs "Shipped" in the app.
+- Delay ranges: sheet moved to the 15-day scheme (Graced ETD / G-15 /
+  15-30 … 135-150 / >150 Days) — the app's 2 Sep buckets ALREADY use exactly
+  this scheme; 991/991 match.
+- Headline KPIs recomputed from raw rows with app rules: Delayed 109,
+  Graced 58, overdue USD 4,721,737.81 / RMB 413,427.58 / EUR 4,004.00 —
+  all EXACT vs the sheet dashboard.
+
+**Sheet-side quirks that make small app-vs-sheet diffs (report, not bugs):**
+1. Notional totals: sheet SUMIFS has NO cancellation filter — 20 cancelled
+   rows contribute ≈183.87 USD (sheet 207,882.66 vs app-rule 207,698.79).
+   The app excludes cancelled/rejected everywhere.
+2. Bucket "% of Delayed Cases" divides by SUM(B23:B32), which misses the
+   ">150 Days" row added later (denominator 103 vs 109) — app divides by all
+   delayed buckets.
+3. Customer "ETD Pending" counts AH = "⏳ ETD Pending", a label AH never
+   produces (it says "Yet to be Shipped") — the sheet column is stuck at 0;
+   the app computes the real pending count.
+4. Several dashboard formulas stop at raw-data row 1003 while data now runs
+   past row 1014 — the sheet under-counts its own newest rows.
+5. Sheet "TOTAL SHIPPED" = 621 vs app 622: the paid-first STATUS drops
+   shipped rows that carry no payment date.
+
+**For the DATA to match in the app:** deploy this batch (backend+frontend),
+`cost_of_fund_rate` = 0.12 in system config, run Recalculate after deploy,
+and remember the app's row set = imported tracker (985 rows ≤31 Aug cutoff)
+plus PWA-entered rows — the sheet has 1011 rows.
+
+299 backend tests green; tsc clean; no migration in this batch.
