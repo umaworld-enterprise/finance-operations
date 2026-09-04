@@ -76,7 +76,11 @@ _CANCELLED = (
 
 
 def norm_key(value) -> str:
-    return " ".join(str(value or "").split()).lower()
+    # Numeric sunshine cells ("3059" typed as a number in the sheet) come out
+    # of openpyxl as floats — "3059.0" would never match the DB's text "3059".
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return " ".join(str(value if value is not None else "").split()).lower()
 
 
 def as_date(v) -> dt.date | None:
@@ -99,7 +103,10 @@ def load_sheet(path: Path) -> list[dict]:
         rows.append(
             {
                 "request_date": as_date(r[1]) or as_date(r[0]),
-                "sunshine": str(r[8] or "").strip(),
+                "sunshine": (
+                    str(int(r[8])) if isinstance(r[8], float) and r[8].is_integer()
+                    else str(r[8] or "").strip()
+                ),
                 "supplier": str(r[6] or "").strip(),
                 "payment_date": as_date(r[4]),
                 "ship_date": as_date(r[25]),
