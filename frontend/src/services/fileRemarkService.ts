@@ -10,6 +10,8 @@ export interface CreateFileRemarkPayload {
   file_number?: string;
   new_file_number?: string;
   split_targets?: SplitTarget[];
+  /** Invoice Value Change (4 Sep 2026): the merchandiser's proposed amount. */
+  proposed_amount?: number;
   remark?: string;
 }
 
@@ -54,6 +56,15 @@ const fileRemarkService = {
     const action = decision === "approved" ? "approve" : "reject";
     const { data } = await api.post<FileRemark>(`/file-remarks/${id}/${action}`, {
       response_note: responseNote || null,
+    });
+    return data;
+  },
+
+  // Invoice Value Change (4 Sep 2026): Accounts apply the final revised
+  // amount on an APPROVED remark — the separate step after approval.
+  applyRevisedAmount: async (id: string, revisedAmount: number): Promise<FileRemark> => {
+    const { data } = await api.post<FileRemark>(`/file-remarks/${id}/revised-amount`, {
+      revised_amount: revisedAmount,
     });
     return data;
   },

@@ -205,6 +205,10 @@ export interface PaymentTranche {
   bank: string | null;
   payment_reference_number: string | null;
   accounts_remarks: string | null;
+  /** Optional secondary currency + amount (4 Sep 2026) — Accounts-entered
+   * alongside the payment details; informational only. */
+  secondary_currency: string | null;
+  secondary_amount: number | null;
   /** Set when Accounts rejected the tranche (Aug 2026) — the tranche stays
    * visible as a dead record and its amount stops counting. */
   rejection_reason: string | null;
@@ -248,7 +252,13 @@ export interface InvoiceAdjustment {
 // File Remarks module (CIO batch 2, Aug 2026; reworked 4 Aug) — tracked
 // merchandiser → Accounts communication on a payment-completed file;
 // bypasses Adjust Invoices for now.
-export type FileRemarkCategory = "invoice_split" | "invoice_amount_change";
+// "invoice_amount_change" is displayed as "File Change" (4 Sep 2026 rename);
+// "invoice_value_change" (4 Sep 2026) revises a file's AMOUNT — proposed by
+// the merchandiser, applied by Accounts after approval.
+export type FileRemarkCategory =
+  | "invoice_split"
+  | "invoice_amount_change"
+  | "invoice_value_change";
 // "resolved" is legacy (pre-decision rows); new decisions are
 // approved/rejected (UAT Aug 2026, item 14).
 export type FileRemarkStatus = "open" | "approved" | "rejected" | "resolved";
@@ -266,6 +276,9 @@ export interface FileRemark {
   old_amount: number | null;
   new_file_number: string | null;
   new_amount: number | null;
+  /** Invoice Value Change: the merchandiser's proposed figure — the final
+   * revised amount lands in new_amount when Accounts apply it. */
+  proposed_amount: number | null;
   split_targets: SplitTarget[] | null;
   remark: string | null;
   status: FileRemarkStatus;

@@ -58,6 +58,9 @@ export interface PaymentDraft {
   bank: string;
   payment_reference_number: string;
   accounts_remarks: string;
+  // Optional secondary currency + amount (4 Sep 2026) — informational only.
+  secondary_currency: string;
+  secondary_amount: string;
 }
 
 export function draftFromTranche(t: PaymentTranche): PaymentDraft {
@@ -66,26 +69,28 @@ export function draftFromTranche(t: PaymentTranche): PaymentDraft {
     bank: t.bank ?? "",
     payment_reference_number: t.payment_reference_number ?? "",
     accounts_remarks: t.accounts_remarks ?? "",
+    secondary_currency: t.secondary_currency ?? "",
+    secondary_amount: t.secondary_amount != null ? String(t.secondary_amount) : "",
   };
 }
+
+// Same list as the request forms — secondary currency options (4 Sep 2026).
+const SECONDARY_CURRENCIES = ["USD", "EUR", "GBP", "AED", "INR", "CNY", "JPY", "SGD", "OTHER"];
 
 // Accounts: per-tranche payment details entry (payment date + bank required
 // before Mark Paid; reference number optional). Fully controlled — the
 // parent holds the draft; Mark Paid saves it and pays in one action.
 function TranchePaymentDetailsForm({
-  currency,
   draft,
   onChange,
 }: {
-  currency: string | null;
   draft: PaymentDraft;
   onChange: (draft: PaymentDraft) => void;
 }) {
-  // Bank master (Aug 2026): the master stores names only — options are
-  // composed with the REQUEST currency ("DBS (EUR)", sign shown in front).
+  // Bank master (Aug 2026): the master stores names only. 4 Sep 2026: the
+  // dropdown shows and stores the BARE name — no currency appended any more.
   // Dropdown-only by client decision: no free-text fallback.
   const { data: banks = [] } = useBanks();
-  const composeBank = (name: string) => (currency ? `${name} (${currency})` : name);
 
   const inputCls =
     "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring";
@@ -117,13 +122,14 @@ function TranchePaymentDetailsForm({
             <option value="" disabled>
               {banks.length === 0 ? "No banks configured" : "Select bank"}
             </option>
-            {/* Legacy free-text value from before the master — keep visible */}
-            {draft.bank && !banks.some((b) => composeBank(b.name) === draft.bank) && (
+            {/* Stored value not in the master's bare names — legacy free-text
+                or a pre-Sep-2026 "{name} (CUR)" composition; keep it visible */}
+            {draft.bank && !banks.some((b) => b.name === draft.bank) && (
               <option value={draft.bank} disabled>{draft.bank} (legacy)</option>
             )}
             {banks.map((b) => (
-              <option key={b.id} value={composeBank(b.name)}>
-                {composeBank(b.name)}
+              <option key={b.id} value={b.name}>
+                {b.name}
               </option>
             ))}
           </select>
@@ -140,6 +146,34 @@ function TranchePaymentDetailsForm({
             type="text"
             value={draft.payment_reference_number}
             onChange={(e) => onChange({ ...draft, payment_reference_number: e.target.value })}
+            className={inputCls}
+          />
+        </div>
+      </div>
+      {/* Optional secondary currency + amount (4 Sep 2026). */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">Secondary currency (optional)</p>
+          <select
+            value={draft.secondary_currency}
+            onChange={(e) => onChange({ ...draft, secondary_currency: e.target.value })}
+            className={inputCls}
+          >
+            <option value="">None</option>
+            {SECONDARY_CURRENCIES.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">Secondary amount (optional)</p>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={draft.secondary_amount}
+            onChange={(e) => onChange({ ...draft, secondary_amount: e.target.value })}
+            placeholder="Amount in the secondary currency"
             className={inputCls}
           />
         </div>
@@ -333,6 +367,12 @@ export function TrancheList({
       setPayConfirmId(null);
       return;
     }
+    // Secondary fields are optional, but an amount needs its currency.
+    if (Number(draft.secondary_amount) > 0 && !draft.secondary_currency) {
+      toast.error("Select the secondary currency for the secondary amount.");
+      setPayConfirmId(null);
+      return;
+    }
     try {
       // Single action (10 Aug refinement): Mark Paid saves the filled
       // payment details first, then pays — no separate Save Details step.
@@ -343,6 +383,9 @@ export function TrancheList({
           bank: draft.bank.trim(),
           payment_reference_number: draft.payment_reference_number.trim() || undefined,
           accounts_remarks: draft.accounts_remarks.trim() || undefined,
+          secondary_currency: draft.secondary_currency || undefined,
+          secondary_amount:
+            Number(draft.secondary_amount) > 0 ? Number(draft.secondary_amount) : undefined,
         },
       });
       await payTranche.mutateAsync(trancheId);
@@ -512,6 +555,15 @@ export function TrancheList({
                       )}
                     </dd>
                   </div>
+                  {/* Optional secondary currency + amount (4 Sep 2026). */}
+                  {t.secondary_amount != null && (
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Secondary amount</dt>
+                      <dd className="font-medium text-foreground">
+                        {formatCurrency(t.secondary_amount, t.secondary_currency ?? undefined)}
+                      </dd>
+                    </div>
+                  )}
                 </dl>
               )}
 
@@ -592,7 +644,6 @@ export function TrancheList({
               {mode === "accounts" && t.status === "unpaid" && !needsRelease(t) && (
                 <div className="space-y-3 pt-2 mt-1 border-t border-border">
                   <TranchePaymentDetailsForm
-                    currency={currency}
                     draft={draftFor(t)}
                     onChange={(draft) => setDrafts((prev) => ({ ...prev, [t.id]: draft }))}
                   />

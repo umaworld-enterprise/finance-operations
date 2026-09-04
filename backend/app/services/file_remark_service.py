@@ -38,9 +38,13 @@ _VIEWER_ROLES = _RAISER_ROLES | {UserRole.FINANCE_ADMIN}
 
 _CATEGORY_LABELS = {
     "invoice_split": "Split Invoices",
-    # Renamed from "Invoice amount changes" (11 Aug 2026) — stored category
+    # Renamed "Invoice Change" → "File Change" (4 Sep 2026) — stored category
     # value stays "invoice_amount_change".
-    "invoice_amount_change": "Invoice Change",
+    "invoice_amount_change": "File Change",
+    # New (4 Sep 2026, migration 0033): the invoice's VALUE changes — the
+    # merchandiser proposes a revised amount; Accounts approve, then apply
+    # the final revised amount as a separate step.
+    "invoice_value_change": "Invoice Value Change",
 }
 
 
@@ -108,6 +112,13 @@ class FileRemarkService:
                 files[r.new_file_number] = (
                     Decimal(str(r.new_amount)) if r.new_amount is not None else (carried or Decimal("0"))
                 )
+            elif r.category == "invoice_value_change" and r.new_amount is not None:
+                # Value change (4 Sep 2026): the file keeps its number, its
+                # amount becomes the revised figure — but ONLY once Accounts
+                # applied it (approved rows with NULL new_amount are still
+                # awaiting the revised amount and change nothing).
+                if old in files:
+                    files[old] = Decimal(str(r.new_amount))
         return files
 
     async def selectable_files(self, user_id: UUID, role: UserRole) -> list[dict]:
@@ -127,11 +138,23 @@ class FileRemarkService:
         requests = list((await self._session.execute(stmt)).scalars().all())
         if not requests:
             return []
+        from sqlalchemy import and_, or_
+
+        # Held back: files under an OPEN remark, plus files whose approved
+        # Invoice Value Change is still awaiting the revised amount (4 Sep
+        # 2026) — their amount is about to move, so no new remark yet.
         open_rows = (
             await self._session.execute(
                 select(FileRemark.deposit_request_id, FileRemark.old_file_number).where(
                     FileRemark.deposit_request_id.in_([r.id for r in requests]),
-                    FileRemark.status == FileRemarkStatus.OPEN.value,
+                    or_(
+                        FileRemark.status == FileRemarkStatus.OPEN.value,
+                        and_(
+                            FileRemark.category == "invoice_value_change",
+                            FileRemark.status == FileRemarkStatus.APPROVED.value,
+                            FileRemark.new_amount.is_(None),
+                        ),
+                    ),
                 )
             )
         ).all()
@@ -228,6 +251,12 @@ class FileRemarkService:
                 if data.category == "invoice_amount_change"
                 else None
             ),
+            # Invoice Value Change (4 Sep 2026): the merchandiser's PROPOSED
+            # figure — the final amount lands in new_amount only when Accounts
+            # apply it after approval. No ceiling: a revision can go up or down.
+            proposed_amount=(
+                data.proposed_amount if data.category == "invoice_value_change" else None
+            ),
             split_targets=(
                 [
                     {"file_number": t.file_number.strip(), "amount": float(t.amount)}
@@ -309,6 +338,65 @@ class FileRemarkService:
             )
         return remark
 
+    async def apply_revised_amount(
+        self,
+        remark_id: UUID,
+        revised_amount: "Decimal",
+        user_id: UUID,
+        role: UserRole,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> FileRemark:
+        """Accounts apply the final revised amount on an APPROVED Invoice
+        Value Change (4 Sep 2026) — the separate step after approval. The
+        figure lands in new_amount, takes effect in the live-file ledger,
+        and is applied exactly once."""
+        if role not in _DECIDER_ROLES:
+            raise AuthorizationError(
+                "Only Accounts Team or Super Admin can update the revised amount."
+            )
+        remark = await self._session.get(FileRemark, remark_id)
+        if not remark:
+            raise NotFoundError("File remark not found.")
+        if remark.category != "invoice_value_change":
+            raise BusinessRuleError(
+                "Only Invoice Value Change remarks carry a revised amount."
+            )
+        if remark.status != FileRemarkStatus.APPROVED.value:
+            raise ConflictError(
+                "The revised amount can only be updated on an APPROVED "
+                "Invoice Value Change."
+            )
+        if remark.new_amount is not None:
+            raise ConflictError(
+                "The revised amount has already been applied on this remark."
+            )
+
+        remark.new_amount = revised_amount
+        await self._session.flush()
+
+        request = await self._session.get(DepositRequest, remark.deposit_request_id)
+        request_number = request.request_number if request else "?"
+        summary = (
+            f"Revised amount on {remark.old_file_number or request_number}: "
+            f"{remark.old_amount} → {revised_amount}"
+            + (f" (proposed {remark.proposed_amount})" if remark.proposed_amount is not None else "")
+        )
+        await self._audit.record_update(
+            "file_remarks", remark.id, user_id,
+            field_name="new_amount",
+            old_value=None, new_value=str(revised_amount),
+            ip_address=ip_address, user_agent=user_agent,
+        )
+        if request:
+            await self._audit.record_update(
+                "deposit_requests", request.id, user_id,
+                field_name="file_remark_amount_updated",
+                old_value=None, new_value=summary,
+                ip_address=ip_address, user_agent=user_agent,
+            )
+        return remark
+
     async def list(
         self,
         user_id: UUID,
@@ -366,6 +454,8 @@ class FileRemarkService:
                 f"new file {remark.new_file_number}"
                 + (f" ({remark.new_amount})" if remark.new_amount is not None else "")
             )
+        if remark.proposed_amount is not None:
+            parts.append(f"proposed amount {remark.proposed_amount}")
         if remark.split_targets:
             targets = ", ".join(
                 f"{t.get('file_number')} ({t.get('amount')})" for t in remark.split_targets

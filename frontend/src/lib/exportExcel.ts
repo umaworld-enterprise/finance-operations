@@ -47,6 +47,70 @@ export async function exportRequestsToExcel(
   );
 }
 
+// Bank-ledger format (4 Sep 2026, executive request): the exact ledger
+// columns the executives keep in Excel. One row per tranche — a paid tranche
+// is a ledger entry dated by its payment date with the amount in Debit; an
+// unpaid tranche is an upcoming entry dated by the request date with Debit
+// left empty. Voucher No., Rate, Credit and BALANCE are maintained manually
+// in Excel (no such data in the system) and stay blank. The same entries
+// feed both the Excel export and the on-screen Bank Ledger tab.
+export interface BankLedgerEntry {
+  date: string | null;
+  supplier: string;
+  file_nos: string;
+  customer: string;
+  curr: string;
+  /** The "Currency" amount column (formerly EURO/CNY) — the tranche amount
+   * in the request's own currency, so every currency is supported. */
+  amount: number;
+  /** Filled only for paid tranches. */
+  debit: number | null;
+}
+
+export function bankLedgerEntries(rows: DepositRequest[]): BankLedgerEntry[] {
+  const entries = rows.flatMap((r) =>
+    (r.tranches ?? [])
+      .filter((t) => t.status !== "rejected")
+      .map((t) => {
+        const paid = t.status === "paid";
+        return {
+          date: (paid && t.payment_date ? t.payment_date : r.created_at) ?? null,
+          supplier: r.supplier?.name ?? "",
+          file_nos: r.sunshine_invoice_number ?? "",
+          customer: r.customer?.name ?? "",
+          curr: r.currency ?? "",
+          amount: Number(t.amount),
+          debit: paid ? Number(t.amount) : null,
+        };
+      }),
+  );
+  // A ledger reads chronologically — oldest entry first.
+  entries.sort((a, b) => (a.date ?? "").localeCompare(b.date ?? ""));
+  return entries;
+}
+
+export async function exportBankLedgerToExcel(
+  rows: DepositRequest[], filename: string,
+): Promise<void> {
+  await writeSheet(
+    bankLedgerEntries(rows).map((e) => ({
+      "Date": e.date ? formatDate(e.date) : "",
+      "Supplier": e.supplier,
+      "Voucher No.": "",
+      "File Nos.": e.file_nos,
+      "Customer": e.customer,
+      "Curr": e.curr,
+      "Currency": e.amount,
+      "Rate": "",
+      "Debit": e.debit ?? "",
+      "Credit": "",
+      "BALANCE": "",
+    })),
+    filename,
+    "Bank Ledger",
+  );
+}
+
 export async function exportPendingReleaseToExcel(
   rows: PendingReleaseRow[], filename: string,
 ): Promise<void> {

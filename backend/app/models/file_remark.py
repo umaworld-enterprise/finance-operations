@@ -30,7 +30,13 @@ from app.models.base import Base, UUIDPrimaryKeyMixin
 
 class FileRemarkCategory(str, enum.Enum):
     INVOICE_SPLIT = "invoice_split"
+    # Displayed as "File Change" (4 Sep 2026 rename) — the invoice's NUMBER
+    # changes; the stored value stays for compatibility.
     INVOICE_AMOUNT_CHANGE = "invoice_amount_change"
+    # 4 Sep 2026 (migration 0033): the invoice's VALUE changes — the
+    # merchandiser proposes a revised amount, Accounts approve and then apply
+    # the final revised amount as a separate step.
+    INVOICE_VALUE_CHANGE = "invoice_value_change"
 
 
 class FileRemarkStatus(str, enum.Enum):
@@ -57,6 +63,11 @@ class FileRemark(UUIDPrimaryKeyMixin, Base):
     old_amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     new_file_number: Mapped[str | None] = mapped_column(String(200), nullable=True)
     new_amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    # Invoice Value Change (4 Sep 2026, migration 0033): the amount the
+    # merchandiser PROPOSED at raise. The final figure Accounts apply after
+    # approval lands in new_amount — NULL new_amount on an approved value
+    # change means "awaiting the revised amount".
+    proposed_amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     # Split Invoices: dynamic [{"file_number": str, "amount": number}, …].
     split_targets: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # Optional (4 Aug rework) — the structured fields carry the instruction.
@@ -82,7 +93,7 @@ class FileRemark(UUIDPrimaryKeyMixin, Base):
 
     __table_args__ = (
         CheckConstraint(
-            "category IN ('invoice_split', 'invoice_amount_change')",
+            "category IN ('invoice_split', 'invoice_amount_change', 'invoice_value_change')",
             name="ck_file_remarks_category",
         ),
         CheckConstraint(

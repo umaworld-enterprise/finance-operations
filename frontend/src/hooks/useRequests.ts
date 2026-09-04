@@ -295,6 +295,8 @@ export function useUpdateTranchePaymentDetails(requestId: string) {
         bank?: string;
         payment_reference_number?: string;
         accounts_remarks?: string;
+        secondary_currency?: string;
+        secondary_amount?: number;
       };
     }) => requestService.updateTranchePaymentDetails(requestId, trancheId, data),
     onSuccess: () => invalidateRequestAndTranches(qc, requestId),

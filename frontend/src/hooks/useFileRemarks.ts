@@ -53,3 +53,14 @@ export function useDecideFileRemark() {
     onSuccess: () => qc.invalidateQueries({ queryKey: [...FILE_REMARKS_KEY] }),
   });
 }
+
+// Invoice Value Change (4 Sep 2026): Accounts apply the final revised amount
+// on an approved remark.
+export function useApplyRevisedAmount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, amount }: { id: string; amount: number }) =>
+      fileRemarkService.applyRevisedAmount(id, amount),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...FILE_REMARKS_KEY] }),
+  });
+}

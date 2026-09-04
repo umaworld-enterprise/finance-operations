@@ -29,8 +29,9 @@ import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, cn, re
 import { differenceInDays } from "date-fns";
 import { needsRelease } from "@/components/tranches/TrancheList";
 import { ExportButton } from "@/components/ui/ExportButton";
-import { exportPendingReleaseToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
-import { Clock, CheckCircle, AlertTriangle, CalendarClock, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
+import { bankLedgerEntries, exportBankLedgerToExcel, exportPendingReleaseToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
+import { BankLedgerTable } from "@/components/tables/BankLedgerTable";
+import { Clock, CheckCircle, AlertTriangle, BookOpen, CalendarClock, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
 import Link from "next/link";
 import type { DepositRequest, PendingReleaseRow } from "@/types";
 
@@ -561,6 +562,9 @@ export default function AccountsDashboard() {
   const term = search.trim();
   let filteredQueue = term ? queue.filter((r) => requestMatchesSearch(r, term)) : queue;
   if (sort) filteredQueue = sortRequests(filteredQueue, sort);
+  // Bank Ledger tab (4 Sep 2026): the pending queue reshaped into the
+  // executives' Excel ledger rows — one row per tranche, oldest first.
+  const ledgerEntries = bankLedgerEntries(filteredQueue);
 
   const { data: holdData, isLoading: holdLoading } = useRequestsPaginated(holdPage, PAGE_SIZE, {
     status: ["hold_by_accounts", "hold_by_merchandiser"],
@@ -655,6 +659,15 @@ export default function AccountsDashboard() {
             subtext={fySubtext}
             onClick={() => goToTab("pending")}
           />
+          {/* Executive request (4 Sep 2026): the pending queue viewable in
+              the Excel bank-ledger layout without downloading. */}
+          <StatCard
+            label="Pending Payments (Bank Ledger)"
+            value={ledgerEntries.length}
+            icon={BookOpen}
+            subtext="Live — one row per tranche"
+            onClick={() => goToTab("bank-ledger")}
+          />
           <StatCard
             label="On Hold"
             value={kpis?.on_hold ?? "—"}
@@ -726,6 +739,14 @@ export default function AccountsDashboard() {
                 </span>
               )}
             </TabsTrigger>
+            <TabsTrigger value="bank-ledger">
+              Bank Ledger
+              {ledgerEntries.length > 0 && (
+                <span className="ml-1.5 bg-secondary text-secondary-foreground border border-border text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                  {ledgerEntries.length}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="hold">
               On Hold
               {holdTotal > 0 && (
@@ -786,6 +807,7 @@ export default function AccountsDashboard() {
               <ExportButton
                 count={filteredQueue.length}
                 onExport={() => exportRequestsToExcel(filteredQueue, "pending-payments.xlsx")}
+                onExportLedger={() => exportBankLedgerToExcel(filteredQueue, "pending-payments-bank-ledger.xlsx")}
               />
             </div>
             <PendingTable
@@ -796,11 +818,24 @@ export default function AccountsDashboard() {
             />
           </TabsContent>
 
+          {/* Pending payments in the executives' bank-ledger layout
+              (4 Sep 2026) — same rows the Bank Ledger export downloads. */}
+          <TabsContent value="bank-ledger">
+            <div className="flex justify-end mb-2">
+              <ExportButton
+                count={ledgerEntries.length}
+                onExport={() => exportBankLedgerToExcel(filteredQueue, "pending-payments-bank-ledger.xlsx")}
+              />
+            </div>
+            <BankLedgerTable entries={ledgerEntries} loading={queueLoading} />
+          </TabsContent>
+
           <TabsContent value="processed">
             <div className="flex justify-end mb-2">
               <ExportButton
                 count={processedItems.length}
                 onExport={() => exportRequestsToExcel(processedItems, "processed-requests.xlsx")}
+                onExportLedger={() => exportBankLedgerToExcel(processedItems, "processed-requests-bank-ledger.xlsx")}
               />
             </div>
             {processedLoading ? (
@@ -841,6 +876,7 @@ export default function AccountsDashboard() {
               <ExportButton
                 count={holdItems.length}
                 onExport={() => exportRequestsToExcel(holdItems, "on-hold-requests.xlsx")}
+                onExportLedger={() => exportBankLedgerToExcel(holdItems, "on-hold-requests-bank-ledger.xlsx")}
               />
             </div>
             {holdLoading ? (
@@ -881,6 +917,7 @@ export default function AccountsDashboard() {
               <ExportButton
                 count={rejectedItems.length}
                 onExport={() => exportRequestsToExcel(rejectedItems, "rejected-requests.xlsx")}
+                onExportLedger={() => exportBankLedgerToExcel(rejectedItems, "rejected-requests-bank-ledger.xlsx")}
               />
             </div>
             {rejectedLoading ? (
@@ -920,6 +957,7 @@ export default function AccountsDashboard() {
               <ExportButton
                 count={cancelledItems.length}
                 onExport={() => exportRequestsToExcel(cancelledItems, "cancelled-requests.xlsx")}
+                onExportLedger={() => exportBankLedgerToExcel(cancelledItems, "cancelled-requests-bank-ledger.xlsx")}
               />
             </div>
             {cancelledLoading ? (
@@ -959,6 +997,7 @@ export default function AccountsDashboard() {
               <ExportButton
                 count={allItems.length}
                 onExport={() => exportRequestsToExcel(allItems, "all-requests.xlsx")}
+                onExportLedger={() => exportBankLedgerToExcel(allItems, "all-requests-bank-ledger.xlsx")}
               />
             </div>
             {allLoading ? (

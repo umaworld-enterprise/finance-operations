@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.enums import AdjustmentStatus, TrancheStatus
 from app.schemas.common import OrmBase
@@ -51,6 +51,21 @@ class TranchePaymentDetailsUpdate(BaseModel):
     bank: str | None = None
     payment_reference_number: str | None = None
     accounts_remarks: str | None = None
+    # Optional secondary currency + amount (4 Sep 2026) — informational only,
+    # never required. An amount without its currency is meaningless.
+    secondary_currency: str | None = Field(None, max_length=8)
+    secondary_amount: Decimal | None = Field(None, gt=0)
+
+    @field_validator("secondary_amount")
+    @classmethod
+    def validate_secondary_precision(cls, v: Decimal | None) -> Decimal | None:
+        return _assert_two_decimal_places(v) if v is not None else v
+
+    @model_validator(mode="after")
+    def validate_secondary_pair(self) -> "TranchePaymentDetailsUpdate":
+        if self.secondary_amount is not None and not (self.secondary_currency or "").strip():
+            raise ValueError("Select the secondary currency for the secondary amount.")
+        return self
 
 
 class TrancheRejectRequest(BaseModel):
@@ -80,6 +95,8 @@ class TrancheResponse(OrmBase):
     bank: str | None = None
     payment_reference_number: str | None = None
     accounts_remarks: str | None = None
+    secondary_currency: str | None = None
+    secondary_amount: Decimal | None = None
     rejection_reason: str | None = None
     rejected_at: datetime | None = None
     # Release gate (19 Aug 2026): NULL on an unpaid tranche 2+ means "Yet to

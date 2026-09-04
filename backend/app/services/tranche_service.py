@@ -683,9 +683,11 @@ class TrancheService:
         return await self._repo.update(tranche, **changes)
 
     async def _assert_bank_allowed(self, request: DepositRequest, bank_value: str) -> None:
-        """The bank master stores names only; the stored tranche value is
-        '{name} ({request currency})' — or the bare name when the request has
-        no currency. An empty master blocks bank entry entirely."""
+        """The bank master stores names only. Since 4 Sep 2026 the dropdown
+        shows and stores the BARE name (no currency appended); older writes
+        composed '{name} ({request currency})' and remain accepted so
+        re-saving a legacy draft doesn't fail. An empty master blocks bank
+        entry entirely."""
         from app.models.masters import BankMaster
 
         names = list(
@@ -701,11 +703,12 @@ class TrancheService:
                 "before recording payment details."
             )
         currency = request.currency.value if request.currency else None
-        allowed = {f"{n} ({currency})" for n in names} if currency else {n for n in names}
+        allowed = set(names)
+        if currency:
+            allowed |= {f"{n} ({currency})" for n in names}
         if bank_value not in allowed:
             raise ValidationError(
-                f"'{bank_value}' is not an available bank for this request's "
-                "currency. Pick one from the dropdown."
+                f"'{bank_value}' is not an available bank. Pick one from the dropdown."
             )
 
     # ── Internals ─────────────────────────────────────────────────────────────

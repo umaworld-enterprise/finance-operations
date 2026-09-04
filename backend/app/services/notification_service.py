@@ -65,6 +65,7 @@ TYPE_REQUEST_PENDING_HOM = "request_pending_hom"
 TYPE_STATUS_CHANGED = "status_changed"
 TYPE_FILE_REMARK_RAISED = "file_remark_raised"
 TYPE_FILE_REMARK_RESOLVED = "file_remark_resolved"
+TYPE_FILE_REMARK_AMOUNT_UPDATED = "file_remark_amount_updated"
 TYPE_REQUEST_REJECTED = "request_rejected"
 
 _EMAIL_ROLES = (UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN)
@@ -1360,14 +1361,71 @@ async def notify_file_remark_decided(remark_id: UUID) -> None:
                 "attachment_url": None,
             }
             creator = await session.get(User, remark.created_by)
-            if creator is None:
+            recipients = [creator] if creator is not None else []
+            # Invoice Value Change (4 Sep 2026): BOTH parties stay in the
+            # loop — beside the raiser, the whole Accounts team hears about
+            # the decision (excluding the deciding user themselves).
+            if remark.category == "invoice_value_change":
+                seen = {u.id for u in recipients} | {remark.resolved_by}
+                for u in await _active_users_with_role(session, UserRole.ACCOUNTS_TEAM):
+                    if u.id not in seen:
+                        recipients.append(u)
+                        seen.add(u.id)
+            if not recipients:
                 return
             await _deliver_to_users(
-                session, [creator], TYPE_FILE_REMARK_RESOLVED, message, request.id
+                session, recipients, TYPE_FILE_REMARK_RESOLVED, message, request.id
             )
     except Exception as exc:
         logger.error(
             "notify_file_remark_decided failed", remark_id=str(remark_id), error=str(exc)
+        )
+
+
+async def notify_file_remark_amount_updated(remark_id: UUID, actor_id: UUID) -> None:
+    """After Accounts apply the revised amount on an approved Invoice Value
+    Change (4 Sep 2026) — bell + push to the raising merchandiser AND every
+    other active Accounts user, so both parties see the final figure.
+
+    Own session; failures logged and swallowed (BackgroundTasks contract).
+    """
+    from app.core.database import AsyncSessionFactory
+
+    try:
+        async with AsyncSessionFactory() as session:
+            remark, request = await _load_file_remark_context(session, remark_id)
+            if remark is None or request is None:
+                return
+            file_ref = remark.old_file_number or request.request_number
+            body = (
+                f"Accounts updated the revised amount on Invoice {file_ref} "
+                f"({request.request_number}): {remark.old_amount} → {remark.new_amount}."
+            )
+            if remark.proposed_amount is not None:
+                body += f" Proposed by the merchandiser: {remark.proposed_amount}."
+            message = {
+                "title": "Invoice value updated",
+                "body": body,
+                "url": "/file-remarks",
+                "attachment_url": None,
+            }
+            recipients: list[User] = []
+            seen = {actor_id}
+            creator = await session.get(User, remark.created_by)
+            if creator is not None and creator.id not in seen:
+                recipients.append(creator)
+                seen.add(creator.id)
+            for u in await _active_users_with_role(session, UserRole.ACCOUNTS_TEAM):
+                if u.id not in seen:
+                    recipients.append(u)
+                    seen.add(u.id)
+            await _deliver_to_users(
+                session, recipients, TYPE_FILE_REMARK_AMOUNT_UPDATED, message, request.id
+            )
+    except Exception as exc:
+        logger.error(
+            "notify_file_remark_amount_updated failed",
+            remark_id=str(remark_id), error=str(exc),
         )
 
 

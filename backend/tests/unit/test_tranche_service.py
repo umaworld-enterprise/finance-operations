@@ -837,13 +837,14 @@ async def test_bank_must_come_from_the_master(db_session):
             accounts.id, UserRole.ACCOUNTS_TEAM,
         )
     await _seed_bank(db_session)
-    # Wrong composition (missing currency suffix) → rejected.
-    with pytest.raises(ValidationError, match="not an available bank"):
-        await svc.update_payment_details(
-            request.id, tranche.id,
-            TranchePaymentDetailsUpdate(bank="HSBC"),
-            accounts.id, UserRole.ACCOUNTS_TEAM,
-        )
+    # Bare master name → accepted (4 Sep 2026: no currency suffix in the
+    # dropdown any more; the composed legacy form stays valid too).
+    updated = await svc.update_payment_details(
+        request.id, tranche.id,
+        TranchePaymentDetailsUpdate(bank="HSBC"),
+        accounts.id, UserRole.ACCOUNTS_TEAM,
+    )
+    assert updated.bank == "HSBC"
     # Unknown bank → rejected.
     with pytest.raises(ValidationError, match="not an available bank"):
         await svc.update_payment_details(
@@ -957,3 +958,36 @@ async def test_release_permissions_and_conflicts(db_session):
     await svc.reject_tranche(request.id, t1.id, "r", accounts.id, UserRole.ACCOUNTS_TEAM)
     with pytest.raises(ConflictError, match="rejected"):
         await svc.release_tranche(request.id, t1.id, merch.id, UserRole.MERCHANDISER)
+
+
+# ── Secondary currency on payment details (4 Sep 2026) ────────────────────────
+
+
+async def test_payment_details_accept_optional_secondary_currency(db_session):
+    from decimal import Decimal
+
+    _, accounts, request, (tranche,) = await _setup(db_session)
+    svc = TrancheService(db_session)
+    updated = await svc.update_payment_details(
+        request.id, tranche.id,
+        TranchePaymentDetailsUpdate(
+            secondary_currency="EUR", secondary_amount=Decimal("920.50"),
+        ),
+        accounts.id, UserRole.ACCOUNTS_TEAM,
+    )
+    assert updated.secondary_currency == "EUR"
+    assert float(updated.secondary_amount) == 920.50
+    logs = await _audit_rows(db_session, "payment_tranches", tranche.id)
+    assert {log.field_name for log in logs} >= {"secondary_currency", "secondary_amount"}
+
+
+async def test_secondary_amount_requires_its_currency():
+    from decimal import Decimal
+
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError, match="secondary currency"):
+        TranchePaymentDetailsUpdate(secondary_amount=Decimal("100.00"))
+    # Currency alone (amount to follow) is fine, and both-empty is fine.
+    TranchePaymentDetailsUpdate(secondary_currency="EUR")
+    TranchePaymentDetailsUpdate()

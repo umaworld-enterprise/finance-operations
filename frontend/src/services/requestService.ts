@@ -225,6 +225,8 @@ const requestService = {
     trancheId: string,
     payload: {
       payment_date?: string;
+      secondary_currency?: string;
+      secondary_amount?: number;
       bank?: string;
       payment_reference_number?: string;
       accounts_remarks?: string;

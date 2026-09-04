@@ -88,6 +88,10 @@ class PaymentTranche(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     released_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
+    # Optional secondary currency + amount (4 Sep 2026, migration 0033) —
+    # Accounts-entered alongside the payment details; informational only.
+    secondary_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    secondary_amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
 
     deposit_request: Mapped["DepositRequest"] = relationship(back_populates="tranches")
     paid_by_user: Mapped["User | None"] = relationship(foreign_keys=[paid_by])
