@@ -35,6 +35,29 @@ def _days_from_etd_expr():
     return AnalyticsSnapshot.etd_grace_overdue_days + (
         AnalyticsSnapshot.grace_etd - DepositRequest.estimated_etd
     )
+
+
+def _notional_by_currency_cols():
+    """Per-currency Notional Gain (= Cost of Fund) sums — the 4 Sep 2026
+    sheet splits every grouped table's notional into USD / RMB / EUR."""
+    def cur_sum(code: CurrencyCode, label: str):
+        return func.coalesce(
+            func.sum(
+                case(
+                    (DepositRequest.currency == code, AnalyticsSnapshot.cost_of_fund_amount),
+                    else_=0,
+                )
+            ),
+            0,
+        ).label(label)
+
+    return (
+        cur_sum(CurrencyCode.USD, "notional_usd"),
+        cur_sum(CurrencyCode.CNY, "notional_cny"),
+        cur_sum(CurrencyCode.EUR, "notional_eur"),
+    )
+
+
 from app.schemas.analytics import AnalyticsFilters, AnalyticsSummary, FlaggedSupplierNpa, MerchandiserNpa, NpaResponse
 
 # ── Analytics section keys (must stay in sync with frontend) ─────────────────
@@ -540,8 +563,9 @@ class AnalyticsService:
     ) -> list[dict]:
         """Overdue metrics grouped by merchandiser — Formula Reference §3.D
         (2 Sep 2026): Contribution % is CASES-based; Avg Delay counts days
-        from the ORIGINAL Est ETD; Notional Gain sums over ALL of the
-        merchandiser's live USD rows, not just the Delayed ones."""
+        from the ORIGINAL Est ETD; Notional Gain (= Cost of Fund) sums over
+        ALL of the merchandiser's live rows, not just the Delayed ones —
+        PER CURRENCY since the 4 Sep 2026 sheet (USD / RMB / EUR columns)."""
         merch_stmt = (
             select(
                 User.full_name,
@@ -565,17 +589,18 @@ class AnalyticsService:
             .group_by(User.full_name)
             .order_by(func.sum(DepositRequest.deposit_amount).desc())
         )
-        # Notional gain per §3.D: every live USD row of the merchandiser.
+        # Notional gain (Cost of Fund) per §3.D: every live row of the
+        # merchandiser, split per currency (4 Sep 2026 sheet: USD/RMB/EUR).
         notional_stmt = (
             select(
                 User.full_name,
-                func.coalesce(func.sum(AnalyticsSnapshot.cost_of_fund_amount), 0).label("notional_gain"),
+                *_notional_by_currency_cols(),
             )
+            .select_from(DepositRequest)
             .join(AnalyticsSnapshot, AnalyticsSnapshot.deposit_request_id == DepositRequest.id)
             .join(User, User.id == DepositRequest.created_by)
             .where(DepositRequest.is_deleted == False)  # noqa: E712
             .where(DepositRequest.current_status.notin_(_DASH_EXCLUDED_STATUSES))
-            .where(DepositRequest.currency == CurrencyCode.USD)
             .group_by(User.full_name)
         )
         for col_filter in (
@@ -593,7 +618,7 @@ class AnalyticsService:
             merch_stmt = merch_stmt.where(_days_from_etd_expr() <= etd_max)
         rows = (await self._session.execute(merch_stmt)).fetchall()
         notional_by_name = {
-            r.full_name: float(r.notional_gain)
+            r.full_name: (float(r.notional_usd), float(r.notional_cny), float(r.notional_eur))
             for r in (await self._session.execute(notional_stmt)).fetchall()
         }
         total_cases = sum(r.overdue_cases for r in rows)
@@ -606,7 +631,12 @@ class AnalyticsService:
                 "overdue_eur": float(r.overdue_eur),
                 "contribution_pct": round(r.overdue_cases / total_cases * 100, 1) if total_cases else 0.0,
                 "avg_delay_days": round(float(r.avg_delay), 0),
-                "notional_gain": notional_by_name.get(r.full_name, 0.0),
+                # Cost of Fund per currency (4 Sep 2026 sheet); notional_gain
+                # keeps the old USD-only value for backward compatibility.
+                "notional_usd": notional_by_name.get(r.full_name, (0.0, 0.0, 0.0))[0],
+                "notional_cny": notional_by_name.get(r.full_name, (0.0, 0.0, 0.0))[1],
+                "notional_eur": notional_by_name.get(r.full_name, (0.0, 0.0, 0.0))[2],
+                "notional_gain": notional_by_name.get(r.full_name, (0.0, 0.0, 0.0))[0],
             }
             for r in rows
         ]
@@ -644,17 +674,18 @@ class AnalyticsService:
             .group_by(Vertical.name)
             .order_by(func.count(DepositRequest.id).desc())
         )
-        # Notional gain per §3.E: every live USD row of the vertical.
+        # Notional gain (Cost of Fund) per §3.E: every live row of the
+        # vertical, split per currency (4 Sep 2026 sheet: USD/RMB/EUR).
         notional_stmt = (
             select(
                 Vertical.name,
-                func.coalesce(func.sum(AnalyticsSnapshot.cost_of_fund_amount), 0).label("notional_gain"),
+                *_notional_by_currency_cols(),
             )
+            .select_from(DepositRequest)
             .join(AnalyticsSnapshot, AnalyticsSnapshot.deposit_request_id == DepositRequest.id)
             .join(Vertical, Vertical.id == DepositRequest.vertical_id)
             .where(DepositRequest.is_deleted == False)  # noqa: E712
             .where(DepositRequest.current_status.notin_(_DASH_EXCLUDED_STATUSES))
-            .where(DepositRequest.currency == CurrencyCode.USD)
             .group_by(Vertical.name)
         )
         for col_filter in (
@@ -672,7 +703,7 @@ class AnalyticsService:
             vert_stmt = vert_stmt.where(_days_from_etd_expr() <= etd_max)
         rows = (await self._session.execute(vert_stmt)).fetchall()
         notional_by_name = {
-            r.name: float(r.notional_gain)
+            r.name: (float(r.notional_usd), float(r.notional_cny), float(r.notional_eur))
             for r in (await self._session.execute(notional_stmt)).fetchall()
         }
         total_cases = sum(r.overdue_cases for r in rows)
@@ -685,7 +716,12 @@ class AnalyticsService:
                 "overdue_eur": float(r.overdue_eur),
                 "contribution_pct": round(r.overdue_cases / total_cases * 100, 1) if total_cases else 0.0,
                 "avg_delay_days": round(float(r.avg_delay), 0),
-                "notional_gain": notional_by_name.get(r.name, 0.0),
+                # Cost of Fund per currency (4 Sep 2026 sheet); notional_gain
+                # keeps the old USD-only value for backward compatibility.
+                "notional_usd": notional_by_name.get(r.name, (0.0, 0.0, 0.0))[0],
+                "notional_cny": notional_by_name.get(r.name, (0.0, 0.0, 0.0))[1],
+                "notional_eur": notional_by_name.get(r.name, (0.0, 0.0, 0.0))[2],
+                "notional_gain": notional_by_name.get(r.name, (0.0, 0.0, 0.0))[0],
             }
             for r in rows
         ]
@@ -1151,12 +1187,7 @@ class AnalyticsService:
                         ),
                     )
                 ).label("etd_pending"),
-                func.coalesce(func.sum(
-                    case(
-                        (DepositRequest.currency == CurrencyCode.USD, AnalyticsSnapshot.cost_of_fund_amount),
-                        else_=0,
-                    )
-                ), 0).label("notional_gain"),
+                *_notional_by_currency_cols(),
             )
             .select_from(DepositRequest)
             .join(Customer, Customer.id == DepositRequest.customer_id)
@@ -1181,7 +1212,12 @@ class AnalyticsService:
             cust_stmt = cust_stmt.where(_days_from_etd_expr() <= etd_max)
         rows = (await self._session.execute(cust_stmt)).fetchall()
         extras = {
-            r.name: (r.etd_pending, float(r.notional_gain))
+            r.name: (
+                r.etd_pending,
+                float(r.notional_usd),
+                float(r.notional_cny),
+                float(r.notional_eur),
+            )
             for r in (await self._session.execute(pending_stmt)).fetchall()
         }
         total_cases = sum(r.overdue_cases for r in rows)
@@ -1195,8 +1231,13 @@ class AnalyticsService:
                 "contribution_pct": round(r.overdue_cases / total_cases * 100, 1) if total_cases else 0.0,
                 "avg_delay_days": round(float(r.avg_delay), 0),
                 "max_delay_days": int(r.max_delay),
-                "etd_pending": extras.get(r.name, (0, 0.0))[0],
-                "notional_gain": extras.get(r.name, (0, 0.0))[1],
+                "etd_pending": extras.get(r.name, (0, 0.0, 0.0, 0.0))[0],
+                # Cost of Fund per currency (4 Sep 2026 sheet); notional_gain
+                # keeps the old USD-only value for backward compatibility.
+                "notional_usd": extras.get(r.name, (0, 0.0, 0.0, 0.0))[1],
+                "notional_cny": extras.get(r.name, (0, 0.0, 0.0, 0.0))[2],
+                "notional_eur": extras.get(r.name, (0, 0.0, 0.0, 0.0))[3],
+                "notional_gain": extras.get(r.name, (0, 0.0, 0.0, 0.0))[1],
             }
             for r in rows
         ]

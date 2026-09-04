@@ -83,6 +83,19 @@ function EmptyTable({ cols }: { cols: number }) {
   );
 }
 
+// A failed query must never masquerade as "No data yet" (4 Sep 2026 — the
+// By Merchandiser / By Vertical 500s were invisible for exactly that reason).
+function ErrorTable({ cols, error }: { cols: number; error: unknown }) {
+  return (
+    <TableRow>
+      <TableCell colSpan={cols} className="text-center py-12 text-sm text-destructive">
+        Failed to load this table{error instanceof Error ? ` — ${error.message}` : ""}. Try
+        refreshing; if it persists, contact the administrator.
+      </TableCell>
+    </TableRow>
+  );
+}
+
 // ── Data hooks ────────────────────────────────────────────────────────────────
 
 const ANALYTICS_STALE = 5 * 60_000;
@@ -548,7 +561,7 @@ function ByMerchandiserTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: s
   const [bucketVal, setBucketVal] = useState("");
   const { etd_min: etdMin, etd_max: etdMax } = decodeBucket(bucketVal);
   const filters: TabFilters = { dateFrom, dateTo, verticalId: verticalId || undefined, customerId: customerId || undefined, etdMin, etdMax };
-  const { data = [], isLoading } = useByMerchandiser(true, filters);
+  const { data = [], isLoading, isError, error } = useByMerchandiser(true, filters);
   return (
     <div className="space-y-3">
       <TabFilterBar
@@ -569,12 +582,16 @@ function ByMerchandiserTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: s
                 <TableHead className="text-right hidden md:table-cell">Overdue EUR</TableHead>
                 <TableHead className="text-right">Contribution</TableHead>
                 <TableHead className="text-right hidden lg:table-cell">Avg Delay</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">Notional Gain</TableHead>
+                {/* Cost of Fund per currency (4 Sep 2026 sheet). */}
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (USD)</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (CNY)</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (EUR)</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? <TableSkeleton rows={8} cols={8} />
-                : data.length === 0 ? <EmptyTable cols={8} />
+              {isLoading ? <TableSkeleton rows={8} cols={10} />
+                : isError ? <ErrorTable cols={10} error={error} />
+                : data.length === 0 ? <EmptyTable cols={10} />
                 : data.map((row: any) => (
                   <TableRow key={row.merchandiser} className="hover:bg-muted/40 cursor-pointer">
                     <TableCell className="font-medium">
@@ -589,7 +606,9 @@ function ByMerchandiserTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: s
                     <TableCell className="text-right tabular-nums hidden md:table-cell">{fmtCurrency(row.overdue_eur, "EUR")}</TableCell>
                     <TableCell className="text-right tabular-nums">{row.contribution_pct}%</TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{row.avg_delay_days}d</TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_gain, "USD")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_usd ?? row.notional_gain, "USD")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_cny ?? 0, "CNY")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_eur ?? 0, "EUR")}</TableCell>
                   </TableRow>
                 ))}
             </TableBody>
@@ -606,7 +625,7 @@ function ByVerticalTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
   const [bucketVal, setBucketVal] = useState("");
   const { etd_min: etdMin, etd_max: etdMax } = decodeBucket(bucketVal);
   const filters: TabFilters = { dateFrom, dateTo, staffId: staffId || undefined, customerId: customerId || undefined, etdMin, etdMax };
-  const { data = [], isLoading } = useByVertical(true, filters);
+  const { data = [], isLoading, isError, error } = useByVertical(true, filters);
   return (
     <div className="space-y-3">
       <TabFilterBar
@@ -627,12 +646,16 @@ function ByVerticalTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
                 <TableHead className="text-right hidden md:table-cell">Overdue EUR</TableHead>
                 <TableHead className="text-right">Contribution</TableHead>
                 <TableHead className="text-right hidden lg:table-cell">Avg Delay</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">Notional Gain</TableHead>
+                {/* Cost of Fund per currency (4 Sep 2026 sheet). */}
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (USD)</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (CNY)</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (EUR)</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? <TableSkeleton rows={8} cols={8} />
-                : data.length === 0 ? <EmptyTable cols={8} />
+              {isLoading ? <TableSkeleton rows={8} cols={10} />
+                : isError ? <ErrorTable cols={10} error={error} />
+                : data.length === 0 ? <EmptyTable cols={10} />
                 : data.map((row: any) => (
                   <TableRow key={row.category} className="hover:bg-muted/40 cursor-pointer">
                     <TableCell className="font-medium">
@@ -647,7 +670,9 @@ function ByVerticalTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
                     <TableCell className="text-right tabular-nums hidden md:table-cell">{fmtCurrency(row.overdue_eur, "EUR")}</TableCell>
                     <TableCell className="text-right tabular-nums">{row.contribution_pct}%</TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{row.avg_delay_days}d</TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_gain, "USD")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_usd ?? row.notional_gain, "USD")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_cny ?? 0, "CNY")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_eur ?? 0, "EUR")}</TableCell>
                   </TableRow>
                 ))}
             </TableBody>
@@ -664,7 +689,7 @@ function ByCustomerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
   const [bucketVal, setBucketVal] = useState("");
   const { etd_min: etdMin, etd_max: etdMax } = decodeBucket(bucketVal);
   const filters: TabFilters = { dateFrom, dateTo, staffId: staffId || undefined, verticalId: verticalId || undefined, etdMin, etdMax };
-  const { data = [], isLoading } = useByCustomer(true, filters);
+  const { data = [], isLoading, isError, error } = useByCustomer(true, filters);
   return (
     <div className="space-y-3">
       <TabFilterBar
@@ -687,11 +712,16 @@ function ByCustomerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
                 <TableHead className="text-right hidden lg:table-cell">Avg Delay</TableHead>
                 <TableHead className="text-right hidden lg:table-cell">Max Delay</TableHead>
                 <TableHead className="text-right hidden lg:table-cell">ETD Pending</TableHead>
+                {/* Cost of Fund per currency (4 Sep 2026 sheet). */}
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (USD)</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (CNY)</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (EUR)</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? <TableSkeleton rows={8} cols={9} />
-                : data.length === 0 ? <EmptyTable cols={9} />
+              {isLoading ? <TableSkeleton rows={8} cols={12} />
+                : isError ? <ErrorTable cols={12} error={error} />
+                : data.length === 0 ? <EmptyTable cols={12} />
                 : data.map((row: any) => (
                   <TableRow key={row.customer} className="hover:bg-muted/40 cursor-pointer">
                     <TableCell className="font-medium">
@@ -708,6 +738,9 @@ function ByCustomerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
                     <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{row.avg_delay_days}d</TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{row.max_delay_days}d</TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{row.etd_pending}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_usd ?? row.notional_gain, "USD")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_cny ?? 0, "CNY")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_eur ?? 0, "EUR")}</TableCell>
                   </TableRow>
                 ))}
             </TableBody>
