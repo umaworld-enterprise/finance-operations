@@ -1462,3 +1462,61 @@ and remember the app's row set = imported tracker (985 rows ≤31 Aug cutoff)
 plus PWA-entered rows — the sheet has 1011 rows.
 
 299 backend tests green; tsc clean; no migration in this batch.
+
+## Cost-of-Fund reconciliation tooling (4 Sep 2026)
+
+Client reported requests (e.g. 855/3256/2026-27, Dep-2026-0549) showing NO
+cost of fund / analytics snapshot while the tracker sheet computes one
+(≈1,241). Offline audit findings:
+- The import CSV parsed 100% cleanly (0 unparseable payment/ETD/ship dates
+  across 985 rows; 10 processed rows genuinely have no payment date in the
+  source). 855/3256 imported with correct inputs (paid 3 Jun, ETD 13 Aug,
+  unshipped) — the engine WOULD produce the sheet's CoF from them.
+- ⇒ the gap is on the SNAPSHOT side: analytics_snapshots rows missing/stale
+  on the server (scheduler not completing, or Recalculate never run after
+  the import + CoF-gate deploy). If MISSING_SNAPSHOT is large, check the
+  backend logs for "Snapshot failed" / "refresh_all_snapshots crashed".
+- xlsx (2 Sep) vs imported CSV drift is tiny: 4 ship dates added later,
+  23 rows renamed/added, and 145 rows share sunshine numbers (multi-tranche
+  sheet entries) — handled by tiered matching.
+
+New `scripts/validate_cost_of_fund.py` — run on the server (report-only by
+default):
+    python -m scripts.validate_cost_of_fund
+    python -m scripts.validate_cost_of_fund --fix --actor-email <admin>
+- Matches every sheet row to a DB request (sunshine number, disambiguated
+  by deposit amount then request date; each request consumed once).
+- Classifies: MISSING_IN_DB / STATUS_DRIFT / INPUT_DRIFT (payment date,
+  ship date, Est ETD, deposit report-only) / MISSING_SNAPSHOT /
+  STALE_SNAPSHOT (stored ≠ engine-today on DB inputs) / OK, plus DB-only
+  rows (post-2-Sep app entries).
+- --fix (audited, google_form rows only): corrects payment/ship dates on
+  payment_details (creating the row if absent), estimated_etd, keeps the
+  legacy paid tranche's dates consistent — then recomputes + upserts the
+  analytics snapshot for every mismatched request, so analytics are right
+  immediately without waiting for the scheduler.
+- Warns when cost_of_fund_rate ≠ 0.12.
+Requires seed_data/Deposit Sunshine Tracker.xlsx (committed) and openpyxl
+(already in requirements). 299 tests green.
+
+### Snapshot-job skip rule fixed (4 Sep 2026)
+
+Answering "is there something where processed/locked won't get CoF?": YES —
+the 30-minute scheduler skipped every **processed + shipped** request
+(assumed static). Two flaws:
+1. Imported tracker rows arrive ALREADY processed+shipped with no snapshot —
+   the regular job would never give them their first one (~620 of the 985
+   imported rows). Only force=True (admin Recalculate) reached them.
+2. Since the 2 Sep CoF gate, a row shipped WITHIN grace carries 0 CoF until
+   TODAY crosses its grace ETD — not static, must keep recomputing.
+
+Fix (`snapshot_job.py`): the non-force run now skips a processed+shipped row
+only when it already HAS a snapshot AND its grace_etd has passed (truly
+static). New `tests/unit/test_snapshot_job.py` (3 tests: first snapshot for
+imported shipped rows, recompute-until-grace-crosses, truly-static skipped +
+force recomputes). `is_locked` plays no role in snapshots.
+
+Note: settings default cost_of_fund_rate is 0.18 — the 0.12 must be set in
+SystemConfig (tests pin it; the validation script warns when it isn't).
+
+302 backend tests green.

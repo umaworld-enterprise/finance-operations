@@ -52,6 +52,8 @@ async def _run_snapshots(session: AsyncSession, force: bool = False) -> int:
     from app.models.enums import RequestStatus
     from app.models.payment import PaymentDetails
 
+    from app.models.analytics import AnalyticsSnapshot
+
     _FROZEN = [
         RequestStatus.CANCELLED_BY_MERCHANDISER,
         RequestStatus.CANCELLED_BY_ACCOUNTS,
@@ -60,6 +62,10 @@ async def _run_snapshots(session: AsyncSession, force: bool = False) -> int:
     stmt = (
         select(DepositRequest)
         .outerjoin(PaymentDetails, PaymentDetails.deposit_request_id == DepositRequest.id)
+        .outerjoin(
+            AnalyticsSnapshot,
+            AnalyticsSnapshot.deposit_request_id == DepositRequest.id,
+        )
         .where(
             DepositRequest.is_deleted == False,  # noqa: E712
             DepositRequest.current_status.notin_(_FROZEN),
@@ -67,15 +73,25 @@ async def _run_snapshots(session: AsyncSession, force: bool = False) -> int:
         .options(selectinload(DepositRequest.payment))
     )
     if not force:
-        # force=True (admin recalculate) also recomputes processed+shipped rows
-        # — needed after formula/config changes so stored values match the new
-        # rules. Cancelled/rejected rows stay excluded even then: their metrics
-        # are meaningless and recomputing them would feed the auto-flag block.
+        # force=True (admin recalculate) also recomputes frozen rows — needed
+        # after formula/config changes so stored values match the new rules.
+        # Cancelled/rejected rows stay excluded even then: their metrics are
+        # meaningless and recomputing them would feed the auto-flag block.
+        #
+        # 4 Sep 2026 fix: a processed+shipped row is only TRULY static once
+        # (a) it HAS a stored snapshot — imported rows arrive already shipped
+        #     and would otherwise never get their first one — and
+        # (b) its graced ETD has passed: under the 2 Sep CoF gate, a row that
+        #     shipped within grace carries a blank CoF until TODAY crosses the
+        #     grace ETD, so it must keep recomputing until that day.
         stmt = stmt.where(
             not_(
                 and_(
                     DepositRequest.current_status == RequestStatus.PAYMENT_PROCESSED,
                     PaymentDetails.ship_date.is_not(None),
+                    AnalyticsSnapshot.id.is_not(None),
+                    AnalyticsSnapshot.grace_etd.is_not(None),
+                    AnalyticsSnapshot.grace_etd < date.today(),
                 )
             ),
         )
