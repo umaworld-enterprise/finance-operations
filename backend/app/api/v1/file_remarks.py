@@ -17,9 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db_session
 from app.core.dependencies import CurrentUser, get_current_user
 from app.models.file_remark import FileRemarkStatus
-from app.schemas.file_remark import FileRemarkCreate, FileRemarkDecide, FileRemarkResponse
+from app.schemas.file_remark import (
+    FileRemarkAmountUpdate,
+    FileRemarkCreate,
+    FileRemarkDecide,
+    FileRemarkResponse,
+)
 from app.services.file_remark_service import FileRemarkService
 from app.services.notification_service import (
+    notify_file_remark_amount_updated,
     notify_file_remark_decided,
     notify_file_remark_raised,
 )
@@ -122,6 +128,33 @@ async def approve_file_remark(
         remark_id, FileRemarkStatus.APPROVED.value, body,
         current_user, request, db, background_tasks,
     )
+
+
+@router.post("/{remark_id}/revised-amount", response_model=FileRemarkResponse)
+async def update_revised_amount(
+    remark_id: UUID,
+    body: FileRemarkAmountUpdate,
+    current_user: User,
+    request: Request,
+    db: DB,
+    background_tasks: BackgroundTasks,
+) -> FileRemarkResponse:
+    """Accounts apply the final revised amount on an APPROVED Invoice Value
+    Change (4 Sep 2026) — a separate step after approval. Both the raising
+    merchandiser and the Accounts team are notified."""
+    svc = FileRemarkService(db)
+    remark = await svc.apply_revised_amount(
+        remark_id, body.revised_amount, current_user.id, current_user.role,
+        ip_address=_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    background_tasks.add_task(
+        notify_file_remark_amount_updated, remark.id, current_user.id
+    )
+    results = await svc.list(
+        current_user.id, current_user.role, deposit_request_id=remark.deposit_request_id
+    )
+    return next(r for r in results if r.id == remark.id)
 
 
 @router.post("/{remark_id}/reject", response_model=FileRemarkResponse)

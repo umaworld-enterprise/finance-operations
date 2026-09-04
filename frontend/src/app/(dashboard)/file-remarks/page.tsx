@@ -30,6 +30,7 @@ import { TableControls } from "@/components/ui/TableControls";
 import { byString, useClientTable } from "@/hooks/useClientTable";
 import { useAuth } from "@/hooks/useAuth";
 import {
+  useApplyRevisedAmount,
   useCreateFileRemark,
   useDecideFileRemark,
   useFileRemarks,
@@ -40,9 +41,19 @@ import type { FileRemark, FileRemarkCategory } from "@/types";
 
 const CATEGORY_LABELS: Record<FileRemarkCategory, string> = {
   invoice_split: "Split Invoices",
-  // Renamed from "Invoice amount changes" (11 Aug 2026).
-  invoice_amount_change: "Invoice Change",
+  // Renamed "Invoice Change" → "File Change" (4 Sep 2026) — the invoice's
+  // NUMBER changes; the stored category value is unchanged.
+  invoice_amount_change: "File Change",
+  // New (4 Sep 2026): the invoice's VALUE changes — the merchandiser
+  // proposes a revised amount; Accounts approve, then apply the final
+  // figure as a separate step.
+  invoice_value_change: "Invoice Value Change",
 };
+
+// Approved Invoice Value Change still awaiting the revised amount from
+// Accounts (4 Sep 2026) — surfaced in the deciders' inbox.
+const needsRevisedAmount = (r: FileRemark) =>
+  r.category === "invoice_value_change" && r.status === "approved" && r.new_amount == null;
 
 type SplitRow = { file_number: string; amount: string };
 
@@ -114,6 +125,67 @@ function DecideDialog({
   );
 }
 
+// Accounts apply the final revised amount on an approved Invoice Value
+// Change (4 Sep 2026) — pre-filled with the merchandiser's proposal.
+function RevisedAmountDialog({
+  remark,
+  onClose,
+  onConfirm,
+  busy,
+}: {
+  remark: FileRemark | null;
+  onClose: () => void;
+  onConfirm: (amount: number) => void;
+  busy: boolean;
+}) {
+  const [amount, setAmount] = useState("");
+  const [seededFor, setSeededFor] = useState<string | null>(null);
+  if (!remark) return null;
+  // Seed the input with the proposed amount each time a remark opens.
+  if (seededFor !== remark.id) {
+    setSeededFor(remark.id);
+    setAmount(remark.proposed_amount != null ? String(remark.proposed_amount) : "");
+  }
+  const value = Number(amount);
+  const valid = Number.isFinite(value) && value > 0;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-card rounded-xl border border-border shadow-lg p-6 w-full max-w-md space-y-4">
+        <h3 className="font-semibold text-foreground">Update Revised Invoice Amount</h3>
+        <p className="text-sm text-muted-foreground">
+          Invoice {remark.old_file_number ?? remark.request_number} on {remark.request_number}
+          {" — current amount "}
+          {remark.old_amount != null
+            ? Number(remark.old_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })
+            : "—"}
+          {remark.currency ? ` (${remark.currency})` : ""}.
+          {remark.proposed_amount != null &&
+            ` The merchandiser proposed ${Number(remark.proposed_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}.`}{" "}
+          Both parties are notified once saved; the amount is applied once and
+          flows into the file&apos;s live balance.
+        </p>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="Revised amount"
+          className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button size="sm" disabled={busy || !valid} onClick={() => onConfirm(value)}>
+            {busy ? "Saving…" : "Save Revised Amount"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Structured details cell — split targets or old→new amounts. Splits show
 // the PARENT file first (10 Aug rework: "from which file to which files") —
 // older rows without a stored parent fall back to the request number.
@@ -150,8 +222,34 @@ function RemarkDetails({ r }: { r: FileRemark }) {
       </div>
     );
   }
-  // Invoice Change: explicit From → To wording (11 Aug) — the file number
-  // changes from the parent file to the new one.
+  // Invoice Value Change (4 Sep 2026): the number stays, the amount moves —
+  // old amount → proposed (merchandiser) → revised (Accounts, once applied).
+  if (r.category === "invoice_value_change") {
+    const file = r.old_file_number ?? r.sunshine_invoice_number ?? r.request_number ?? "—";
+    return (
+      <div className="text-xs text-muted-foreground space-y-0.5">
+        <p className="font-medium text-foreground">
+          Invoice {file}
+          {r.old_amount != null ? `: ${fmt(Number(r.old_amount))}${cur}` : ""}
+        </p>
+        {r.proposed_amount != null && (
+          <p>Proposed new amount: {fmt(Number(r.proposed_amount))}{cur}</p>
+        )}
+        {r.new_amount != null ? (
+          <p className="font-medium text-foreground">
+            Revised amount: {fmt(Number(r.new_amount))}{cur}
+          </p>
+        ) : (
+          r.status === "approved" && (
+            <p className="text-amber-700">Awaiting revised amount from Accounts</p>
+          )
+        )}
+      </div>
+    );
+  }
+  // File Change (renamed from Invoice Change, 4 Sep 2026): explicit From → To
+  // wording (11 Aug) — the file number changes from the parent file to the
+  // new one.
   const fromFile = r.old_file_number ?? r.sunshine_invoice_number ?? r.request_number;
   return (
     <div className="text-xs text-muted-foreground space-y-0.5">
@@ -197,11 +295,17 @@ export default function FileRemarksPage() {
   const [fileKey, setFileKey] = useState("");
   const [splitRows, setSplitRows] = useState<SplitRow[]>([{ file_number: "", amount: "" }]);
   const [newFile, setNewFile] = useState("");
+  // Invoice Value Change (4 Sep 2026): the merchandiser's proposed amount.
+  const [proposedAmount, setProposedAmount] = useState("");
   const [remarkText, setRemarkText] = useState("");
   const [decideTarget, setDecideTarget] = useState<FileRemark | null>(null);
   const [decision, setDecision] = useState<"approved" | "rejected">("approved");
+  const [amountTarget, setAmountTarget] = useState<FileRemark | null>(null);
+  const applyAmount = useApplyRevisedAmount();
 
-  const openRemarks = remarks.filter((r) => r.status === "open");
+  // The deciders' inbox: open remarks PLUS approved value changes still
+  // awaiting the revised amount (4 Sep 2026) — both need Accounts action.
+  const openRemarks = remarks.filter((r) => r.status === "open" || needsRevisedAmount(r));
 
   // Request # cells link to the request's own form (19 Aug 2026) — the
   // merchandiser's request view for merchandisers, the payment-queue view
@@ -260,17 +364,25 @@ export default function FileRemarksPage() {
     splitRows.length > 0 &&
     splitRows.every((row) => row.file_number.trim() && Number(row.amount) > 0) &&
     !splitOverCeiling;
-  // Invoice Change (19 Aug 2026): the whole invoice changes number, not
+  // File Change (19 Aug 2026): the whole invoice changes number, not
   // value — the amount is pre-filled from the file and locked; the server
   // derives it independently, so only the new file number is client input.
   const amountChangeValid = Boolean(newFile.trim());
+  // Invoice Value Change (4 Sep 2026): a positive proposed amount is required.
+  const valueChangeValid = Number(proposedAmount) > 0;
   const canSubmit =
-    !!selectedFile && (category === "invoice_split" ? splitRowsValid : amountChangeValid);
+    !!selectedFile &&
+    (category === "invoice_split"
+      ? splitRowsValid
+      : category === "invoice_value_change"
+        ? valueChangeValid
+        : amountChangeValid);
 
   const resetForm = () => {
     setFileKey("");
     setSplitRows([{ file_number: "", amount: "" }]);
     setNewFile("");
+    setProposedAmount("");
     setRemarkText("");
   };
 
@@ -292,12 +404,18 @@ export default function FileRemarksPage() {
                 amount: Number(row.amount),
               })),
             }
-          : {
-              // The old file reference (10 Aug rework) AND the new amount
-              // (19 Aug: whole-invoice change keeps the amount) are both
-              // server-derived — only the new file number is typed.
-              new_file_number: newFile.trim(),
-            }),
+          : category === "invoice_value_change"
+            ? {
+                // The number stays — only the proposed amount travels
+                // (4 Sep 2026); Accounts apply the final figure later.
+                proposed_amount: Number(proposedAmount),
+              }
+            : {
+                // The old file reference (10 Aug rework) AND the new amount
+                // (19 Aug: whole-invoice change keeps the amount) are both
+                // server-derived — only the new file number is typed.
+                new_file_number: newFile.trim(),
+              }),
         remark: remarkText.trim() || undefined,
       });
       toast.success("File remark raised — the Accounts team has been notified.");
@@ -358,7 +476,8 @@ export default function FileRemarksPage() {
                     className={`mt-1 ${inputCls}`}
                   >
                     <option value="invoice_split">Split Invoices</option>
-                    <option value="invoice_amount_change">Invoice Change</option>
+                    <option value="invoice_amount_change">File Change</option>
+                    <option value="invoice_value_change">Invoice Value Change</option>
                   </select>
                 </div>
                 <div>
@@ -473,6 +592,45 @@ export default function FileRemarksPage() {
                       {depositCeiling!.toFixed(2)}.
                     </p>
                   )}
+                </div>
+              ) : category === "invoice_value_change" ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Value change (4 Sep 2026): number stays, amount moves —
+                      the merchandiser proposes; Accounts apply the final
+                      figure after approving. */}
+                  <div>
+                    <Label htmlFor="fr-vc-old-amount">Current invoice amount</Label>
+                    <input
+                      id="fr-vc-old-amount"
+                      type="text"
+                      value={oldAmountDisplay}
+                      readOnly
+                      disabled
+                      placeholder="Select a file above"
+                      className={`mt-1 ${inputCls} bg-muted opacity-70 cursor-not-allowed`}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Pre-filled from the selected file — not editable.
+                    </p>
+                  </div>
+                  <div>
+                    <Label htmlFor="fr-vc-proposed">
+                      Proposed new amount<span className="ml-0.5" aria-hidden="true">*</span>
+                    </Label>
+                    <input
+                      id="fr-vc-proposed"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={proposedAmount}
+                      onChange={(e) => setProposedAmount(e.target.value)}
+                      className={`mt-1 ${inputCls}`}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Accounts enter the final revised amount after approving —
+                      your proposal pre-fills it.
+                    </p>
+                  </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -607,25 +765,38 @@ export default function FileRemarksPage() {
                           </TableCell>
                           {isDecider && (
                             <TableCell>
-                              <div className="flex gap-2 whitespace-nowrap">
+                              {needsRevisedAmount(r) ? (
+                                // Approved value change awaiting the figure
+                                // (4 Sep 2026) — the one remaining action.
                                 <Button
                                   size="sm"
-                                  onClick={() => { setDecision("approved"); setDecideTarget(r); }}
-                                  disabled={decideRemark.isPending}
-                                  className="gap-1"
+                                  onClick={() => setAmountTarget(r)}
+                                  disabled={applyAmount.isPending}
+                                  className="gap-1 whitespace-nowrap"
                                 >
-                                  <Check className="h-3.5 w-3.5" /> Processed / Approve
+                                  <Check className="h-3.5 w-3.5" /> Update Revised Amount
                                 </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  onClick={() => { setDecision("rejected"); setDecideTarget(r); }}
-                                  disabled={decideRemark.isPending}
-                                  className="gap-1"
-                                >
-                                  <X className="h-3.5 w-3.5" /> Reject
-                                </Button>
-                              </div>
+                              ) : (
+                                <div className="flex gap-2 whitespace-nowrap">
+                                  <Button
+                                    size="sm"
+                                    onClick={() => { setDecision("approved"); setDecideTarget(r); }}
+                                    disabled={decideRemark.isPending}
+                                    className="gap-1"
+                                  >
+                                    <Check className="h-3.5 w-3.5" /> Processed / Approve
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={() => { setDecision("rejected"); setDecideTarget(r); }}
+                                    disabled={decideRemark.isPending}
+                                    className="gap-1"
+                                  >
+                                    <X className="h-3.5 w-3.5" /> Reject
+                                  </Button>
+                                </div>
+                              )}
                             </TableCell>
                           )}
                         </TableRow>
@@ -725,6 +896,21 @@ export default function FileRemarksPage() {
         onClose={() => setDecideTarget(null)}
         onConfirm={doDecide}
         busy={decideRemark.isPending}
+      />
+      <RevisedAmountDialog
+        remark={amountTarget}
+        onClose={() => setAmountTarget(null)}
+        onConfirm={async (amount) => {
+          if (!amountTarget) return;
+          try {
+            await applyAmount.mutateAsync({ id: amountTarget.id, amount });
+            toast.success("Revised amount saved — both parties have been notified.");
+            setAmountTarget(null);
+          } catch (err: unknown) {
+            toast.error(err instanceof Error ? err.message : "Failed to save the revised amount.");
+          }
+        }}
+        busy={applyAmount.isPending}
       />
     </RoleGuard>
   );

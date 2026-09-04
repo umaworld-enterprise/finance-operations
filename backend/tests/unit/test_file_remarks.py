@@ -293,7 +293,8 @@ async def test_raised_fans_out_to_accounts(db_session, engine, monkeypatch):
     ).scalars().all()
     assert {n.user_id for n in rows} == {accounts.id, accounts2.id}
     body = rows[0].body
-    assert "Invoice Change" in body
+    # "Invoice Change" was renamed "File Change" (4 Sep 2026).
+    assert "File Change" in body
     assert request.request_number in body
     assert request.request_number in body and "INV-NEW-1" in body
     assert "1000.0" in body  # amounts travel in the notification
@@ -431,4 +432,96 @@ async def test_selectable_files_exclude_dead_and_open(db_session):
         await svc.create(
             _payload(request, file_number="NOT-A-FILE", new_file_number="X"),
             merch.id, UserRole.MERCHANDISER,
+        )
+
+
+# ── Invoice Value Change (4 Sep 2026) ─────────────────────────────────────────
+
+
+def test_value_change_requires_a_proposed_amount():
+    from decimal import Decimal
+    from uuid import uuid4
+
+    with pytest.raises(PydanticValidationError, match="proposed new amount"):
+        FileRemarkCreate(deposit_request_id=uuid4(), category="invoice_value_change")
+    ok = FileRemarkCreate(
+        deposit_request_id=uuid4(), category="invoice_value_change",
+        proposed_amount=Decimal("1250.00"),
+    )
+    assert ok.new_file_number is None
+
+
+@pytest.mark.asyncio
+async def test_value_change_full_flow_raise_approve_apply(db_session):
+    """Merchandiser proposes → Accounts approve → Accounts apply the revised
+    amount (separate step) → the live-file ledger carries the final figure."""
+    from decimal import Decimal
+
+    merch, accounts, request = await _setup(db_session)
+    svc = FileRemarkService(db_session)
+    remark = await svc.create(
+        _payload(
+            request, category="invoice_value_change",
+            new_file_number=None, proposed_amount=Decimal("1250.00"),
+        ),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert remark.status == "open"
+    assert float(remark.old_amount) == 1000.0
+    assert float(remark.proposed_amount) == 1250.0
+    assert remark.new_amount is None  # nothing applied yet
+    assert remark.new_file_number is None  # the number does not change
+
+    # The revised amount cannot be applied before approval.
+    with pytest.raises(ConflictError, match="APPROVED"):
+        await svc.apply_revised_amount(
+            remark.id, Decimal("1300.00"), accounts.id, UserRole.ACCOUNTS_TEAM
+        )
+
+    await svc.decide(remark.id, "approved", accounts.id, UserRole.ACCOUNTS_TEAM)
+    # Approved but not applied → the ledger still shows the old amount, and
+    # the file is held back from new remarks until the figure lands.
+    live = await svc.live_files_for_request(request)
+    assert live == {request.request_number: Decimal("1000.00")}
+    rows = await svc.selectable_files(merch.id, UserRole.MERCHANDISER)
+    assert [r for r in rows if r["deposit_request_id"] == str(request.id)] == []
+
+    # Only decider roles may apply.
+    with pytest.raises(AuthorizationError):
+        await svc.apply_revised_amount(
+            remark.id, Decimal("1300.00"), merch.id, UserRole.MERCHANDISER
+        )
+
+    applied = await svc.apply_revised_amount(
+        remark.id, Decimal("1300.00"), accounts.id, UserRole.ACCOUNTS_TEAM
+    )
+    assert float(applied.new_amount) == 1300.0
+    live = await svc.live_files_for_request(request)
+    assert live == {request.request_number: Decimal("1300.00")}
+    rows = await svc.selectable_files(merch.id, UserRole.MERCHANDISER)
+    mine = [r for r in rows if r["deposit_request_id"] == str(request.id)]
+    assert [(r["file_number"], r["amount"]) for r in mine] == [
+        (request.request_number, 1300.0)
+    ]
+
+    # Applied exactly once.
+    with pytest.raises(ConflictError, match="already been applied"):
+        await svc.apply_revised_amount(
+            remark.id, Decimal("1400.00"), accounts.id, UserRole.ACCOUNTS_TEAM
+        )
+
+
+@pytest.mark.asyncio
+async def test_apply_revised_amount_only_on_value_changes(db_session):
+    from decimal import Decimal
+
+    from app.core.exceptions import BusinessRuleError
+
+    merch, accounts, request = await _setup(db_session)
+    svc = FileRemarkService(db_session)
+    change = await svc.create(_payload(request), merch.id, UserRole.MERCHANDISER)
+    await svc.decide(change.id, "approved", accounts.id, UserRole.ACCOUNTS_TEAM)
+    with pytest.raises(BusinessRuleError, match="Invoice Value Change"):
+        await svc.apply_revised_amount(
+            change.id, Decimal("900.00"), accounts.id, UserRole.ACCOUNTS_TEAM
         )

@@ -10,7 +10,9 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.common import OrmBase
 
-FileRemarkCategoryLiteral = Literal["invoice_split", "invoice_amount_change"]
+FileRemarkCategoryLiteral = Literal[
+    "invoice_split", "invoice_amount_change", "invoice_value_change"
+]
 
 
 class SplitTarget(BaseModel):
@@ -36,6 +38,9 @@ class FileRemarkCreate(BaseModel):
     new_file_number: str | None = Field(None, max_length=200)
     # Split Invoices: dynamic target rows.
     split_targets: list[SplitTarget] | None = None
+    # Invoice Value Change (4 Sep 2026): the amount the merchandiser proposes.
+    # The final revised amount is applied by Accounts after approval.
+    proposed_amount: Decimal | None = Field(None, gt=0)
     # Optional — the structured fields carry the instruction.
     remark: str | None = None
 
@@ -49,7 +54,17 @@ class FileRemarkCreate(BaseModel):
         if self.category == "invoice_amount_change":
             if not (self.new_file_number or "").strip():
                 raise ValueError("New file number required for an invoice change.")
+        if self.category == "invoice_value_change" and self.proposed_amount is None:
+            raise ValueError("A proposed new amount is required for an invoice value change.")
         return self
+
+
+class FileRemarkAmountUpdate(BaseModel):
+    """Accounts apply the final revised amount on an APPROVED Invoice Value
+    Change (4 Sep 2026) — a separate step after approval; the merchandiser's
+    proposed amount pre-fills the UI but Accounts decide the figure."""
+
+    revised_amount: Decimal = Field(gt=0)
 
 
 class FileRemarkDecide(BaseModel):
@@ -68,6 +83,7 @@ class FileRemarkResponse(OrmBase):
     old_amount: Decimal | None
     new_file_number: str | None
     new_amount: Decimal | None
+    proposed_amount: Decimal | None = None
     split_targets: list[dict] | None
     remark: str | None
     status: str

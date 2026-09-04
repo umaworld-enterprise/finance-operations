@@ -47,7 +47,8 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/merchandiser",  label: "My Requests",    icon: ClipboardList,   roles: ["merchandiser"],                                                                     group: "main"  },
   { href: "/hom",           label: "HoM Workspace",  icon: UserCog,         roles: ["head_of_merchandiser", "super_admin"],                                              group: "main"  },
   { href: "/finance",       label: "Supplier Risk",  icon: ShieldAlert,     roles: ["finance_admin", "super_admin"],                                                     group: "main"  },
-  { href: "/file-remarks",  label: "File Remarks",   icon: MessageSquarePlus, roles: ["merchandiser", "accounts_team", "super_admin", "finance_admin"],                     group: "main"  },
+  // "File Remarks" renamed "Modify Request" (4 Sep 2026) — route unchanged.
+  { href: "/file-remarks",  label: "Modify Request", icon: MessageSquarePlus, roles: ["merchandiser", "accounts_team", "super_admin", "finance_admin"],                     group: "main"  },
   { href: "/analytics",     label: "Analytics",      icon: BarChart3,       roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
   { href: "/reports",       label: "Reports",        icon: FileText,        roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
   { href: "/settings",      label: "Settings",       icon: Settings,        roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },

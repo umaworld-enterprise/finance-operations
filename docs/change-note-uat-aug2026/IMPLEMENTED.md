@@ -1323,3 +1323,80 @@ apply). `ExportButton` gained an optional `onExportLedger` prop — a small
 self-contained dropdown (no new dependency), closes on outside click.
 
 tsc clean; frontend-only change.
+
+## Follow-up (4 Sep 2026) — Pending Payments Bank Ledger tile + tab
+
+Executive request: view the pending payments in the bank-ledger layout on
+screen, no download needed.
+
+- Accounts Workspace gains a **"Pending Payments (Bank Ledger)"** tile
+  (live count of ledger entries — one per tranche) that opens a new
+  **Bank Ledger** tab next to Pending.
+- The tab renders the pending queue through the same `bankLedgerEntries()`
+  shaping the Excel export uses (extracted from `exportBankLedgerToExcel`,
+  `lib/exportExcel.ts`) — identical rows, columns and ordering to the
+  downloaded file: one row per non-rejected tranche, oldest first; paid
+  tranches dated by payment date with Debit filled, unpaid dated by request
+  date with Debit empty; Voucher No., Rate, Credit, BALANCE empty (kept in
+  Excel). Dark header band mirroring the executives' sheet.
+- New `components/tables/BankLedgerTable.tsx` — client-side pagination
+  (50/page), search/sort from the page apply (it reads the filtered queue).
+- The tab keeps a single "Export Excel" button that downloads exactly what
+  is on screen (ledger format).
+
+tsc clean; frontend-only change.
+
+### Amendment (4 Sep 2026): the ledger's "EURO/CNY" amount column is renamed
+**"Currency"** (export + on-screen tab) — a generic term so the ledger
+supports every currency in the system, not just EUR/CNY. The "Curr" code
+column is unchanged.
+
+## Follow-up (4 Sep 2026) — Modify Request renames, Invoice Value Change,
+## ledger totals, tranche secondary currency, bank dropdown
+
+**Migration 0033** (`0033_value_change_and_secondary_currency.py`):
+`file_remarks.proposed_amount`, category CHECK widened with
+`invoice_value_change`; `payment_tranches.secondary_currency` +
+`secondary_amount`. Downgrade removes value-change rows, restores the check.
+
+1. **Sidebar**: "File Remarks" → **"Modify Request"** (route unchanged).
+2. **"Invoice Change" → "File Change"** everywhere it is displayed
+   (dropdown, tables, notifications, audit summaries) — the stored category
+   value stays `invoice_amount_change`.
+3. **New remark category "Invoice Value Change"** (`invoice_value_change`):
+   the invoice's VALUE changes, its number stays.
+   - Merchandiser raises it with a **proposed new amount** (required, > 0;
+     no ceiling — revisions can go up or down). Current amount pre-filled
+     and locked from the live file, like the other categories.
+   - Accounts **approve/reject** as usual; approval does NOT move the value.
+   - **Separate step** (client decision): Accounts then "Update Revised
+     Amount" (`POST /file-remarks/{id}/revised-amount`, pre-filled with the
+     proposal, applied exactly once) — only then does the file's live-ledger
+     amount change and flow into later splits/changes.
+   - A file with an approved-but-unapplied value change is held back from
+     the selectable-files dropdown (its amount is about to move).
+   - Deciders' "Open Remarks" inbox also lists approved value changes
+     awaiting the amount, with the Update Revised Amount action.
+   - **Notifications, both parties**: raise → Accounts team (existing);
+     approval/rejection of a value change → raiser + all other active
+     Accounts users; revised-amount update → raiser + all other active
+     Accounts users (`notify_file_remark_amount_updated`, new type
+     `file_remark_amount_updated`). Bell + push.
+4. **Bank Ledger tab total value**: per-currency "Total value" rows at the
+   bottom of the on-screen ledger — Currency-amount and Debit sums over the
+   whole filtered ledger (not just the visible page).
+5. **Tranche secondary currency + amount** (both optional; client decision:
+   Accounts enter them in the payment-details section): new inputs on the
+   per-tranche payment form, saved with Mark Paid; schema rejects an amount
+   without its currency; shown on the tranche card ("Secondary amount") for
+   all roles when present.
+6. **Bank dropdown no longer appends the currency** — shows/stores the bare
+   master name ("DBS", not "DBS (USD)"). Backend accepts bare names AND the
+   legacy composed values; stored legacy values still render (disabled
+   "legacy" option).
+
+295 backend tests green (new: value-change full flow raise→approve→apply,
+apply guards — not-approved/second-apply/wrong-category/role, schema
+proposed-amount requirement, secondary-currency pair validation, bare bank
+name accepted); tsc clean. Deploy: `alembic upgrade head` (0033) + backend
+and frontend together.
