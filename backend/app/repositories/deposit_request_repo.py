@@ -42,6 +42,9 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         customer_id: UUID | None = None,
         vertical_id: UUID | None = None,
         created_by: UUID | None = None,
+        currency=None,
+        date_from=None,
+        date_to=None,
         search: str | None = None,
     ):
         if role == UserRole.MERCHANDISER:
@@ -71,6 +74,21 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
             stmt = stmt.where(DepositRequest.vertical_id == vertical_id)
         if created_by:
             stmt = stmt.where(DepositRequest.created_by == created_by)
+        # Dynamic filter module (4 Sep 2026): currency + request-date range.
+        if currency:
+            stmt = stmt.where(DepositRequest.currency == currency)
+        if date_from:
+            from datetime import datetime, time, timezone
+            stmt = stmt.where(
+                DepositRequest.created_at
+                >= datetime.combine(date_from, time.min, tzinfo=timezone.utc)
+            )
+        if date_to:
+            from datetime import datetime, time, timedelta, timezone
+            stmt = stmt.where(
+                DepositRequest.created_at
+                < datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc)
+            )
         if search and search.strip():
             # Relations are selectinload'ed (separate SELECTs), so name search
             # needs explicit joins here. Inner joins are safe — supplier_id and
@@ -96,6 +114,9 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         customer_id: UUID | None = None,
         vertical_id: UUID | None = None,
         created_by: UUID | None = None,
+        currency=None,
+        date_from=None,
+        date_to=None,
         search: str | None = None,
         sort: str | None = None,
         limit: int = 50,
@@ -105,6 +126,7 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
             self._base_query(), role, user_id,
             status=status, supplier_id=supplier_id,
             customer_id=customer_id, vertical_id=vertical_id, created_by=created_by,
+            currency=currency, date_from=date_from, date_to=date_to,
             search=search,
         )
         # created_at tiebreak keeps amount sorts stable across pages.
@@ -127,6 +149,9 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         customer_id: UUID | None = None,
         vertical_id: UUID | None = None,
         created_by: UUID | None = None,
+        currency=None,
+        date_from=None,
+        date_to=None,
         search: str | None = None,
     ) -> int:
         stmt = self._apply_filters(
@@ -134,6 +159,7 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
             role, user_id,
             status=status, supplier_id=supplier_id,
             customer_id=customer_id, vertical_id=vertical_id, created_by=created_by,
+            currency=currency, date_from=date_from, date_to=date_to,
             search=search,
         )
         result = await self._session.execute(stmt)

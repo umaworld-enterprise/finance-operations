@@ -16,6 +16,7 @@ import { NpaPanel } from "@/components/analytics/NpaPanel";
 import { ShipmentsTable } from "@/components/analytics/ShipmentsTable";
 import { DecisionDialog } from "@/components/hom/DecisionDialog";
 import { useHomQueue, useHomApprove, useHomReject } from "@/hooks/useRequests";
+import { matchesRequestFilters, RequestFilterBar, type RequestFilterValues } from "@/components/filters/RequestFilterBar";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
 import { formatCurrency, formatDate, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
@@ -101,11 +102,15 @@ export default function HomDashboard() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<RequestSort>("newest");
+  // Dynamic filter module (4 Sep 2026) — client-side on the plain queue.
+  const [filters, setFilters] = useState<RequestFilterValues>({});
 
   // The HoM queue is a plain array (not server-paginated) — filter/sort client-side.
   const term = search.trim();
   const filtered = sortRequests(
-    term ? queue.filter((r) => requestMatchesSearch(r, term)) : queue,
+    (term ? queue.filter((r) => requestMatchesSearch(r, term)) : queue).filter((r) =>
+      matchesRequestFilters(r, filters),
+    ),
     sort,
   );
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
@@ -166,6 +171,16 @@ export default function HomDashboard() {
                   className="sm:max-w-md flex-1"
                 />
                 <SortSelect value={sort} onChange={changeSort} className="sm:w-52" />
+              </div>
+            )}
+            {queue.length > 0 && (
+              <div className="mb-3">
+                {/* Dynamic filter module (4 Sep 2026). */}
+                <RequestFilterBar
+                  values={filters}
+                  onChange={(v) => { setFilters(v); setPage(1); }}
+                  showMerchandiser
+                />
               </div>
             )}
             {isLoading ? (

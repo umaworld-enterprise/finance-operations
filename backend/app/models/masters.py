@@ -17,6 +17,12 @@ class Vertical(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Projections module (4 Sep 2026, migration 0034): a vertical belongs to
+    # at most ONE user; a user may hold many verticals. Drives ONLY the
+    # projection form's vertical list — nothing else reads it.
+    assigned_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
 
     deposit_requests: Mapped[list["DepositRequest"]] = relationship(back_populates="vertical")
 

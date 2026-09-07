@@ -1,6 +1,7 @@
 """Deposit request endpoints."""
 
 import asyncio
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
@@ -16,8 +17,7 @@ from app.core.database import get_db_session
 from app.core.dependencies import CurrentUser, get_current_user
 from app.core.exceptions import AppError, AuthorizationError, NotFoundError
 from app.models.deposit_request import DepositRequest
-from app.models.enums import UserRole
-from app.models.enums import RequestStatus
+from app.models.enums import CurrencyCode, RequestStatus, UserRole
 from app.models.masters import User as UserModel
 from app.repositories.deposit_request_repo import DepositRequestRepository
 from app.schemas.deposit_request import (
@@ -58,6 +58,10 @@ async def list_requests(
     customer_id: UUID | None = None,
     vertical_id: UUID | None = None,
     created_by: UUID | None = None,
+    # Dynamic filter module (4 Sep 2026): currency + request-date range.
+    currency: CurrencyCode | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
     search: str | None = Query(None, max_length=100),
     sort: str | None = Query(None, pattern="^(newest|oldest|amount_desc|amount_asc)$"),
     page: int = Query(1, ge=1),
@@ -69,13 +73,17 @@ async def list_requests(
         current_user.role, current_user.id,
         status=status_filter, supplier_id=supplier_id,
         customer_id=customer_id, vertical_id=vertical_id,
-        created_by=created_by, search=search, sort=sort, limit=page_size, offset=offset,
+        created_by=created_by, currency=currency,
+        date_from=date_from, date_to=date_to,
+        search=search, sort=sort, limit=page_size, offset=offset,
     )
     total = await repo.count_for_role(
         current_user.role, current_user.id,
         status=status_filter, supplier_id=supplier_id,
         customer_id=customer_id, vertical_id=vertical_id,
-        created_by=created_by, search=search,
+        created_by=created_by, currency=currency,
+        date_from=date_from, date_to=date_to,
+        search=search,
     )
     responses = [DepositRequestResponse.model_validate(r) for r in items]
     # Who acted last — so hold/cancel/reject rows carry the person's name
@@ -99,6 +107,17 @@ async def create_request(
     db: DB,
     background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
+    # Projections gate (4 Sep 2026): a merchandiser whose assigned verticals
+    # are missing the CURRENT month's projections cannot raise new requests —
+    # only the Super Admin's on-behalf entry unblocks them.
+    if current_user.role == UserRole.MERCHANDISER:
+        from app.core.exceptions import BusinessRuleError
+        from app.services.projection_service import ProjectionService
+
+        blocked, message = await ProjectionService(db).is_blocked(current_user.id)
+        if blocked:
+            raise BusinessRuleError(message or "Projections missing — contact the Super Admin.")
+
     svc = DepositRequestService(db)
     req = await svc.create(
         data,

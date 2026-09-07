@@ -60,6 +60,9 @@ class VerticalResponse(OrmBase):
     name: str
     is_active: bool
     created_at: datetime
+    # Projections module (4 Sep 2026): the single user this vertical is
+    # assigned to, if any.
+    assigned_user_id: UUID | None = None
 
 
 # ── Customer ─────────────────────────────────────────────────────────────────

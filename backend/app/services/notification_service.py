@@ -66,6 +66,8 @@ TYPE_STATUS_CHANGED = "status_changed"
 TYPE_FILE_REMARK_RAISED = "file_remark_raised"
 TYPE_FILE_REMARK_RESOLVED = "file_remark_resolved"
 TYPE_FILE_REMARK_AMOUNT_UPDATED = "file_remark_amount_updated"
+TYPE_PROJECTION_REMINDER = "projection_reminder"
+TYPE_PROJECTION_BLOCKED = "projection_blocked"
 TYPE_REQUEST_REJECTED = "request_rejected"
 
 _EMAIL_ROLES = (UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN)
@@ -1427,6 +1429,96 @@ async def notify_file_remark_amount_updated(remark_id: UUID, actor_id: UUID) -> 
             "notify_file_remark_amount_updated failed",
             remark_id=str(remark_id), error=str(exc),
         )
+
+
+# ── Projections module (4 Sep 2026) ─────────────────────────────────────────
+
+
+async def send_projection_reminders(session_factory: async_sessionmaker) -> int:
+    """Daily job. Two phases per client spec:
+
+    - 25th → month end: merchandisers whose assigned verticals are missing
+      NEXT month's projections get a fill-the-form reminder (bell + push).
+    - After the deadline (from the 1st, until filled): a ONE-TIME formal
+      notice that request creation is stopped — contact the Super Admin.
+
+    Merchandisers with no assigned verticals are never contacted.
+    Returns how many notifications were sent.
+    """
+    import calendar
+    from datetime import date as date_cls
+
+    from app.services.projection_service import (
+        ProjectionService,
+        next_period,
+        window_open,
+    )
+
+    sent = 0
+    try:
+        async with session_factory() as session:
+            svc = ProjectionService(session)
+            today = date_cls.today()
+            merchandisers = await _active_users_with_role(session, UserRole.MERCHANDISER)
+
+            for user in merchandisers:
+                assigned = await svc.assigned_verticals(user.id)
+                if not assigned:
+                    continue
+
+                if window_open(today):
+                    t_year, t_month = next_period(today)
+                    missing = await svc._missing_verticals(user.id, t_year, t_month)
+                    if not missing:
+                        continue
+                    days_left = calendar.monthrange(today.year, today.month)[1] - today.day
+                    month_label = date_cls(t_year, t_month, 1).strftime("%B %Y")
+                    when = (
+                        "due TODAY" if days_left == 0 else f"{days_left} day(s) left"
+                    )
+                    message = {
+                        "title": f"Fill your {month_label} projections — {when}",
+                        "body": (
+                            f"Projections pending for: {', '.join(v.name for v in missing)}. "
+                            "Submit them before the end of the month or new request "
+                            "creation will be stopped."
+                        ),
+                        "url": "/projections",
+                        "attachment_url": None,
+                    }
+                    await _deliver_to_users(session, [user], TYPE_PROJECTION_REMINDER, message, None)
+                    sent += 1
+                else:
+                    blocked, block_message = await svc.is_blocked(user.id, today)
+                    if not blocked:
+                        continue
+                    # Formal notice ONCE per month — skip if already sent
+                    # since the current month started.
+                    month_start = datetime(today.year, today.month, 1, tzinfo=timezone.utc)
+                    already = (
+                        await session.execute(
+                            select(Notification.id).where(
+                                Notification.user_id == user.id,
+                                Notification.type == TYPE_PROJECTION_BLOCKED,
+                                Notification.created_at >= month_start,
+                            ).limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if already:
+                        continue
+                    message = {
+                        "title": "Request creation stopped — projections missing",
+                        "body": block_message
+                        or "Your monthly projections were not added before the deadline. "
+                           "Please contact the Super Admin to add them and unblock you.",
+                        "url": "/projections",
+                        "attachment_url": None,
+                    }
+                    await _deliver_to_users(session, [user], TYPE_PROJECTION_BLOCKED, message, None)
+                    sent += 1
+    except Exception as exc:
+        logger.error("send_projection_reminders failed", error=str(exc))
+    return sent
 
 
 # ── Fallback scheduler job ───────────────────────────────────────────────────

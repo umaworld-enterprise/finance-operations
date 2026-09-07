@@ -17,6 +17,7 @@ import {
   FileText,
   Landmark,
   LayoutDashboard,
+  LineChart,
   LogOut,
   MessageSquarePlus,
   ScrollText,
@@ -50,6 +51,8 @@ const NAV_ITEMS: NavItem[] = [
   // "File Remarks" renamed "Modify Request" (4 Sep 2026) — route unchanged.
   { href: "/file-remarks",  label: "Modify Request", icon: MessageSquarePlus, roles: ["merchandiser", "accounts_team", "super_admin", "finance_admin"],                     group: "main"  },
   { href: "/analytics",     label: "Analytics",      icon: BarChart3,       roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
+  // Projections module (4 Sep 2026) — monthly per-vertical projections.
+  { href: "/projections",   label: "Projections",    icon: LineChart,       roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
   { href: "/reports",       label: "Reports",        icon: FileText,        roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
   { href: "/settings",      label: "Settings",       icon: Settings,        roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
   // Banking module (Aug 2026) — super admin and accounts team.

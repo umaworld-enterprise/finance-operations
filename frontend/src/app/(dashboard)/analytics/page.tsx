@@ -28,7 +28,9 @@ const CostOfFundChart    = dynamic(() => import("@/components/charts/CostOfFundC
 const MonthlyTrendChart  = dynamic(() => import("@/components/charts/MonthlyTrendChart").then(m => ({ default: m.MonthlyTrendChart })), { ssr: false });
 import { useAnalyticsSummary, useAnalyticsSnapshots, useWeeklyDeposits } from "@/hooks/useAnalytics";
 import { useRequests } from "@/hooks/useRequests";
-import { useVerticals, useCustomers, useUsers } from "@/hooks/useMasters";
+// useMerchandiserOptions (4 Sep 2026): analytics is open to every role now —
+// the staff dropdown must not depend on the Super-Admin-only users master.
+import { useVerticals, useCustomers, useMerchandiserOptions } from "@/hooks/useMasters";
 import { currencyDisplayLabel, formatCurrency, formatDate, cn } from "@/lib/utils";
 import { analyticsService, type AnalyticsFilters } from "@/services/analyticsService";
 import type { MonthlyTrendPoint } from "@/components/charts/MonthlyTrendChart";
@@ -436,7 +438,7 @@ function TabFilterBar({
 }) {
   const { data: verticals = [] } = useVerticals();
   const { data: customers = [] } = useCustomers();
-  const { data: users = [] } = useUsers();
+  const { data: users = [] } = useMerchandiserOptions();
   const hasFilter = staffId || verticalId || customerId || bucketVal;
   return (
     <div className="flex flex-wrap items-end gap-2 mb-3">
@@ -966,7 +968,7 @@ function OverviewTab({ filters, draftFilters, setDraft, applyFilters, clearFilte
   const { data: monthlyTrends = [], isLoading: trendsLoading } = useMonthlyTrends(trendYear);
   const { data: verticals = [] } = useVerticals();
   const { data: customers = [] } = useCustomers();
-  const { data: users = [] } = useUsers();
+  const { data: users = [] } = useMerchandiserOptions();
   const { data: allRequests = [] } = useRequests();
   const { data: summary, isLoading: summaryLoading } = useAnalyticsSummary(filters);
   const { data: snapshots = [], isLoading: snapshotsLoading } = useAnalyticsSnapshots(filters);

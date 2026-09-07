@@ -52,6 +52,9 @@ export interface Vertical {
   name: string;
   is_active: boolean;
   created_at: string;
+  /** Projections module (4 Sep 2026): the single user this vertical is
+   * assigned to, if any. */
+  assigned_user_id?: string | null;
 }
 
 export interface Customer {

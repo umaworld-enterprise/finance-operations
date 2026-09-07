@@ -42,6 +42,25 @@ async def list_all_verticals(db: DB, _: FinanceAdmin) -> list[VerticalResponse]:
     return [VerticalResponse.model_validate(v) for v in result.scalars().all()]
 
 
+@router.put("/assignments/{user_id}", response_model=list[VerticalResponse])
+async def assign_verticals_to_user(
+    user_id: UUID,
+    vertical_ids: list[UUID],
+    current_user: User,
+    db: DB,
+) -> list[VerticalResponse]:
+    """Projections module (4 Sep 2026): bind verticals to ONE user — the list
+    becomes the user's full assignment set (removed ids are unassigned).
+    Single vertical → single user is enforced; Super Admin only. Assignments
+    drive ONLY the projection form's vertical list."""
+    from app.services.projection_service import ProjectionService
+
+    verticals = await ProjectionService(db).assign_verticals(
+        user_id, vertical_ids, current_user.role
+    )
+    return [VerticalResponse.model_validate(v) for v in verticals]
+
+
 @router.post("", response_model=VerticalResponse, status_code=status.HTTP_201_CREATED)
 async def create_vertical(data: VerticalCreate, current_user: FinanceAdmin, db: DB, request: Request) -> VerticalResponse:
     repo = BaseRepository(db, Vertical)

@@ -57,9 +57,9 @@ export function BankLedgerTable({
       <div className="px-5 py-4 border-b border-border">
         <h3 className="font-semibold text-foreground text-sm">Pending Payments — Bank Ledger</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          One row per tranche, oldest first — the tranche amount sits in Debit; paid tranches
-          carry their payment date, unpaid ones the request date. Voucher No., Rate, Credit and
-          BALANCE are maintained in Excel and stay empty here.
+          One row per UNPAID tranche (amounts still to be paid), oldest first — the amount sits
+          in Debit, dated by the request date. EURO/CNY, Rate, Credit and BALANCE are maintained
+          in Excel and stay empty here.
         </p>
       </div>
       {!loading && entries.length === 0 ? (
@@ -79,10 +79,12 @@ export function BankLedgerTable({
                 <TableRow className="bg-foreground hover:bg-foreground">
                   <TableHead className="text-background whitespace-nowrap">Date</TableHead>
                   <TableHead className="text-background">Supplier</TableHead>
-                  <TableHead className="text-background whitespace-nowrap">Voucher No.</TableHead>
+                  <TableHead className="text-background whitespace-nowrap">Supplier Proforma Invoice #</TableHead>
                   <TableHead className="text-background whitespace-nowrap">File Nos.</TableHead>
                   <TableHead className="text-background">Customer</TableHead>
-                  <TableHead className="text-background">Currency</TableHead>
+                  <TableHead className="text-background">Curr</TableHead>
+                  {/* Kept empty for now (client decision, 4 Sep 2026). */}
+                  <TableHead className="text-background text-right whitespace-nowrap">EURO/CNY</TableHead>
                   <TableHead className="text-background text-right">Rate</TableHead>
                   <TableHead className="text-background text-right">Debit</TableHead>
                   <TableHead className="text-background text-right">Credit</TableHead>
@@ -91,7 +93,7 @@ export function BankLedgerTable({
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableSkeleton rows={6} cols={10} />
+                  <TableSkeleton rows={6} cols={11} />
                 ) : (
                   rows.map((e, i) => (
                     <TableRow key={i}>
@@ -99,10 +101,11 @@ export function BankLedgerTable({
                         {e.date ? formatDate(e.date) : ""}
                       </TableCell>
                       <TableCell className="text-sm font-medium">{e.supplier}</TableCell>
-                      <TableCell />
+                      <TableCell className="whitespace-nowrap text-sm">{e.supplier_invoice}</TableCell>
                       <TableCell className="whitespace-nowrap text-sm">{e.file_nos}</TableCell>
                       <TableCell className="text-sm">{e.customer}</TableCell>
                       <TableCell className="text-sm">{e.curr}</TableCell>
+                      <TableCell />
                       <TableCell />
                       <TableCell className="text-right text-sm tabular-nums">{num(e.amount)}</TableCell>
                       <TableCell />
@@ -119,6 +122,7 @@ export function BankLedgerTable({
                         Total value{totalRows.length > 1 || curr !== "—" ? ` (${curr})` : ""}
                       </TableCell>
                       <TableCell className="text-sm">{curr}</TableCell>
+                      <TableCell />
                       <TableCell />
                       <TableCell className="text-right text-sm tabular-nums">{num(sum)}</TableCell>
                       <TableCell />

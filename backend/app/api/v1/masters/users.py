@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
-from app.core.dependencies import CurrentUser, RequireSuperAdmin
+from app.core.dependencies import CurrentUser, RequireSuperAdmin, get_current_user
 from app.schemas.masters import UserCreate, UserResponse, UserUpdate
 from app.services.user_service import UserService
 
@@ -15,6 +15,27 @@ router = APIRouter(prefix="/masters/users", tags=["masters-users"])
 
 DB = Annotated[AsyncSession, Depends(get_db_session)]
 SuperAdmin = Annotated[CurrentUser, RequireSuperAdmin]
+AnyUser = Annotated[CurrentUser, Depends(get_current_user)]
+
+
+@router.get("/merchandisers")
+async def list_merchandiser_options(current_user: AnyUser, db: DB) -> list[dict]:
+    """Minimal merchandiser list for filter dropdowns (4 Sep 2026 dynamic
+    filter module) — any authenticated role; id + name only, active
+    merchandiser-role users."""
+    from sqlalchemy import select
+
+    from app.models.enums import UserRole
+    from app.models.masters import User as UserModel
+
+    rows = (
+        await db.execute(
+            select(UserModel.id, UserModel.full_name)
+            .where(UserModel.role == UserRole.MERCHANDISER, UserModel.is_active == True)  # noqa: E712
+            .order_by(UserModel.full_name)
+        )
+    ).all()
+    return [{"id": str(r.id), "full_name": r.full_name} for r in rows]
 
 
 @router.get("", response_model=list[UserResponse])
