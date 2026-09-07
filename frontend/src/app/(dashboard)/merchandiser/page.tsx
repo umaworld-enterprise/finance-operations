@@ -16,6 +16,7 @@ import { exportRequestsToExcel } from "@/lib/exportExcel";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
 import { useRequestsPaginated, useMyActivity, usePendingRelease } from "@/hooks/useRequests";
+import { useVerticals } from "@/hooks/useMasters";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   Table, TableHeader, TableBody, TableRow, TableHead,
@@ -58,8 +59,11 @@ export default function MerchandiserDashboard() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<RequestSort>("newest");
+  // Vertical filter on the request list (4 Sep 2026, executive request).
+  const [verticalId, setVerticalId] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const debouncedSearch = useDebouncedValue(search.trim());
+  const { data: verticals = [] } = useVerticals();
   const { data: activity = [] } = useMyActivity();
   // "Yet to be Released" tranches (2 onwards) awaiting this merchandiser's
   // release (19 Aug 2026).
@@ -77,6 +81,7 @@ export default function MerchandiserDashboard() {
     ...TAB_PARAMS[activeTab],
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(sort !== "newest" ? { sort } : {}),
+    ...(verticalId ? { vertical_id: verticalId } : {}),
   });
   const requests = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -110,6 +115,11 @@ export default function MerchandiserDashboard() {
 
   function changeSort(value: RequestSort) {
     setSort(value);
+    setPage(1);
+  }
+
+  function changeVertical(value: string) {
+    setVerticalId(value);
     setPage(1);
   }
 
@@ -234,6 +244,19 @@ export default function MerchandiserDashboard() {
             placeholder="Search by invoice #, request #, supplier or customer…"
             className="sm:max-w-md flex-1"
           />
+          {/* Vertical filter (4 Sep 2026, executive request) — narrows the
+              list below; the tiles keep their overall counts. */}
+          <select
+            value={verticalId}
+            onChange={(e) => changeVertical(e.target.value)}
+            aria-label="Filter by vertical"
+            className="flex h-9 w-full sm:w-52 rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            <option value="">All verticals</option>
+            {verticals.map((v) => (
+              <option key={v.id} value={v.id}>{v.name}</option>
+            ))}
+          </select>
           <SortSelect value={sort} onChange={changeSort} className="sm:w-52" />
           <ExportButton
             count={requests.length}

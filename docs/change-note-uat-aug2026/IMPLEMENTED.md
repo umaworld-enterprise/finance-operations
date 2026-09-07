@@ -1520,3 +1520,14 @@ Note: settings default cost_of_fund_rate is 0.18 — the 0.12 must be set in
 SystemConfig (tests pin it; the validation script warns when it isn't).
 
 302 backend tests green.
+
+## Follow-up (4 Sep 2026) — Vertical filter on the merchandiser request list
+
+Executive request: a Vertical dropdown ("All verticals" + the active
+verticals master) beside Search/Sort on My Requests. It filters the
+server-paginated list on every status tab (the backend GET /requests already
+accepted vertical_id — frontend-only change); resets to page 1 on change;
+the Excel export follows the filtered view as before. The KPI tiles and tab
+counts deliberately keep their overall numbers, matching how Search behaves.
+
+tsc clean; no backend change.
