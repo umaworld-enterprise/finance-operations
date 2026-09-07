@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { amountPayable, formatCurrency, formatDate, requestDisplayNumber } from "@/lib/utils";
+import { amountPayable, formatCurrency, formatDate, hasHighPriorityUnpaid, requestDisplayNumber } from "@/lib/utils";
 import { latestPaymentDate } from "@/lib/exportExcel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -61,12 +61,20 @@ export function RequestsTable({
           {requests.map((req) => (
             <TableRow key={req.id}>
               <TableCell>
-                <Link
-                  href={`${basePath}/${req.id}`}
-                  className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2"
-                >
-                  {requestDisplayNumber(req)}
-                </Link>
+                <div className="flex items-center gap-1.5">
+                  <Link
+                    href={`${basePath}/${req.id}`}
+                    className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2"
+                  >
+                    {requestDisplayNumber(req)}
+                  </Link>
+                  {/* Priority badge (5 Sep 2026) — display only, no re-ordering. */}
+                  {hasHighPriorityUnpaid(req) && (
+                    <span className="inline-flex items-center text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                      High
+                    </span>
+                  )}
+                </div>
               </TableCell>
               <TableCell className="hidden sm:table-cell font-mono text-xs text-muted-foreground">
                 {req.sunshine_invoice_number || "—"}

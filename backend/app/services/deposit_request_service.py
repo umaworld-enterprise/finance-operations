@@ -254,6 +254,8 @@ class DepositRequestService:
                         tranche_number=i,
                         amount=t.amount,
                         tentative_payment_date=t.tentative_payment_date,
+                        # Priority of Tranche Payment (5 Sep 2026) — badge only.
+                        priority=t.priority,
                         # Release gate (19 Aug 2026): tranche 1 is payable
                         # immediately; tranche 2 onwards stays "Yet to be
                         # Released" until the merchandiser releases it.

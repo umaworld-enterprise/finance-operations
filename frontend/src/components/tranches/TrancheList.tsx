@@ -259,10 +259,13 @@ export function TrancheList({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState("");
   const [editDate, setEditDate] = useState("");
+  // Priority of Tranche Payment (5 Sep 2026) — badge-only in the queues.
+  const [editPriority, setEditPriority] = useState<"normal" | "high">("normal");
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [addAmount, setAddAmount] = useState("");
   const [addDate, setAddDate] = useState(todayLocalISO());
+  const [addPriority, setAddPriority] = useState<"normal" | "high">("normal");
 
   const merchandiserCanModify = mode === "merchandiser" && canModify;
   // Adding replacement tranches stays possible after a rejection even when
@@ -279,6 +282,7 @@ export function TrancheList({
     setEditingId(t.id);
     setEditAmount(String(t.amount));
     setEditDate(t.tentative_payment_date ?? "");
+    setEditPriority(t.priority === "high" ? "high" : "normal");
   };
 
   const saveEdit = async (t: PaymentTranche) => {
@@ -294,7 +298,7 @@ export function TrancheList({
     try {
       await updateTranche.mutateAsync({
         trancheId: t.id,
-        data: { amount, tentative_payment_date: editDate },
+        data: { amount, tentative_payment_date: editDate, priority: editPriority },
       });
       toast.success(`${t.label} updated — the Accounts team has been notified.`);
       setEditingId(null);
@@ -314,11 +318,12 @@ export function TrancheList({
       return;
     }
     try {
-      await addTranche.mutateAsync({ amount, tentative_payment_date: addDate });
+      await addTranche.mutateAsync({ amount, tentative_payment_date: addDate, priority: addPriority });
       toast.success("Tranche added — the Accounts team has been notified.");
       setAddOpen(false);
       setAddAmount("");
       setAddDate(todayLocalISO());
+      setAddPriority("normal");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to add tranche.");
     }
@@ -482,6 +487,12 @@ export function TrancheList({
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-semibold text-foreground">{t.label}</span>
                 <TrancheStatusPill status={t.status} />
+                {/* Priority of Tranche Payment (5 Sep 2026) — badge only. */}
+                {t.priority === "high" && !isRejected && (
+                  <span className="inline-flex items-center text-xs font-medium text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+                    High Priority
+                  </span>
+                )}
                 {t.status === "paid" && (
                   <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
                     <Lock className="h-3 w-3" /> Locked against edits
@@ -511,7 +522,7 @@ export function TrancheList({
               )}
 
               {isEditing ? (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   <div>
                     <p className="text-xs text-muted-foreground mb-1">
                       {currency ? `Amount (${currencyDisplayLabel(currency)})` : "Amount"}
@@ -533,6 +544,17 @@ export function TrancheList({
                       onChange={(e) => setEditDate(e.target.value)}
                       className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                     />
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Priority</p>
+                    <select
+                      value={editPriority}
+                      onChange={(e) => setEditPriority(e.target.value as "normal" | "high")}
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="normal">Normal</option>
+                      <option value="high">High Priority</option>
+                    </select>
                   </div>
                   <div className="flex items-end gap-2">
                     <Button size="sm" onClick={() => saveEdit(t)} disabled={updateTranche.isPending}>
@@ -803,7 +825,7 @@ export function TrancheList({
         addOpen ? (
           <div className="rounded-lg border border-dashed border-border p-3 space-y-2">
             <p className="text-sm font-semibold text-foreground">New Deposit Tranche</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
                 <p className="text-xs text-muted-foreground mb-1">
                   {currency ? `Amount (${currencyDisplayLabel(currency)})` : "Amount"}
@@ -826,6 +848,17 @@ export function TrancheList({
                   onChange={(e) => setAddDate(e.target.value)}
                   className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                 />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Priority of Tranche Payment</p>
+                <select
+                  value={addPriority}
+                  onChange={(e) => setAddPriority(e.target.value as "normal" | "high")}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="normal">Normal</option>
+                  <option value="high">High Priority</option>
+                </select>
               </div>
               <div className="flex items-end gap-2">
                 <Button size="sm" onClick={doAdd} disabled={addTranche.isPending}>

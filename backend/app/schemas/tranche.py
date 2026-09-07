@@ -2,12 +2,16 @@
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.enums import AdjustmentStatus, TrancheStatus
 from app.schemas.common import OrmBase
+
+# Priority of Tranche Payment (5 Sep 2026): merchandiser-chosen, badge-only.
+TranchePriorityLiteral = Literal["normal", "high"]
 
 
 def _assert_two_decimal_places(v: Decimal) -> Decimal:
@@ -19,6 +23,7 @@ def _assert_two_decimal_places(v: Decimal) -> Decimal:
 class TrancheCreate(BaseModel):
     amount: Decimal = Field(gt=0)
     tentative_payment_date: date
+    priority: TranchePriorityLiteral = "normal"
 
     @field_validator("amount")
     @classmethod
@@ -31,6 +36,7 @@ class TrancheUpdate(BaseModel):
 
     amount: Decimal | None = Field(None, gt=0)
     tentative_payment_date: date | None = None
+    priority: TranchePriorityLiteral | None = None
 
     @field_validator("amount")
     @classmethod
@@ -97,6 +103,7 @@ class TrancheResponse(OrmBase):
     accounts_remarks: str | None = None
     secondary_currency: str | None = None
     secondary_amount: Decimal | None = None
+    priority: str = "normal"
     rejection_reason: str | None = None
     rejected_at: datetime | None = None
     # Release gate (19 Aug 2026): NULL on an unpaid tranche 2+ means "Yet to

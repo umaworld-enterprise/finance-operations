@@ -30,6 +30,9 @@ const INVOICE_FIELD_LABELS: Record<InvoiceField, string> = {
 const trancheSchema = z.object({
   amount: z.coerce.number().positive("Must be positive"),
   tentative_payment_date: z.string().min(1, "Date is required"),
+  // Priority of Tranche Payment (5 Sep 2026): badge in the queues only —
+  // never changes list ordering. Reserve High Priority for genuine urgency.
+  priority: z.enum(["normal", "high"]).default("normal"),
 });
 
 const schema = z
@@ -60,7 +63,7 @@ type FormValues = z.infer<typeof schema>;
 const CURRENCIES = ["USD", "EUR", "GBP", "AED", "INR", "CNY", "JPY", "SGD", "OTHER"];
 
 const DEFAULT_VALUES = {
-  tranches: [{ amount: undefined as unknown as number, tentative_payment_date: "" }],
+  tranches: [{ amount: undefined as unknown as number, tentative_payment_date: "", priority: "normal" as const }],
 };
 
 interface Props {
@@ -342,7 +345,7 @@ export function NewRequestForm({ onSuccess, onCancel }: Props) {
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="space-y-1.5">
                       <p className="text-xs text-muted-foreground">
                         {currency ? `Amount (${currencyDisplayLabel(currency)})` : "Amount"}
@@ -386,6 +389,18 @@ export function NewRequestForm({ onSuccess, onCancel }: Props) {
                         {...register(`tranches.${i}.tentative_payment_date`)}
                       />
                     </div>
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-muted-foreground">Priority of Tranche Payment</p>
+                      {/* 5 Sep 2026: badge-only in the queues — reserve High
+                          Priority for genuinely urgent payments. */}
+                      <select
+                        {...register(`tranches.${i}.priority`)}
+                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        <option value="normal">Normal</option>
+                        <option value="high">High Priority</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -402,7 +417,7 @@ export function NewRequestForm({ onSuccess, onCancel }: Props) {
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => append({ amount: undefined as unknown as number, tentative_payment_date: todayLocalISO() })}
+                  onClick={() => append({ amount: undefined as unknown as number, tentative_payment_date: todayLocalISO(), priority: "normal" })}
                 >
                   <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Tranche {fields.length + 1}
                 </Button>

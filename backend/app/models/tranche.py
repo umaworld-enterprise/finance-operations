@@ -92,6 +92,10 @@ class PaymentTranche(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Accounts-entered alongside the payment details; informational only.
     secondary_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
     secondary_amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    # Priority of Tranche Payment (5 Sep 2026, migration 0035): 'normal'
+    # (default) or 'high' — merchandiser-chosen, badge-only in the queues
+    # (never changes list ordering).
+    priority: Mapped[str] = mapped_column(String(10), nullable=False, default="normal")
 
     deposit_request: Mapped["DepositRequest"] = relationship(back_populates="tranches")
     paid_by_user: Mapped["User | None"] = relationship(foreign_keys=[paid_by])
@@ -113,6 +117,7 @@ class PaymentTranche(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("deposit_request_id", "tranche_number", name="uq_tranche_request_number"),
         CheckConstraint("amount > 0", name="ck_tranche_amount_positive"),
+        CheckConstraint("priority IN ('normal', 'high')", name="ck_tranche_priority"),
         Index("idx_payment_tranches_request", "deposit_request_id"),
         Index("idx_payment_tranches_status", "status"),
     )

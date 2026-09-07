@@ -242,7 +242,7 @@ export function useTranches(requestId: string) {
 export function useUpdateTranche(requestId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ trancheId, data }: { trancheId: string; data: { amount?: number; tentative_payment_date?: string } }) =>
+    mutationFn: ({ trancheId, data }: { trancheId: string; data: { amount?: number; tentative_payment_date?: string; priority?: "normal" | "high" } }) =>
       requestService.updateTranche(requestId, trancheId, data),
     onSuccess: () => invalidateRequestAndTranches(qc, requestId),
   });
@@ -264,7 +264,7 @@ export function useTranchesModifiable(requestId: string) {
 export function useAddTranche(requestId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { amount: number; tentative_payment_date: string }) =>
+    mutationFn: (data: { amount: number; tentative_payment_date: string; priority?: "normal" | "high" }) =>
       requestService.addTranche(requestId, data),
     onSuccess: () => invalidateRequestAndTranches(qc, requestId),
   });

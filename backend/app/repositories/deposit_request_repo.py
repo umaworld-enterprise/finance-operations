@@ -45,6 +45,7 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         currency=None,
         date_from=None,
         date_to=None,
+        priority: str | None = None,
         search: str | None = None,
     ):
         if role == UserRole.MERCHANDISER:
@@ -89,6 +90,23 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
                 DepositRequest.created_at
                 < datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc)
             )
+        # Priority filter (5 Sep 2026): 'high' → requests with at least one
+        # UNPAID high-priority tranche (matches the queue badge); 'normal' →
+        # requests without one. Opt-in via the dynamic filter bar.
+        if priority in ("high", "normal"):
+            from app.models.enums import TrancheStatus
+            from app.models.tranche import PaymentTranche
+
+            high_exists = (
+                select(PaymentTranche.id)
+                .where(
+                    PaymentTranche.deposit_request_id == DepositRequest.id,
+                    PaymentTranche.status == TrancheStatus.UNPAID,
+                    PaymentTranche.priority == "high",
+                )
+                .exists()
+            )
+            stmt = stmt.where(high_exists if priority == "high" else ~high_exists)
         if search and search.strip():
             # Relations are selectinload'ed (separate SELECTs), so name search
             # needs explicit joins here. Inner joins are safe — supplier_id and
@@ -117,6 +135,7 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         currency=None,
         date_from=None,
         date_to=None,
+        priority: str | None = None,
         search: str | None = None,
         sort: str | None = None,
         limit: int = 50,
@@ -127,7 +146,7 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
             status=status, supplier_id=supplier_id,
             customer_id=customer_id, vertical_id=vertical_id, created_by=created_by,
             currency=currency, date_from=date_from, date_to=date_to,
-            search=search,
+            priority=priority, search=search,
         )
         # created_at tiebreak keeps amount sorts stable across pages.
         _SORTS = {
@@ -152,6 +171,7 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         currency=None,
         date_from=None,
         date_to=None,
+        priority: str | None = None,
         search: str | None = None,
     ) -> int:
         stmt = self._apply_filters(
@@ -160,7 +180,7 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
             status=status, supplier_id=supplier_id,
             customer_id=customer_id, vertical_id=vertical_id, created_by=created_by,
             currency=currency, date_from=date_from, date_to=date_to,
-            search=search,
+            priority=priority, search=search,
         )
         result = await self._session.execute(stmt)
         return result.scalar_one()

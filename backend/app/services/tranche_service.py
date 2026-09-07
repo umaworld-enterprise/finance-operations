@@ -197,6 +197,8 @@ class TrancheService:
             tranche_number=next_number,
             amount=data.amount,
             tentative_payment_date=data.tentative_payment_date,
+            # Priority of Tranche Payment (5 Sep 2026) — badge only.
+            priority=data.priority,
             # Release gate (19 Aug 2026): tranche 2 onwards is a FUTURE
             # payment — it stays "Yet to be Released" until the merchandiser
             # releases it. Tranche 1 is payable immediately.

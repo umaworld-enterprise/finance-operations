@@ -62,6 +62,8 @@ async def list_requests(
     currency: CurrencyCode | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    # Priority filter (5 Sep 2026): high = any unpaid high-priority tranche.
+    priority: str | None = Query(None, pattern="^(normal|high)$"),
     search: str | None = Query(None, max_length=100),
     sort: str | None = Query(None, pattern="^(newest|oldest|amount_desc|amount_asc)$"),
     page: int = Query(1, ge=1),
@@ -74,7 +76,7 @@ async def list_requests(
         status=status_filter, supplier_id=supplier_id,
         customer_id=customer_id, vertical_id=vertical_id,
         created_by=created_by, currency=currency,
-        date_from=date_from, date_to=date_to,
+        date_from=date_from, date_to=date_to, priority=priority,
         search=search, sort=sort, limit=page_size, offset=offset,
     )
     total = await repo.count_for_role(
@@ -82,7 +84,7 @@ async def list_requests(
         status=status_filter, supplier_id=supplier_id,
         customer_id=customer_id, vertical_id=vertical_id,
         created_by=created_by, currency=currency,
-        date_from=date_from, date_to=date_to,
+        date_from=date_from, date_to=date_to, priority=priority,
         search=search,
     )
     responses = [DepositRequestResponse.model_validate(r) for r in items]

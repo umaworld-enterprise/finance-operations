@@ -25,6 +25,9 @@ export interface RequestFilterValues {
   vertical_id?: string;
   created_by?: string;
   currency?: string;
+  /** Priority of Tranche Payment (5 Sep 2026): 'high' = at least one unpaid
+   * high-priority tranche; 'normal' = none. */
+  priority?: string;
   date_from?: string;
   date_to?: string;
 }
@@ -39,6 +42,7 @@ const FIELD_LABELS: Record<FieldKey, string> = {
   vertical_id: "Vertical",
   created_by: "Merchandiser",
   currency: "Currency",
+  priority: "Priority",
   date_range: "Request date",
   date_from: "Request date", // never listed directly — lives in date_range
   date_to: "Request date",
@@ -61,6 +65,12 @@ export function matchesRequestFilters(req: DepositRequest, values: RequestFilter
   if (values.vertical_id && req.vertical?.id !== values.vertical_id) return false;
   if (values.created_by && req.created_by !== values.created_by) return false;
   if (values.currency && req.currency !== values.currency) return false;
+  if (values.priority) {
+    const high = (req.tranches ?? []).some(
+      (t) => t.status === "unpaid" && t.priority === "high",
+    );
+    if (values.priority === "high" ? !high : high) return false;
+  }
   const created = (req.created_at ?? "").slice(0, 10);
   if (values.date_from && created && created < values.date_from) return false;
   if (values.date_to && created && created > values.date_to) return false;
@@ -99,6 +109,7 @@ export function RequestFilterBar({
     "vertical_id",
     ...(showMerchandiser ? (["created_by"] as FieldKey[]) : []),
     "currency",
+    "priority",
     "date_range",
   ];
   const addable = availableFields.filter((f) => !active.includes(f));
@@ -135,7 +146,7 @@ export function RequestFilterBar({
   );
 
   const optionSelect = (
-    field: "supplier_id" | "customer_id" | "vertical_id" | "created_by" | "currency",
+    field: "supplier_id" | "customer_id" | "vertical_id" | "created_by" | "currency" | "priority",
     options: { value: string; label: string }[],
     placeholder: string,
   ) =>
@@ -183,6 +194,15 @@ export function RequestFilterBar({
         optionSelect("created_by", merchandisers.map((m) => ({ value: m.id, label: m.full_name })), "All merchandisers")}
       {active.includes("currency") &&
         optionSelect("currency", CURRENCIES.map((c) => ({ value: c, label: c })), "All currencies")}
+      {active.includes("priority") &&
+        optionSelect(
+          "priority",
+          [
+            { value: "high", label: "High Priority" },
+            { value: "normal", label: "Normal only" },
+          ],
+          "Any priority",
+        )}
       {active.includes("date_range") &&
         chip(
           "date_range",

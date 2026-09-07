@@ -9,7 +9,14 @@
 // the month's actual requested deposit amounts.
 
 import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { toast } from "sonner";
+
+// Recharts is heavy — load the analysis chart only when the page renders.
+const ProjectionChart = dynamic(
+  () => import("@/components/charts/ProjectionChart").then((m) => ({ default: m.ProjectionChart })),
+  { ssr: false },
+);
 import { AlertTriangle, CalendarClock, LineChart, UserCog } from "lucide-react";
 import { TopNav } from "@/components/layout/TopNav";
 import { RoleGuard } from "@/components/layout/RoleGuard";
@@ -266,6 +273,8 @@ function ProjectionDashboard() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
+  // Analysis view (5 Sep 2026): which currency the bar chart plots.
+  const [chartCurrency, setChartCurrency] = useState<"usd" | "eur" | "cny">("usd");
   const { data, isLoading } = useProjectionDashboard(year, month);
   const rows = data?.rows ?? [];
 
@@ -300,6 +309,53 @@ function ProjectionDashboard() {
           </select>
         </div>
       </div>
+      {/* Analysis view (5 Sep 2026): achievement strip + grouped bar chart
+          per currency, with the detail table below. */}
+      {!isLoading && rows.length > 0 && (
+        <div className="px-5 py-4 border-b border-border space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="grid grid-cols-3 gap-4">
+              {(() => {
+                const proj = totals[`proj_${chartCurrency}`];
+                const actual = totals[`actual_${chartCurrency}`];
+                const pct = proj > 0 ? (actual / proj) * 100 : null;
+                const cur = chartCurrency.toUpperCase();
+                return (
+                  <>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Projected ({cur})</p>
+                      <p className="text-sm font-semibold text-foreground tabular-nums">{fmt(proj)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Actual ({cur})</p>
+                      <p className="text-sm font-semibold text-foreground tabular-nums">{fmt(actual)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Achievement</p>
+                      <p className={`text-sm font-semibold tabular-nums ${pct == null ? "text-muted-foreground" : pct >= 100 ? "text-emerald-700" : "text-amber-700"}`}>
+                        {pct == null ? "—" : `${pct.toFixed(1)}%`}
+                      </p>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+            <div className="flex items-center gap-1">
+              {(["usd", "eur", "cny"] as const).map((c) => (
+                <Button
+                  key={c}
+                  size="sm"
+                  variant={chartCurrency === c ? "default" : "outline"}
+                  onClick={() => setChartCurrency(c)}
+                >
+                  {c.toUpperCase()}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <ProjectionChart rows={rows} currency={chartCurrency} />
+        </div>
+      )}
       <div className="overflow-x-auto">
         <Table>
           <TableHeader>
