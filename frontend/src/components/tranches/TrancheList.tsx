@@ -9,6 +9,7 @@ import { DecisionDialog } from "@/components/hom/DecisionDialog";
 import {
   useAddTranche,
   useDeleteTranche,
+  useDeleteTrancheTtCopy,
   usePayTranche,
   useRejectTranche,
   useReleaseTranche,
@@ -241,9 +242,12 @@ export function TrancheList({
   const rejectTranche = useRejectTranche(requestId);
   const releaseTranche = useReleaseTranche(requestId);
   const updateDetails = useUpdateTranchePaymentDetails(requestId);
+  const deleteTtCopy = useDeleteTrancheTtCopy(requestId);
   const [payConfirmId, setPayConfirmId] = useState<string | null>(null);
   const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
   const [releaseConfirmId, setReleaseConfirmId] = useState<string | null>(null);
+  // Delete TT copy confirmation (4 Sep 2026).
+  const [deleteTtConfirmId, setDeleteTtConfirmId] = useState<string | null>(null);
   // Disclaimer shown before the add form opens (19 Aug 2026): tranche 2
   // onwards is a future payment the merchandiser must release later.
   const [addDisclaimerOpen, setAddDisclaimerOpen] = useState(false);
@@ -399,6 +403,22 @@ export function TrancheList({
       toast.error(err instanceof Error ? err.message : "Failed to mark the tranche paid.");
     } finally {
       setPayConfirmId(null);
+    }
+  };
+
+  // Delete a TT copy (4 Sep 2026) — accounts fix for a wrong upload.
+  const doDeleteTt = async (trancheId: string) => {
+    const t = tranches.find((x) => x.id === trancheId);
+    setDeleteTtConfirmId(null);
+    if (!t) return;
+    try {
+      await deleteTtCopy.mutateAsync(trancheId);
+      toast.success(
+        `TT copy deleted from ${t.label}.` +
+          (t.status === "unpaid" ? " Upload a new one before marking it paid." : ""),
+      );
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete the TT copy.");
     }
   };
 
@@ -567,16 +587,57 @@ export function TrancheList({
                 </dl>
               )}
 
+              {/* One hidden file input per tranche (accounts mode) — shared
+                  by Upload and Replace so the picker opens from anywhere. */}
+              {mode === "accounts" && !isRejected && (
+                <input
+                  ref={(el) => { fileInputs.current[t.id] = el; }}
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void doUpload(t, file);
+                  }}
+                  className="hidden"
+                />
+              )}
               {t.tt_copy_url && !isEditing && (
-                <a
-                  href={t.tt_copy_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border bg-secondary text-secondary-foreground text-xs font-medium hover:bg-muted transition-colors"
-                >
-                  View TT copy{t.tt_copy_filename ? ` — ${t.tt_copy_filename}` : ""}
-                  <ExternalLink className="h-3 w-3" />
-                </a>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <a
+                    href={t.tt_copy_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border bg-secondary text-secondary-foreground text-xs font-medium hover:bg-muted transition-colors"
+                  >
+                    View TT copy{t.tt_copy_filename ? ` — ${t.tt_copy_filename}` : ""}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                  {/* Accounts can replace or delete an uploaded TT copy
+                      (4 Sep 2026) — both audited; the old Drive file is
+                      cleaned up server-side. */}
+                  {mode === "accounts" && !isRejected && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => fileInputs.current[t.id]?.click()}
+                        disabled={uploadingId === t.id || deleteTtCopy.isPending}
+                      >
+                        <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                        {uploadingId === t.id ? "Uploading…" : "Replace"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => setDeleteTtConfirmId(t.id)}
+                        disabled={uploadingId === t.id || deleteTtCopy.isPending}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete
+                      </Button>
+                    </>
+                  )}
+                </div>
               )}
 
               {/* Merchandiser: edit/delete unpaid tranches while the request
@@ -650,18 +711,8 @@ export function TrancheList({
 
                   {!t.tt_copy_url && (
                     <div className="flex">
-                      {/* Hidden native input — the single Upload button opens
-                          the picker and the chosen file uploads immediately. */}
-                      <input
-                        ref={(el) => { fileInputs.current[t.id] = el; }}
-                        type="file"
-                        accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) void doUpload(t, file);
-                        }}
-                        className="hidden"
-                      />
+                      {/* The tranche's shared hidden input (rendered above)
+                          opens the picker; the chosen file uploads immediately. */}
                       <Button
                         size="sm"
                         variant="secondary"
@@ -719,16 +770,6 @@ export function TrancheList({
                     mandatory. Upload its TT copy to complete the record.
                   </p>
                   <div className="flex">
-                    <input
-                      ref={(el) => { fileInputs.current[t.id] = el; }}
-                      type="file"
-                      accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) void doUpload(t, file);
-                      }}
-                      className="hidden"
-                    />
                     <Button
                       size="sm"
                       variant="secondary"
@@ -824,6 +865,15 @@ export function TrancheList({
         description="The Accounts team will be notified that the tranche is now payable. This cannot be undone."
         confirmLabel="Yes, release it"
         onConfirm={() => releaseConfirmId && doRelease(releaseConfirmId)}
+      />
+
+      <ConfirmDialog
+        open={deleteTtConfirmId !== null}
+        onOpenChange={(open) => !open && setDeleteTtConfirmId(null)}
+        title="Delete this TT copy?"
+        description="The document is removed from the tranche and from Drive; the deletion is recorded in the audit trail. An unpaid tranche cannot be marked paid again until a new TT copy is uploaded."
+        confirmLabel="Yes, delete it"
+        onConfirm={() => deleteTtConfirmId && doDeleteTt(deleteTtConfirmId)}
       />
 
       <ConfirmDialog

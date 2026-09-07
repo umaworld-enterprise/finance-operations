@@ -351,6 +351,16 @@ export function useUploadTrancheTtCopy(requestId: string) {
   });
 }
 
+// Delete a tranche's TT copy (4 Sep 2026) — Accounts only.
+export function useDeleteTrancheTtCopy(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (trancheId: string) =>
+      requestService.deleteTrancheTtCopy(requestId, trancheId),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
 export function useRequestAuditTrail(requestId: string) {
   return useQuery({
     queryKey: [...REQUESTS_KEY, requestId, "audit"],

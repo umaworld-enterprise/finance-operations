@@ -283,6 +283,14 @@ const requestService = {
     return data;
   },
 
+  // Delete a tranche's TT copy (4 Sep 2026) — Accounts only, audited.
+  deleteTrancheTtCopy: async (id: string, trancheId: string): Promise<PaymentTranche> => {
+    const { data } = await api.delete<PaymentTranche>(
+      `/requests/${id}/tranches/${trancheId}/tt-copy`,
+    );
+    return data;
+  },
+
   auditTrail: async (id: string): Promise<RequestAuditEntry[]> => {
     const { data } = await api.get<RequestAuditEntry[]>(`/requests/${id}/audit`);
     return data;
