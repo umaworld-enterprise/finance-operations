@@ -95,6 +95,15 @@ export function requestDisplayNumber(req: { request_number: string }): string {
   return req.request_number;
 }
 
+// Priority of Tranche Payment (5 Sep 2026): a request carries the High
+// Priority badge while any UNPAID tranche is marked high — display only,
+// never changes list ordering.
+export function hasHighPriorityUnpaid(req: {
+  tranches?: { status: string; priority?: string }[] | null;
+}): boolean {
+  return (req.tranches ?? []).some((t) => t.status === "unpaid" && t.priority === "high");
+}
+
 // Client-side counterpart of the server `search` param — used by the
 // non-paginated lists (accounts pending queue, HoM queue). Same fields.
 export function requestMatchesSearch(

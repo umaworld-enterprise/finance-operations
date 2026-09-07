@@ -1648,3 +1648,38 @@ backend + frontend together.
 carries the date) until the form is complete — a per-month key would have
 fired only once inside the 72-hour PWA sessions. Daily bell+push reminders
 were already in (04:00 UTC job, 25th→EOM countdown wording).
+
+### Projections analysis view (5 Sep 2026)
+The Projections dashboard now carries a full analysis block above the table:
+an achievement strip (Projected / Actual / Achievement % for the selected
+currency), a USD-EUR-CNY toggle, and a grouped BAR CHART (Projected vs
+Actual per vertical, lazy-loaded Recharts — `charts/ProjectionChart.tsx`).
+The detail table with the per-currency totals row stays below. tsc clean.
+
+## Priority of Tranche Payment (5 Sep 2026) — migration 0035
+
+`payment_tranches.priority` — 'normal' (default) / 'high', CHECK-constrained.
+- **New Request form**: each tranche row gains a "Priority of Tranche
+  Payment" dropdown (default Normal; "High Priority" for urgent payments).
+- Also selectable on **Add Tranche** and the merchandiser's tranche **edit**
+  form (unpaid tranches only, same rules as amount/date; flows through the
+  existing update audit).
+- **Display, never ordering**: a red "High" pill appears beside the request
+  number in the Accounts Pending Payment queue (desktop + mobile card) and
+  in the merchandiser's request list — only while at least one UNPAID
+  tranche is high (paid/rejected tranches stop badging the row). Tranche
+  cards show a "High Priority" pill. No sort/filter behaviour changes.
+- Backend: TrancheCreate/TrancheUpdate/TrancheResponse carry `priority`;
+  request-create and add-tranche persist it. New unit test (default normal,
+  add high, edit back to normal). 309 backend tests green; tsc clean.
+
+Deploy: `alembic upgrade head` (0035) + backend & frontend together.
+
+### Priority filter (5 Sep 2026 follow-up)
+The dynamic filter bar gained a **Priority** field — "High Priority" (at
+least one unpaid high-priority tranche, i.e. exactly the rows carrying the
+queue badge) or "Normal only". Works everywhere the bar lives (Accounts
+Workspace all tabs incl. the client-filtered pending queue + Bank Ledger,
+merchandiser My Requests, HoM queue). Backend: GET /requests `priority`
+param (EXISTS subquery on unpaid high tranches). Opt-in — default listing
+untouched. 309 tests green; tsc clean.

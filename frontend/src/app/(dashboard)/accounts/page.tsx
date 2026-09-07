@@ -25,7 +25,7 @@ import { ShipmentsTable } from "@/components/analytics/ShipmentsTable";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
-import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, cn, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
+import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, cn, hasHighPriorityUnpaid, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
 import { differenceInDays } from "date-fns";
 import { needsRelease } from "@/components/tranches/TrancheList";
 import { ExportButton } from "@/components/ui/ExportButton";
@@ -138,9 +138,16 @@ function PendingTable({
         ) : rows.map((req) => (
           <div key={req.id} className="p-4 space-y-2.5">
             <div className="flex items-start justify-between gap-3">
-              <Link href={`/accounts/${req.id}`} className="font-mono text-xs font-bold text-foreground hover:underline underline-offset-2">
-                {requestDisplayNumber(req)}
-              </Link>
+              <span className="flex items-center gap-1.5">
+                <Link href={`/accounts/${req.id}`} className="font-mono text-xs font-bold text-foreground hover:underline underline-offset-2">
+                  {requestDisplayNumber(req)}
+                </Link>
+                {hasHighPriorityUnpaid(req) && (
+                  <span className="inline-flex items-center text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full">
+                    High
+                  </span>
+                )}
+              </span>
               {agingBadge(req.created_at)}
             </div>
             <div className="text-xs text-muted-foreground font-mono">Invoice # {req.sunshine_invoice_number || "—"}</div>
@@ -202,9 +209,17 @@ function PendingTable({
             ) : rows.map((req) => (
               <TableRow key={req.id}>
                 <TableCell>
-                  <Link href={`/accounts/${req.id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
-                    {requestDisplayNumber(req)}
-                  </Link>
+                  <div className="flex items-center gap-1.5">
+                    <Link href={`/accounts/${req.id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
+                      {requestDisplayNumber(req)}
+                    </Link>
+                    {/* Priority badge (5 Sep 2026) — display only, no re-ordering. */}
+                    {hasHighPriorityUnpaid(req) && (
+                      <span className="inline-flex items-center text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                        High
+                      </span>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDate(req.created_at)}</TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>

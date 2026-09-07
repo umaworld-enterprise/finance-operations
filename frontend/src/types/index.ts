@@ -212,6 +212,8 @@ export interface PaymentTranche {
    * alongside the payment details; informational only. */
   secondary_currency: string | null;
   secondary_amount: number | null;
+  /** Priority of Tranche Payment (5 Sep 2026) — badge-only in the queues. */
+  priority: "normal" | "high";
   /** Set when Accounts rejected the tranche (Aug 2026) — the tranche stays
    * visible as a dead record and its amount stops counting. */
   rejection_reason: string | null;

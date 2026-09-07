@@ -1028,3 +1028,29 @@ async def test_secondary_amount_requires_its_currency():
     # Currency alone (amount to follow) is fine, and both-empty is fine.
     TranchePaymentDetailsUpdate(secondary_currency="EUR")
     TranchePaymentDetailsUpdate()
+
+
+# ── Priority of Tranche Payment (5 Sep 2026) ──────────────────────────────────
+
+
+async def test_tranche_priority_defaults_normal_and_is_editable(db_session):
+    merch, _, request, (tranche,) = await _setup(db_session)
+    svc = TrancheService(db_session)
+    assert tranche.priority in (None, "normal")  # factory default → normal
+
+    added = await svc.add_tranche(
+        request.id,
+        TrancheCreate(
+            amount=Decimal("500.00"),
+            tentative_payment_date=date(2026, 10, 1),
+            priority="high",
+        ),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert added.priority == "high"
+
+    updated = await svc.update_tranche(
+        request.id, added.id, TrancheUpdate(priority="normal"),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert updated.priority == "normal"

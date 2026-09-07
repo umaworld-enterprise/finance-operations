@@ -21,6 +21,8 @@ export interface PaginatedResponse<T> {
 export interface TranchePayload {
   amount: number;
   tentative_payment_date: string;
+  /** Priority of Tranche Payment (5 Sep 2026) — badge-only in the queues. */
+  priority?: "normal" | "high";
 }
 
 export interface CreateRequestPayload {
