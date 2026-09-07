@@ -20,7 +20,7 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
-import { useRequestsPaginated, usePendingQueue, useQueueKpis, usePendingRelease } from "@/hooks/useRequests";
+import { useRequestsPaginated, usePendingQueue, useQueueKpis } from "@/hooks/useRequests";
 import { ShipmentsTable } from "@/components/analytics/ShipmentsTable";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { SearchInput } from "@/components/ui/SearchInput";
@@ -29,11 +29,12 @@ import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, cn, re
 import { differenceInDays } from "date-fns";
 import { needsRelease } from "@/components/tranches/TrancheList";
 import { ExportButton } from "@/components/ui/ExportButton";
-import { bankLedgerEntries, exportBankLedgerToExcel, exportPendingReleaseToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
+import { bankLedgerEntries, exportBankLedgerToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
 import { BankLedgerTable } from "@/components/tables/BankLedgerTable";
-import { Clock, CheckCircle, AlertTriangle, BookOpen, CalendarClock, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
+import { filterParams, matchesRequestFilters, RequestFilterBar, type RequestFilterValues } from "@/components/filters/RequestFilterBar";
+import { Clock, CheckCircle, AlertTriangle, BookOpen, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
 import Link from "next/link";
-import type { DepositRequest, PendingReleaseRow } from "@/types";
+import type { DepositRequest } from "@/types";
 
 const PAGE_SIZE = 50;
 
@@ -73,12 +74,15 @@ function payableDueSoon(req: DepositRequest): number {
     .reduce((sum, t) => sum + Number(t.amount), 0);
 }
 
-// Sum of this request's "Yet to be Released" tranches (2 onwards, unpaid,
-// unreleased) — waiting on the merchandiser, not payable by Accounts yet.
-function yetToReleaseAmount(req: DepositRequest): number {
-  return (req.tranches ?? [])
-    .filter(needsRelease)
-    .reduce((sum, t) => sum + Number(t.amount), 0);
+// Deposit % (4 Sep 2026 — replaced the Yet to be Released column): the
+// stored percentage, else derived from deposit / proforma total.
+function depositPct(req: DepositRequest): string {
+  const pct =
+    req.deposit_percentage ??
+    (req.total_supplier_invoice_amount
+      ? (req.deposit_amount / req.total_supplier_invoice_amount) * 100
+      : null);
+  return pct != null ? `${Number(pct).toFixed(2)}%` : "—";
 }
 
 function PendingTable({
@@ -152,11 +156,9 @@ function PendingTable({
             <div className="text-xs text-muted-foreground">
               Payable (0–10 days): <span className="font-semibold text-foreground">{formatCurrency(payableDueSoon(req), req.currency)}</span>
             </div>
-            {yetToReleaseAmount(req) > 0 && (
-              <div className="text-xs text-muted-foreground">
-                Yet to be Released: <span className="font-semibold text-amber-700">{formatCurrency(yetToReleaseAmount(req), req.currency)}</span>
-              </div>
-            )}
+            <div className="text-xs text-muted-foreground">
+              Deposit %: <span className="font-semibold text-foreground">{depositPct(req)}</span>
+            </div>
             <div className="flex items-center justify-between">
               <span className="font-bold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</span>
               <Button size="sm" asChild>
@@ -178,11 +180,13 @@ function PendingTable({
               <TableHead>Request Date</TableHead>
               <TableHead>Invoice #</TableHead>
               <TableHead>Supplier</TableHead>
-              <TableHead>Customer</TableHead>
+              {/* 4 Sep 2026: proforma # after Supplier; Vertical before Customer. */}
+              <TableHead>Supplier Proforma Invoice #</TableHead>
               <TableHead>Vertical/Category</TableHead>
+              <TableHead>Customer</TableHead>
               <TableHead>Merchandiser</TableHead>
               <TableHead className="text-right">Amount Payable (0–10 days)</TableHead>
-              <TableHead className="text-right">Yet to be Released</TableHead>
+              <TableHead className="text-right">Deposit %</TableHead>
               <TableHead className="text-right">Deposit</TableHead>
               <TableHead>Currency</TableHead>
               <TableHead>Tentative Payment</TableHead>
@@ -192,9 +196,9 @@ function PendingTable({
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableSkeleton rows={5} cols={14} />
+              <TableSkeleton rows={5} cols={15} />
             ) : rows.length === 0 ? (
-              <tr><td colSpan={14}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
+              <tr><td colSpan={15}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id}>
                 <TableCell>
@@ -205,19 +209,12 @@ function PendingTable({
                 <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDate(req.created_at)}</TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
-                <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{req.supplier_invoice_number || "—"}</TableCell>
                 <TableCell className="text-muted-foreground text-xs">{req.vertical?.name ?? "—"}</TableCell>
+                <TableCell className="text-muted-foreground">{req.customer.name}</TableCell>
                 <TableCell className="text-muted-foreground text-xs">{req.creator?.full_name ?? "—"}</TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(payableDueSoon(req), req.currency)}</TableCell>
-                <TableCell className="text-right text-sm">
-                  {yetToReleaseAmount(req) > 0 ? (
-                    <span className="font-semibold text-amber-700">
-                      {formatCurrency(yetToReleaseAmount(req), req.currency)}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </TableCell>
+                <TableCell className="text-right text-sm text-muted-foreground">{depositPct(req)}</TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs font-medium">{currencyDisplayLabel(req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDate(nextTentativeDate(req))}</TableCell>
@@ -385,69 +382,6 @@ function StatusTable({
   );
 }
 
-// "Yet to be Released" tab (19 Aug 2026): tranches 2+ the merchandiser has
-// not released yet — Accounts cannot pay these; the amount column shows what
-// is waiting on each release.
-function YetToReleaseTable({ rows }: { rows: PendingReleaseRow[] }) {
-  return (
-    <Card className="overflow-hidden">
-      <div className="px-5 py-4 border-b border-border">
-        <h3 className="font-semibold text-foreground text-sm">Yet to be Released by Merchandiser</h3>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Future tranches awaiting the merchandiser&apos;s release — they become
-          payable here the moment they are released.
-        </p>
-      </div>
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Request #</TableHead>
-              <TableHead>Invoice #</TableHead>
-              <TableHead>Supplier</TableHead>
-              <TableHead>Merchandiser</TableHead>
-              <TableHead>Tranche</TableHead>
-              <TableHead className="text-right">Amount (to be released)</TableHead>
-              <TableHead>Tentative Payment</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={7}>
-                  <EmptyState
-                    icon={CalendarClock}
-                    title="Nothing awaiting release"
-                    description="Future tranches the merchandiser has not released yet will appear here."
-                  />
-                </td>
-              </tr>
-            ) : rows.map((r) => (
-              <TableRow key={r.tranche_id}>
-                <TableCell>
-                  <Link href={`/accounts/${r.request_id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
-                    {r.request_number}
-                  </Link>
-                </TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">{r.sunshine_invoice_number || "—"}</TableCell>
-                <TableCell className="text-foreground font-medium">{r.supplier_name}</TableCell>
-                <TableCell className="text-muted-foreground text-xs">{r.merchandiser_name ?? "—"}</TableCell>
-                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{r.tranche_label}</TableCell>
-                <TableCell className="text-right font-semibold text-foreground">
-                  {formatCurrency(r.amount, r.currency)}
-                </TableCell>
-                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
-                  {r.tentative_payment_date ? formatDate(r.tentative_payment_date) : "—"}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </Card>
-  );
-}
-
 function AllTable({ rows }: { rows: DepositRequest[] }) {
   return (
     <Card className="overflow-hidden">
@@ -550,10 +484,14 @@ export default function AccountsDashboard() {
   // null = untouched: the pending queue keeps the server's latest-first
   // default (19 Aug 2026) until the user actively picks a sort.
   const [sort, setSort]         = useState<RequestSort | null>(null);
+  // Dynamic filter module (4 Sep 2026): supplier / customer / vertical /
+  // merchandiser / currency / request-date range — applied to every tab.
+  const [filters, setFilters]   = useState<RequestFilterValues>({});
   const debouncedSearch = useDebouncedValue(search.trim());
   const listParams = {
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(sort && sort !== "newest" ? { sort } : {}),
+    ...filterParams(filters),
   };
 
   const { data: queue = [], isLoading: queueLoading } = usePendingQueue();
@@ -561,10 +499,12 @@ export default function AccountsDashboard() {
   // client-side on the raw input so it feels instant.
   const term = search.trim();
   let filteredQueue = term ? queue.filter((r) => requestMatchesSearch(r, term)) : queue;
+  filteredQueue = filteredQueue.filter((r) => matchesRequestFilters(r, filters));
   if (sort) filteredQueue = sortRequests(filteredQueue, sort);
   // Bank Ledger tab (4 Sep 2026): the pending queue reshaped into the
-  // executives' Excel ledger rows — one row per tranche, oldest first.
-  const ledgerEntries = bankLedgerEntries(filteredQueue);
+  // executives' Excel ledger rows — UNPAID tranches only (the "1323" fix:
+  // paid tranches never belong in a pending payments sheet), oldest first.
+  const ledgerEntries = bankLedgerEntries(filteredQueue, { unpaidOnly: true });
 
   const { data: holdData, isLoading: holdLoading } = useRequestsPaginated(holdPage, PAGE_SIZE, {
     status: ["hold_by_accounts", "hold_by_merchandiser"],
@@ -591,8 +531,15 @@ export default function AccountsDashboard() {
   // KPI cards: financial-year-to-date (April–March), one backend query
   // (UAT Aug 2026, item 5).
   const { data: kpis } = useQueueKpis();
-  // "Yet to be Released" tranches (19 Aug 2026) — waiting on merchandisers.
-  const { data: pendingRelease = [] } = usePendingRelease();
+
+  function changeFilters(value: RequestFilterValues) {
+    setFilters(value);
+    setHoldPage(1);
+    setProcessedPage(1);
+    setRejectedPage(1);
+    setCancelledPage(1);
+    setAllPage(1);
+  }
 
   function changeSearch(value: string) {
     setSearch(value);
@@ -665,7 +612,7 @@ export default function AccountsDashboard() {
             label="Pending Payments (Bank Ledger)"
             value={ledgerEntries.length}
             icon={BookOpen}
-            subtext="Live — one row per tranche"
+            subtext="Live — one row per unpaid tranche"
             onClick={() => goToTab("bank-ledger")}
           />
           <StatCard
@@ -703,15 +650,6 @@ export default function AccountsDashboard() {
             subtext={fySubtext}
             onClick={() => goToTab("all")}
           />
-          {/* Live bucket, not FY (19 Aug 2026): future tranches waiting on
-              the merchandiser's release — not payable yet. */}
-          <StatCard
-            label="Yet to be Released by Merchandiser"
-            value={pendingRelease.length}
-            icon={CalendarClock}
-            subtext="Live — tranches awaiting release"
-            onClick={() => goToTab("yet-to-release")}
-          />
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
@@ -728,6 +666,9 @@ export default function AccountsDashboard() {
             className="sm:w-52"
           />
         </div>
+
+        {/* Dynamic filter module (4 Sep 2026) — applies to every tab. */}
+        <RequestFilterBar values={filters} onChange={changeFilters} showMerchandiser />
 
         <Tabs value={activeTab} onValueChange={setActiveTab} id="status-tabs" className="scroll-mt-4">
           <TabsList className="mb-1">
@@ -779,26 +720,8 @@ export default function AccountsDashboard() {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="yet-to-release">
-              Yet to be Released
-              {pendingRelease.length > 0 && (
-                <span className="ml-1.5 bg-secondary text-secondary-foreground border border-border text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                  {pendingRelease.length}
-                </span>
-              )}
-            </TabsTrigger>
             <TabsTrigger value="all">All Requests</TabsTrigger>
           </TabsList>
-
-          <TabsContent value="yet-to-release">
-            <div className="flex justify-end mb-2">
-              <ExportButton
-                count={pendingRelease.length}
-                onExport={() => exportPendingReleaseToExcel(pendingRelease, "yet-to-be-released.xlsx")}
-              />
-            </div>
-            <YetToReleaseTable rows={pendingRelease} />
-          </TabsContent>
 
           <TabsContent value="pending">
             {/* Single pending table (11 Aug — the > 10 days split was
@@ -807,7 +730,7 @@ export default function AccountsDashboard() {
               <ExportButton
                 count={filteredQueue.length}
                 onExport={() => exportRequestsToExcel(filteredQueue, "pending-payments.xlsx")}
-                onExportLedger={() => exportBankLedgerToExcel(filteredQueue, "pending-payments-bank-ledger.xlsx")}
+                onExportLedger={() => exportBankLedgerToExcel(filteredQueue, "pending-payments-bank-ledger.xlsx", { unpaidOnly: true })}
               />
             </div>
             <PendingTable
@@ -824,7 +747,7 @@ export default function AccountsDashboard() {
             <div className="flex justify-end mb-2">
               <ExportButton
                 count={ledgerEntries.length}
-                onExport={() => exportBankLedgerToExcel(filteredQueue, "pending-payments-bank-ledger.xlsx")}
+                onExport={() => exportBankLedgerToExcel(filteredQueue, "pending-payments-bank-ledger.xlsx", { unpaidOnly: true })}
               />
             </div>
             <BankLedgerTable entries={ledgerEntries} loading={queueLoading} />

@@ -47,32 +47,45 @@ export async function exportRequestsToExcel(
   );
 }
 
-// Bank-ledger format (4 Sep 2026, executive request; column mapping fixed
-// same day): one row per tranche. "Currency" carries the currency CODE and
-// "Debit" carries the tranche amount; a paid tranche is dated by its payment
-// date, an unpaid one by the request date. Voucher No., Rate, Credit and
-// BALANCE are maintained manually in Excel (no such data in the system) and
-// stay blank. The same entries feed both the Excel export and the on-screen
-// Bank Ledger tab.
+// Bank-ledger format (4 Sep 2026, executive request; final column sequence
+// same day): Date | Supplier | Supplier Proforma Invoice # | File Nos. |
+// Customer | Curr | EURO/CNY | Rate | Debit | Credit | BALANCE. One row per
+// tranche — "Curr" carries the currency CODE, "Debit" the tranche amount; a
+// paid tranche is dated by its payment date, an unpaid one by the request
+// date. EURO/CNY (kept empty by client decision for now), Rate, Credit and
+// BALANCE are maintained manually in Excel. The same entries feed both the
+// Excel export and the on-screen Bank Ledger tab.
 export interface BankLedgerEntry {
   date: string | null;
   supplier: string;
+  /** The "Supplier Proforma Invoice #" column (replaced Voucher No.). */
+  supplier_invoice: string;
   file_nos: string;
   customer: string;
-  /** The "Currency" column — the request's currency code. */
+  /** The "Curr" column — the request's currency code. */
   curr: string;
   /** The "Debit" column — the tranche amount in that currency. */
   amount: number;
 }
 
-export function bankLedgerEntries(rows: DepositRequest[]): BankLedgerEntry[] {
+export function bankLedgerEntries(
+  rows: DepositRequest[],
+  opts?: {
+    /** Pending Payments view (4 Sep 2026, the "1323" case): list only the
+     * tranches still to be paid — paid tranches never belong in a PENDING
+     * payments sheet. */
+    unpaidOnly?: boolean;
+  },
+): BankLedgerEntry[] {
   const entries = rows.flatMap((r) =>
     (r.tranches ?? [])
       .filter((t) => t.status !== "rejected")
+      .filter((t) => (opts?.unpaidOnly ? t.status === "unpaid" : true))
       .map((t) => ({
         date:
           (t.status === "paid" && t.payment_date ? t.payment_date : r.created_at) ?? null,
         supplier: r.supplier?.name ?? "",
+        supplier_invoice: r.supplier_invoice_number ?? "",
         file_nos: r.sunshine_invoice_number ?? "",
         customer: r.customer?.name ?? "",
         curr: r.currency ?? "",
@@ -85,16 +98,19 @@ export function bankLedgerEntries(rows: DepositRequest[]): BankLedgerEntry[] {
 }
 
 export async function exportBankLedgerToExcel(
-  rows: DepositRequest[], filename: string,
+  rows: DepositRequest[],
+  filename: string,
+  opts?: { unpaidOnly?: boolean },
 ): Promise<void> {
   await writeSheet(
-    bankLedgerEntries(rows).map((e) => ({
+    bankLedgerEntries(rows, opts).map((e) => ({
       "Date": e.date ? formatDate(e.date) : "",
       "Supplier": e.supplier,
-      "Voucher No.": "",
+      "Supplier Proforma Invoice #": e.supplier_invoice,
       "File Nos.": e.file_nos,
       "Customer": e.customer,
-      "Currency": e.curr,
+      "Curr": e.curr,
+      "EURO/CNY": "",
       "Rate": "",
       "Debit": e.amount,
       "Credit": "",

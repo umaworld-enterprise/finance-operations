@@ -104,6 +104,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.analytics.snapshot_job import refresh_all_snapshots
     from app.services.notification_service import (
         send_fallback_notifications,
+        send_projection_reminders,
         send_release_reminders,
     )
 
@@ -134,6 +135,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             hour=3,
             minute=30,
             id="tranche_release_reminders",
+            replace_existing=True,
+        )
+        # Projections (4 Sep 2026): daily 04:00 UTC ≈ 09:30 IST — fill
+        # reminders from the 25th, one-time blocked notice after the deadline.
+        _scheduler.add_job(
+            send_projection_reminders,
+            "cron",
+            hour=4,
+            minute=0,
+            args=[AsyncSessionFactory],
+            id="projection_reminders",
             replace_existing=True,
         )
         _scheduler.start()
@@ -312,6 +324,7 @@ def create_app() -> FastAPI:
     from app.api.v1.adjustments import router as adjustments_router
     from app.api.v1.file_remarks import router as file_remarks_router
     from app.api.v1.bank import router as bank_router
+    from app.api.v1.projections import router as projections_router
 
     prefix = "/api/v1"
     for r in [
@@ -323,6 +336,7 @@ def create_app() -> FastAPI:
         adjustments_router,
         file_remarks_router,
         bank_router,
+        projections_router,
         analytics_router,
         reports_router,
         admin_router,

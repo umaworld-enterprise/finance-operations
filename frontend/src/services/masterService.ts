@@ -189,6 +189,15 @@ const masterService = {
     await api.post(`/masters/suppliers/defaulted/${flagId}/resolve`);
   },
 
+  // Minimal merchandiser list for the dynamic filter dropdowns (4 Sep 2026)
+  // — available to every role, unlike the Super-Admin-only users master.
+  getMerchandiserOptions: async (): Promise<{ id: string; full_name: string }[]> => {
+    const { data } = await api.get<{ id: string; full_name: string }[]>(
+      "/masters/users/merchandisers",
+    );
+    return data;
+  },
+
   getUsers: async (): Promise<AppUser[]> => {
     const { data } = await api.get<AppUser[]>("/masters/users");
     return data;

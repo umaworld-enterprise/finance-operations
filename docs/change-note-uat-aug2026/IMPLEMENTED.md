@@ -1559,3 +1559,92 @@ Tests: accounts replace (audited swap) replaces the old duplicate-rejected
 test; delete flow (fields cleared, audit row, second delete conflicts,
 merchandiser forbidden, Mark Paid re-blocked). 303 backend tests green;
 tsc clean; no migration.
+
+## Follow-up batch (4 Sep 2026 evening) — ledger columns, unpaid-only pending
+## ledger, pending table columns, Deposit %, analytics for all, dynamic filters
+
+1. **Bank Ledger final column sequence** (tab + export):
+   Date | Supplier | **Supplier Proforma Invoice #** (replaced Voucher No.,
+   carries supplier_invoice_number) | File Nos. | Customer | Curr (code) |
+   **EURO/CNY (restored, kept EMPTY — client decision)** | Rate | Debit
+   (amount) | Credit | BALANCE.
+2. **The "1323" fix**: the Pending Payments Bank Ledger (tab + its export)
+   lists ONLY unpaid tranches — paid tranches of a partially-paid request no
+   longer appear in the pending sheet (`bankLedgerEntries(..., {unpaidOnly})`).
+   Ledger exports from other tabs unchanged (client decision).
+3. **Pending Payment table**: new "Supplier Proforma Invoice #" column after
+   Supplier; Vertical column now BEFORE Customer.
+4. **Yet to be Released removed from the Accounts Workspace** (tile, tab,
+   table, export, per-row column) — replaced in the pending table by a
+   **Deposit %** column (stored percentage, else deposit/proforma total).
+   The release WORKFLOW is untouched: merchandiser tile/release button stay,
+   unreleased tranches remain unpayable and excluded from Amount Payable.
+5. **Analytics open to all roles**: DEFAULT_PERMISSIONS now grants every
+   section to all five roles; the Super Admin permission switches remain.
+   NOTE for servers previously configured: a stored `analytics_permissions`
+   system_config row overrides defaults — flip the toggles in admin, or
+   `DELETE FROM system_config WHERE config_key='analytics_permissions'`.
+   The analytics staff dropdown now reads the new any-role
+   `GET /masters/users/merchandisers` endpoint (was Super-Admin-only master).
+6. **Dynamic filter module** (`components/filters/RequestFilterBar.tsx`):
+   add-a-filter chips for Supplier / Customer / Vertical / Merchandiser /
+   Currency / Request-date range; emits one RequestFilterValues object with
+   `filterParams()` (server) + `matchesRequestFilters()` (client) helpers.
+   Wired app-wide: Accounts Workspace (all tabs; pending queue + ledger
+   filtered client-side, paginated tabs server-side), Merchandiser My
+   Requests (replaces the morning's single vertical dropdown; no
+   merchandiser field), HoM approval queue (client-side). Backend
+   GET /requests gained `currency`, `date_from`, `date_to` filters
+   (repo `_apply_filters`).
+
+303 backend tests green; tsc clean; no migration. Deploy backend + frontend
+together (new filters + merchandisers endpoint).
+
+## Projections module (4 Sep 2026) — migration 0034
+
+Monthly per-vertical deposit projections (USD / EUR / CNY) vs actuals.
+Client decisions: window collects the NEXT month; actuals = deposit amounts
+of live requests by request date; only merchandisers WITH assigned verticals
+are nagged/blocked; after the deadline only the Super Admin can add values
+(no late self-fill).
+
+**Data (0034):** `verticals.assigned_user_id` (single vertical → single
+user; user → many verticals; drives ONLY the projection form) and
+`projections` (vertical, year, month, amount_usd/eur/cny, user_id,
+submitted_by; unique per vertical+period).
+
+**Cycle:**
+- 25th → month end: merchandisers fill/edit next month's numbers per
+  assigned vertical (`/projections` form; upsert). Daily 04:00 UTC reminders
+  (bell + push, countdown wording) via `send_projection_reminders`; a
+  once-per-session popup on My Requests links to the form.
+- From the 1st: any assigned vertical missing the CURRENT month's projection
+  BLOCKS request creation (guard in POST /requests) with the formal message
+  naming the missing verticals and "contact the Super Admin"; a one-time
+  formal notification (TYPE_PROJECTION_BLOCKED) plus a red banner on My
+  Requests. Merchandisers with no verticals are never contacted or blocked.
+- Super Admin unblocks via the on-behalf form on /projections (current or
+  next month, any merchandiser's verticals).
+
+**Endpoints:** GET /projections/status, POST /projections,
+GET /projections/dashboard (all roles), PUT
+/masters/verticals/assignments/{user_id} (Super Admin; refuses verticals
+held by another user). VerticalResponse carries `assigned_user_id`.
+
+**Frontend:** sidebar "Projections" (all roles) → merchandiser form (window
+state, prefilled amounts, pending markers), Super-Admin on-behalf card,
+projections-vs-actuals dashboard (month picker, Filled/Pending pills,
+per-currency totals row). Admin Users page: "Verticals" column on
+merchandiser rows opens the multi-select assignment dialog (verticals held
+by others disabled, single-owner enforced server-side too).
+
+Nothing else reads the assignments — request forms and other dropdowns are
+untouched. 5 new unit tests (window math, exclusive assignment, window/
+ownership guards, block + super-admin unblock, dashboard actuals).
+308 backend tests green; tsc clean. Deploy: `alembic upgrade head` (0034),
+backend + frontend together.
+
+### Amendment: the projections popup now returns EVERY DAY (dismissal key
+carries the date) until the form is complete — a per-month key would have
+fired only once inside the 72-hour PWA sessions. Daily bell+push reminders
+were already in (04:00 UTC job, 25th→EOM countdown wording).

@@ -71,15 +71,17 @@ ANALYTICS_SECTIONS = [
     "outstanding_tracker",
 ]
 
+# 4 Sep 2026 (client decision): analytics open to ALL roles by default —
+# every section, every tab. The Super Admin permission switches remain and
+# can restrict again if ever needed. (A stored `analytics_permissions`
+# system_config row overrides these defaults — clear it or flip the toggles
+# if a server was previously restricted.)
+_ALL_ROLES = [
+    "super_admin", "finance_admin", "accounts_team",
+    "merchandiser", "head_of_merchandiser",
+]
 DEFAULT_PERMISSIONS: dict[str, list[str]] = {
-    "overdue_kpis":    ["finance_admin", "accounts_team"],
-    "shipment_kpis":   ["finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"],
-    "delay_buckets":   ["finance_admin"],
-    # HoM dashboard's NPA panel links into the by_merchandiser drill-down.
-    "by_merchandiser": ["finance_admin", "head_of_merchandiser"],
-    "by_vertical":     ["finance_admin", "accounts_team"],
-    "by_customer":     ["finance_admin", "accounts_team"],
-    "outstanding_tracker": ["finance_admin", "accounts_team", "head_of_merchandiser"],
+    section: list(_ALL_ROLES) for section in ANALYTICS_SECTIONS
 }
 
 

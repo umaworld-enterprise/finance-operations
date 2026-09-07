@@ -16,7 +16,10 @@ import { exportRequestsToExcel } from "@/lib/exportExcel";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
 import { useRequestsPaginated, useMyActivity, usePendingRelease } from "@/hooks/useRequests";
-import { useVerticals } from "@/hooks/useMasters";
+import { useProjectionStatus } from "@/hooks/useProjections";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useRouter } from "next/navigation";
+import { filterParams, RequestFilterBar, type RequestFilterValues } from "@/components/filters/RequestFilterBar";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   Table, TableHeader, TableBody, TableRow, TableHead,
@@ -59,12 +62,29 @@ export default function MerchandiserDashboard() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<RequestSort>("newest");
-  // Vertical filter on the request list (4 Sep 2026, executive request).
-  const [verticalId, setVerticalId] = useState("");
+  // Dynamic filter module (4 Sep 2026) — grew out of the morning's vertical
+  // filter: supplier / customer / vertical / currency / request-date range.
+  const [filters, setFilters] = useState<RequestFilterValues>({});
   const [formOpen, setFormOpen] = useState(false);
   const debouncedSearch = useDebouncedValue(search.trim());
-  const { data: verticals = [] } = useVerticals();
+  const router = useRouter();
   const { data: activity = [] } = useMyActivity();
+  // Projections module (4 Sep 2026): during the 25th→EOM window the popup
+  // returns EVERY DAY until the form is complete (the key carries today's
+  // date — sessions live 72h, so a per-month key would fire only once); a
+  // missing CURRENT month shows the blocked banner (the backend refuses
+  // request creation regardless).
+  const { data: projStatus } = useProjectionStatus();
+  const [projNagDismissed, setProjNagDismissed] = useState(false);
+  const projPeriodKey = projStatus
+    ? `proj-nag-${projStatus.target_year}-${projStatus.target_month}-${new Date().toISOString().slice(0, 10)}`
+    : "";
+  const showProjNag =
+    !!projStatus &&
+    projStatus.window_open &&
+    projStatus.missing_target.length > 0 &&
+    !projNagDismissed &&
+    (typeof window === "undefined" || !sessionStorage.getItem(projPeriodKey));
   // "Yet to be Released" tranches (2 onwards) awaiting this merchandiser's
   // release (19 Aug 2026).
   const { data: pendingRelease = [] } = usePendingRelease();
@@ -81,7 +101,7 @@ export default function MerchandiserDashboard() {
     ...TAB_PARAMS[activeTab],
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(sort !== "newest" ? { sort } : {}),
-    ...(verticalId ? { vertical_id: verticalId } : {}),
+    ...filterParams(filters),
   });
   const requests = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -118,8 +138,8 @@ export default function MerchandiserDashboard() {
     setPage(1);
   }
 
-  function changeVertical(value: string) {
-    setVerticalId(value);
+  function changeFilters(value: RequestFilterValues) {
+    setFilters(value);
     setPage(1);
   }
 
@@ -129,6 +149,17 @@ export default function MerchandiserDashboard() {
     <RoleGuard allowedRoles={["merchandiser", "super_admin"]}>
       <TopNav title="My Requests" subtitle="Track and manage your Supplier Advance Payment Requests" />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
+
+        {/* Projections gate (4 Sep 2026): blocked merchandisers see the
+            formal notice; the backend refuses creation regardless. */}
+        {projStatus?.blocked && (
+          <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg p-3">
+            {projStatus.block_message}{" "}
+            <Link href="/projections" className="underline underline-offset-2 font-medium">
+              View projections
+            </Link>
+          </p>
+        )}
 
         {/* New Request — the Supplier Advance Payment Request form lives in
             the queue as a collapsible section (Aug 2026 batch, item 2.2). */}
@@ -244,25 +275,15 @@ export default function MerchandiserDashboard() {
             placeholder="Search by invoice #, request #, supplier or customer…"
             className="sm:max-w-md flex-1"
           />
-          {/* Vertical filter (4 Sep 2026, executive request) — narrows the
-              list below; the tiles keep their overall counts. */}
-          <select
-            value={verticalId}
-            onChange={(e) => changeVertical(e.target.value)}
-            aria-label="Filter by vertical"
-            className="flex h-9 w-full sm:w-52 rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-          >
-            <option value="">All verticals</option>
-            {verticals.map((v) => (
-              <option key={v.id} value={v.id}>{v.name}</option>
-            ))}
-          </select>
           <SortSelect value={sort} onChange={changeSort} className="sm:w-52" />
           <ExportButton
             count={requests.length}
             onExport={() => exportRequestsToExcel(requests, `my-requests-${activeTab}.xlsx`)}
           />
         </div>
+
+        {/* Dynamic filter module (4 Sep 2026) — applies to every tab. */}
+        <RequestFilterBar values={filters} onChange={changeFilters} />
 
         <Tabs value={activeTab} onValueChange={changeTab} id="status-tabs" className="scroll-mt-4">
           <TabsList className="w-full">
@@ -325,6 +346,26 @@ export default function MerchandiserDashboard() {
           ))}
         </Tabs>
       </main>
+
+      {/* Fill-your-projections popup (4 Sep 2026) — once per session while
+          the 25th→EOM window is open and verticals are missing. */}
+      <ConfirmDialog
+        open={showProjNag}
+        onOpenChange={(open) => {
+          if (!open) {
+            setProjNagDismissed(true);
+            try { sessionStorage.setItem(projPeriodKey, "1"); } catch {}
+          }
+        }}
+        title="Monthly projections pending"
+        description={`Your projections for ${projStatus?.missing_target.join(", ") ?? ""} are still pending. Fill them before the end of the month — otherwise new request creation will be stopped until the Super Admin adds them on your behalf.`}
+        confirmLabel="Fill projections now"
+        onConfirm={() => {
+          setProjNagDismissed(true);
+          try { sessionStorage.setItem(projPeriodKey, "1"); } catch {}
+          router.push("/projections");
+        }}
+      />
     </RoleGuard>
   );
 }

@@ -165,6 +165,18 @@ export function useResolveDefault() {
   });
 }
 
+// Merchandiser options for the dynamic filter bar (4 Sep 2026) — every role.
+export function useMerchandiserOptions(enabled = true) {
+  return useQuery({
+    queryKey: ["merchandiser-options"],
+    queryFn: masterService.getMerchandiserOptions,
+    enabled,
+    staleTime: STALE,
+    gcTime: GC,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useUsers() {
   return useQuery({
     queryKey: ["users"],
