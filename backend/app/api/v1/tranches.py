@@ -15,6 +15,7 @@ from app.core.dependencies import CurrentUser, get_current_user
 from app.core.exceptions import NotFoundError, ValidationError
 from app.integrations.google_drive.drive_service import (
     build_tt_copy_filename,
+    delete_tt_copy_from_drive,
     upload_tt_copy_to_drive,
     validate_tt_copy,
 )
@@ -342,6 +343,9 @@ async def upload_tranche_tt_copy(
         deposit_request.request_number, file.content_type,
         tranche_number=target.tranche_number,
     )
+    # Replace flow (4 Sep 2026): remember the outgoing Drive file so it can
+    # be cleaned up once the new copy is attached.
+    replaced_file_id = target.tt_copy_file_id
     file_id, link = await asyncio.to_thread(
         upload_tt_copy_to_drive, content, filename, file.content_type
     )
@@ -363,7 +367,41 @@ async def upload_tranche_tt_copy(
         email_tt_copy_uploaded, request_id, tranche.id, content,
         file.content_type or "application/octet-stream", filename,
     )
+    if replaced_file_id and replaced_file_id != file_id:
+        background_tasks.add_task(delete_tt_copy_from_drive, replaced_file_id)
     return _tranche_response(tranche, deposit_request.total_supplier_invoice_amount)
+
+
+@router.delete("/{tranche_id}/tt-copy", response_model=TrancheResponse)
+async def delete_tranche_tt_copy(
+    request_id: UUID,
+    tranche_id: UUID,
+    current_user: User,
+    request: Request,
+    db: DB,
+    background_tasks: BackgroundTasks,
+) -> TrancheResponse:
+    """Delete a tranche's TT copy (4 Sep 2026) — Accounts only, audited. On
+    an unpaid tranche this re-blocks Mark Paid until a new copy is uploaded;
+    the Drive file is removed best-effort in the background."""
+    svc = TrancheService(db)
+    tranches = await svc.list_for_request(request_id)
+    target = next((t for t in tranches if t.id == tranche_id), None)
+    if target is None:
+        raise NotFoundError(f"Tranche {tranche_id} not found on this request.")
+    old_file_id = target.tt_copy_file_id
+
+    tranche = await svc.remove_tt_copy(
+        request_id, tranche_id,
+        user_id=current_user.id,
+        role=current_user.role,
+        ip_address=_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    if old_file_id:
+        background_tasks.add_task(delete_tt_copy_from_drive, old_file_id)
+    req = await DepositRequestRepository(db).get_for_validation(request_id)
+    return _tranche_response(tranche, req.total_supplier_invoice_amount)
 
 
 # ── Request-level traceability ────────────────────────────────────────────────

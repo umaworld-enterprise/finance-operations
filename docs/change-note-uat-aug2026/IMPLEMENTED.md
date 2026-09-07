@@ -1531,3 +1531,31 @@ the Excel export follows the filtered view as before. The KPI tiles and tab
 counts deliberately keep their overall numbers, matching how Search behaves.
 
 tsc clean; no backend change.
+
+## Follow-up (4 Sep 2026) — Replace / Delete TT copy (Accounts)
+
+Client: TT copies could be uploaded but never edited or removed.
+
+- **Replace**: beside "View TT copy", Accounts get a Replace button (opens
+  the file picker; uploads immediately). `attach_tt_copy` now lets Accounts
+  overwrite (previously Super Admin only); the swap is audited old → new
+  filename, the executive TT email fires for the new document, and the old
+  Drive file is deleted best-effort in the background
+  (`delete_tt_copy_from_drive`, new in drive_service).
+- **Delete**: a Delete button with a confirm dialog →
+  `DELETE /requests/{id}/tranches/{tid}/tt-copy` → new
+  `TrancheService.remove_tt_copy` (Accounts/Super only; blocked on
+  cancelled/rejected requests and merchandiser holds; audited — legacy rows
+  without a filename audit the URL instead). On an UNPAID tranche the delete
+  re-blocks Mark Paid until a new copy is uploaded (readiness tick resets);
+  paid tranches allowed too (mirrors the legacy "upload to complete the
+  record" flow). Drive file removed best-effort in the background.
+- Rejected tranches: no replace/delete (consistent with attach).
+- TrancheList now renders ONE shared hidden file input per tranche in
+  accounts mode — Upload (unpaid), legacy Upload (paid, missing copy) and
+  Replace all drive the same picker.
+
+Tests: accounts replace (audited swap) replaces the old duplicate-rejected
+test; delete flow (fields cleared, audit row, second delete conflicts,
+merchandiser forbidden, Mark Paid re-blocked). 303 backend tests green;
+tsc clean; no migration.

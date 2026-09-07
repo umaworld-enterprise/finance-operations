@@ -594,8 +594,9 @@ class TrancheService:
         explicit pay_tranche action, which requires this TT copy plus the
         tranche's payment details.
 
-        Duplicate uploads against a tranche are rejected; only a Super Admin
-        may replace an existing TT copy.
+        4 Sep 2026: Accounts may also REPLACE an existing TT copy (previously
+        Super Admin only) — the swap is audited old → new; the endpoint cleans
+        the previous Drive file up in the background.
         """
         if role not in _ACCOUNTS_ROLES:
             raise AuthorizationError("Only Accounts Team can attach the TT copy.")
@@ -610,12 +611,8 @@ class TrancheService:
 
         if tranche.status == TrancheStatus.REJECTED:
             raise ConflictError(f"{tranche.label} was rejected — TT copies cannot be attached.")
-        if tranche.tt_copy_url and role != UserRole.SUPER_ADMIN:
-            raise ConflictError(
-                f"A TT copy is already attached to {tranche.label}. "
-                "Contact a Super Admin if it must be replaced."
-            )
 
+        old_filename = tranche.tt_copy_filename
         tranche = await self._repo.update(
             tranche,
             tt_copy_url=tt_copy_url,
@@ -625,7 +622,51 @@ class TrancheService:
         await self._audit.record_update(
             "payment_tranches", tranche.id, user_id,
             field_name="tt_copy",
-            old_value=None, new_value=tt_copy_filename,
+            old_value=old_filename, new_value=tt_copy_filename,
+            ip_address=ip_address, user_agent=user_agent,
+        )
+        return tranche
+
+    async def remove_tt_copy(
+        self,
+        request_id: UUID,
+        tranche_id: UUID,
+        user_id: UUID,
+        role: UserRole,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> PaymentTranche:
+        """Accounts delete a tranche's TT copy (4 Sep 2026) — e.g. a wrong
+        document uploaded against the wrong tranche. Audited; on an UNPAID
+        tranche this re-blocks Mark Paid until a new copy is uploaded. The
+        Drive file is cleaned up by the endpoint in the background."""
+        if role not in _ACCOUNTS_ROLES:
+            raise AuthorizationError("Only Accounts Team can delete the TT copy.")
+
+        request = await self._get_request_or_404(request_id)
+        if request.current_status in _TERMINAL_STATUSES:
+            raise ConflictError(
+                "A TT copy cannot be deleted on a cancelled or rejected request."
+            )
+        self._assert_not_held_by_merchandiser(request)
+        tranche = await self._get_tranche_locked(request_id, tranche_id)
+        if not tranche.tt_copy_url:
+            raise ConflictError(f"{tranche.label} has no TT copy to delete.")
+
+        # Legacy attachments may lack a filename — fall back to the URL so
+        # the deletion always leaves an audit row (record_update skips
+        # None → None as a no-op).
+        old_ref = tranche.tt_copy_filename or tranche.tt_copy_url
+        tranche = await self._repo.update(
+            tranche,
+            tt_copy_url=None,
+            tt_copy_file_id=None,
+            tt_copy_filename=None,
+        )
+        await self._audit.record_update(
+            "payment_tranches", tranche.id, user_id,
+            field_name="tt_copy",
+            old_value=old_ref, new_value=None,
             ip_address=ip_address, user_agent=user_agent,
         )
         return tranche

@@ -460,7 +460,9 @@ async def test_tt_upload_no_longer_auto_pays(db_session):
     assert request.is_locked is False
 
 
-async def test_duplicate_tt_upload_rejected(db_session):
+async def test_accounts_may_replace_tt_copy(db_session):
+    """4 Sep 2026: Accounts can replace an existing TT copy themselves
+    (previously Super Admin only) — audited old → new."""
     _, accounts, request, (tranche,) = await _setup(db_session)
     svc = TrancheService(db_session)
     await svc.attach_tt_copy(
@@ -469,13 +471,48 @@ async def test_duplicate_tt_upload_rejected(db_session):
         tt_copy_filename="a.pdf",
         user_id=accounts.id, role=UserRole.ACCOUNTS_TEAM,
     )
-    with pytest.raises(ConflictError, match="already attached"):
-        await svc.attach_tt_copy(
-            request.id, tranche.id,
-            tt_copy_url="https://drive.test/y", tt_copy_file_id="f2",
-            tt_copy_filename="b.pdf",
-            user_id=accounts.id, role=UserRole.ACCOUNTS_TEAM,
-        )
+    updated = await svc.attach_tt_copy(
+        request.id, tranche.id,
+        tt_copy_url="https://drive.test/y", tt_copy_file_id="f2",
+        tt_copy_filename="b.pdf",
+        user_id=accounts.id, role=UserRole.ACCOUNTS_TEAM,
+    )
+    assert updated.tt_copy_url == "https://drive.test/y"
+    assert updated.tt_copy_filename == "b.pdf"
+    logs = await _audit_rows(db_session, "payment_tranches", tranche.id)
+    swap = [l for l in logs if l.field_name == "tt_copy" and l.old_value == "a.pdf"]
+    assert swap and swap[0].new_value == "b.pdf"
+
+
+async def test_accounts_can_delete_tt_copy_and_pay_is_reblocked(db_session):
+    """4 Sep 2026: Accounts delete a wrong TT copy — fields cleared, audited,
+    and an unpaid tranche cannot be marked paid until a new copy is uploaded."""
+    merch, accounts, request, (tranche,) = await _setup(db_session)
+    svc = TrancheService(db_session)
+    await _payable(db_session, tranche)  # TT + payment details in place
+
+    # Merchandiser cannot delete it.
+    with pytest.raises(AuthorizationError):
+        await svc.remove_tt_copy(request.id, tranche.id, merch.id, UserRole.MERCHANDISER)
+
+    removed = await svc.remove_tt_copy(
+        request.id, tranche.id, accounts.id, UserRole.ACCOUNTS_TEAM
+    )
+    assert removed.tt_copy_url is None
+    assert removed.tt_copy_file_id is None
+    assert removed.tt_copy_filename is None
+    # The deletion is audited (the _payable helper sets no filename, so both
+    # values render empty — the field-level row itself is the record).
+    logs = await _audit_rows(db_session, "payment_tranches", tranche.id)
+    assert any(l.field_name == "tt_copy" for l in logs)
+
+    # Nothing left to delete → conflict.
+    with pytest.raises(ConflictError, match="no TT copy"):
+        await svc.remove_tt_copy(request.id, tranche.id, accounts.id, UserRole.ACCOUNTS_TEAM)
+
+    # Mark Paid is blocked again until a new copy is uploaded.
+    with pytest.raises(ConflictError, match="TT copy"):
+        await svc.pay_tranche(request.id, tranche.id, accounts.id, UserRole.ACCOUNTS_TEAM)
 
 
 # ── Pending-and-untouched guard on merchandiser tranche changes ───────────────
