@@ -112,27 +112,42 @@ class FileRemarkService:
                 files[r.new_file_number] = (
                     Decimal(str(r.new_amount)) if r.new_amount is not None else (carried or Decimal("0"))
                 )
-            elif r.category == "invoice_value_change" and r.new_amount is not None:
-                # Value change (4 Sep 2026): the file keeps its number, its
-                # amount becomes the revised figure — but ONLY once Accounts
-                # applied it (approved rows with NULL new_amount are still
-                # awaiting the revised amount and change nothing).
-                if old in files:
-                    files[old] = Decimal(str(r.new_amount))
+            # invoice_value_change (5 Sep 2026 rework) deliberately does NOT
+            # touch this ledger: it revises the request's TOTAL proforma
+            # invoice amount (applied in apply_revised_amount), not the
+            # deposit value the split/File-Change chain tracks.
         return files
 
-    async def selectable_files(self, user_id: UUID, role: UserRole) -> list[dict]:
-        """Every file the raiser can pick in the New File Remark dropdown:
-        the live files (root + split-born + invoice-changed, any depth) of
-        each payment-completed request, minus files already under an OPEN
-        remark. Merchandisers see their own requests; accounts / super see
-        all."""
+    async def selectable_files(
+        self, user_id: UUID, role: UserRole, category: str | None = None
+    ) -> list[dict]:
+        """Every file the raiser can pick in the New File Remark dropdown,
+        minus files already under an OPEN remark. Merchandisers see their own
+        requests; accounts / super see all.
+
+        Split / File Change (unchanged): the live files (root + split-born +
+        invoice-changed, any depth) of each PAYMENT-COMPLETED request.
+
+        Invoice Value Change (5 Sep 2026 rework): any LIVE request — payment
+        completed or not (revising the total before payment is the whole
+        point) — one row per request, carrying the request's TOTAL proforma
+        invoice amount (the value the change revises)."""
         if role not in _RAISER_ROLES:
             raise AuthorizationError("Your role cannot raise file remarks.")
-        stmt = select(DepositRequest).where(
-            DepositRequest.is_deleted == False,  # noqa: E712
-            DepositRequest.current_status == RequestStatus.PAYMENT_PROCESSED,
+        _TERMINAL = (
+            RequestStatus.CANCELLED_BY_MERCHANDISER,
+            RequestStatus.CANCELLED_BY_ACCOUNTS,
+            RequestStatus.REJECTED_BY_HOM,
+            RequestStatus.REJECTED_BY_ACCOUNTS,
         )
+        value_change = category == "invoice_value_change"
+        stmt = select(DepositRequest).where(DepositRequest.is_deleted == False)  # noqa: E712
+        if value_change:
+            stmt = stmt.where(DepositRequest.current_status.notin_(_TERMINAL))
+        else:
+            stmt = stmt.where(
+                DepositRequest.current_status == RequestStatus.PAYMENT_PROCESSED
+            )
         if role == UserRole.MERCHANDISER:
             stmt = stmt.where(DepositRequest.created_by == user_id)
         requests = list((await self._session.execute(stmt)).scalars().all())
@@ -161,6 +176,23 @@ class FileRemarkService:
         under_open = {(rid, (num or "").strip()) for rid, num in open_rows}
         out: list[dict] = []
         for req in requests:
+            if value_change:
+                # One row per request; the amount the change revises is the
+                # TOTAL proforma invoice amount (not the deposit).
+                number = _root_file_number(req)
+                if (req.id, number) in under_open:
+                    continue
+                out.append(
+                    {
+                        "deposit_request_id": str(req.id),
+                        "request_number": req.request_number,
+                        "file_number": number,
+                        "amount": float(req.total_supplier_invoice_amount or 0),
+                        "currency": req.currency.value if req.currency else None,
+                        "is_root": True,
+                    }
+                )
+                continue
             live = await self.live_files_for_request(req)
             for number, amount in live.items():
                 if (req.id, number) in under_open:
@@ -194,34 +226,57 @@ class FileRemarkService:
             raise NotFoundError(f"Request {data.deposit_request_id} not found.")
         if role == UserRole.MERCHANDISER and request.created_by != user_id:
             raise AuthorizationError("You can only raise file remarks on your own requests.")
-        # Rule (4 Aug rework): only payment-completed files are eligible —
-        # splits and amount moves only make sense once the deposit is paid.
-        if request.current_status != RequestStatus.PAYMENT_PROCESSED:
+        from decimal import Decimal
+
+        _TERMINAL = (
+            RequestStatus.CANCELLED_BY_MERCHANDISER,
+            RequestStatus.CANCELLED_BY_ACCOUNTS,
+            RequestStatus.REJECTED_BY_HOM,
+            RequestStatus.REJECTED_BY_ACCOUNTS,
+        )
+        if data.category == "invoice_value_change":
+            # 5 Sep 2026 rework: a value change revises the request's TOTAL
+            # proforma invoice amount and may be raised BEFORE payment — any
+            # live request qualifies.
+            if request.current_status in _TERMINAL:
+                raise BusinessRuleError(
+                    "An invoice value change cannot be raised on a cancelled "
+                    "or rejected request."
+                )
+            parent_file = (data.file_number or "").strip() or _root_file_number(request)
+            if parent_file != _root_file_number(request):
+                raise ValidationError(
+                    "An invoice value change applies to the request's own "
+                    "invoice — pick the file from the dropdown."
+                )
+            deposit = Decimal(str(request.total_supplier_invoice_amount))
+        elif request.current_status != RequestStatus.PAYMENT_PROCESSED:
+            # Rule (4 Aug rework): splits and File Changes only make sense
+            # once the deposit is paid.
             raise BusinessRuleError(
                 "File remarks can only be raised on payment-completed files "
                 f"(current status: {request.current_status.value})."
             )
-
-        from decimal import Decimal
-
-        # The selected FILE (19 Aug 2026 chain support): the root file or any
-        # live file born from an approved split / invoice change on this
-        # request — validated against the server-replayed live set, which
-        # also supplies the old amount. Every chained remark stays anchored
-        # to this core request, so its audit trail records the whole chain.
-        live = await self.live_files_for_request(request)
-        if data.file_number and data.file_number.strip():
-            parent_file = data.file_number.strip()
-            if parent_file not in live:
-                raise ValidationError(
-                    f"'{parent_file}' is not a live file of this request — "
-                    "pick a file from the dropdown."
-                )
-            deposit = live[parent_file]
         else:
-            # Legacy callers without a file selection act on the root file.
-            parent_file = _root_file_number(request)
-            deposit = live.get(parent_file, Decimal(str(request.deposit_amount)))
+            # The selected FILE (19 Aug 2026 chain support): the root file or
+            # any live file born from an approved split / invoice change on
+            # this request — validated against the server-replayed live set,
+            # which also supplies the old amount. Every chained remark stays
+            # anchored to this core request, so its audit trail records the
+            # whole chain.
+            live = await self.live_files_for_request(request)
+            if data.file_number and data.file_number.strip():
+                parent_file = data.file_number.strip()
+                if parent_file not in live:
+                    raise ValidationError(
+                        f"'{parent_file}' is not a live file of this request — "
+                        "pick a file from the dropdown."
+                    )
+                deposit = live[parent_file]
+            else:
+                # Legacy callers without a file selection act on the root file.
+                parent_file = _root_file_number(request)
+                deposit = live.get(parent_file, Decimal(str(request.deposit_amount)))
 
         # Amounts can never exceed the selected file's amount (7 Aug fix —
         # the old amount is the ceiling for what can be moved or split).
@@ -348,9 +403,12 @@ class FileRemarkService:
         user_agent: str | None = None,
     ) -> FileRemark:
         """Accounts apply the final revised amount on an APPROVED Invoice
-        Value Change (4 Sep 2026) — the separate step after approval. The
-        figure lands in new_amount, takes effect in the live-file ledger,
-        and is applied exactly once."""
+        Value Change — the separate step after approval, applied exactly once.
+
+        5 Sep 2026 rework (client bug report): the figure UPDATES the
+        request's Total Supplier Proforma Invoice Amount itself — raising the
+        tranche ceiling so the merchandiser can add further tranches — not
+        just the remark log."""
         if role not in _DECIDER_ROLES:
             raise AuthorizationError(
                 "Only Accounts Team or Super Admin can update the revised amount."
@@ -372,11 +430,39 @@ class FileRemarkService:
                 "The revised amount has already been applied on this remark."
             )
 
+        request = await self._session.get(DepositRequest, remark.deposit_request_id)
+        if request is None:
+            raise NotFoundError("The remark's request no longer exists.")
+        from decimal import Decimal
+
+        # The new total must still cover the tranches already planned —
+        # deposit_amount is the derived sum of the non-rejected tranches.
+        planned = Decimal(str(request.deposit_amount))
+        if revised_amount < planned:
+            raise BusinessRuleError(
+                f"The revised total ({revised_amount}) is below the request's "
+                f"existing tranche total ({planned}) — reduce the tranches "
+                "first or set a higher amount."
+            )
+
         remark.new_amount = revised_amount
+
+        old_total = request.total_supplier_invoice_amount
+        request.total_supplier_invoice_amount = revised_amount
+        # Keep the stored deposit % consistent with the new total.
+        if revised_amount > 0:
+            request.deposit_percentage = (planned / revised_amount * 100).quantize(
+                Decimal("0.01")
+            )
+        await self._audit.record_update(
+            "deposit_requests", request.id, user_id,
+            field_name="total_supplier_invoice_amount",
+            old_value=str(old_total), new_value=str(revised_amount),
+            ip_address=ip_address, user_agent=user_agent,
+        )
         await self._session.flush()
 
-        request = await self._session.get(DepositRequest, remark.deposit_request_id)
-        request_number = request.request_number if request else "?"
+        request_number = request.request_number
         summary = (
             f"Revised amount on {remark.old_file_number or request_number}: "
             f"{remark.old_amount} → {revised_amount}"

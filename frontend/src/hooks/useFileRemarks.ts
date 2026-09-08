@@ -20,10 +20,10 @@ export function useFileRemarks(params?: {
   });
 }
 
-export function useSelectableFiles(enabled: boolean) {
+export function useSelectableFiles(enabled: boolean, category?: string) {
   return useQuery({
-    queryKey: [...FILE_REMARKS_KEY, "selectable-files"],
-    queryFn: fileRemarkService.selectableFiles,
+    queryKey: [...FILE_REMARKS_KEY, "selectable-files", category ?? "default"],
+    queryFn: () => fileRemarkService.selectableFiles(category),
     enabled,
     refetchInterval: 10_000,
   });

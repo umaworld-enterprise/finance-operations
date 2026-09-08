@@ -36,8 +36,13 @@ const fileRemarkService = {
     return data;
   },
 
-  selectableFiles: async (): Promise<SelectableFile[]> => {
-    const { data } = await api.get<SelectableFile[]>("/file-remarks/selectable-files");
+  // Split / File Change: payment-completed live files. Invoice Value Change
+  // (5 Sep 2026): any live request — before or after payment — carrying the
+  // TOTAL proforma invoice amount the change revises.
+  selectableFiles: async (category?: string): Promise<SelectableFile[]> => {
+    const { data } = await api.get<SelectableFile[]>("/file-remarks/selectable-files", {
+      params: category ? { category } : undefined,
+    });
     return data;
   },
 

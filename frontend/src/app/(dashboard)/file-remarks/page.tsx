@@ -161,8 +161,9 @@ function RevisedAmountDialog({
           {remark.currency ? ` (${remark.currency})` : ""}.
           {remark.proposed_amount != null &&
             ` The merchandiser proposed ${Number(remark.proposed_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}.`}{" "}
-          Both parties are notified once saved; the amount is applied once and
-          flows into the file&apos;s live balance.
+          Both parties are notified once saved; the amount is applied once and UPDATES
+          the request&apos;s Total Supplier Proforma Invoice Amount — the merchandiser
+          can then add tranches against the new total.
         </p>
         <input
           type="number"
@@ -280,16 +281,16 @@ export default function FileRemarksPage() {
   // File Remark form — every decider role sees just open remarks + history.
   const canRaise = user?.role === "merchandiser";
 
-  // Selectable files (19 Aug 2026 chain support): the live files of every
-  // payment-completed request — root file PLUS files born from approved
-  // splits / invoice changes, any depth — file number only, no supplier.
-  const { data: selectableFiles = [] } = useSelectableFiles(canRaise);
+  // Category comes FIRST (4 Aug rework) and drives the rest of the form —
+  // declared before the files query because eligibility depends on it:
+  // Split / File Change list payment-completed live files; Invoice Value
+  // Change (5 Sep 2026) lists ANY live request with its TOTAL invoice amount.
+  const [category, setCategory] = useState<FileRemarkCategory>("invoice_split");
+  const { data: selectableFiles = [] } = useSelectableFiles(canRaise, category);
   const { data: remarks = [], isLoading } = useFileRemarks();
   const createRemark = useCreateFileRemark();
   const decideRemark = useDecideFileRemark();
 
-  // Category comes FIRST (4 Aug rework) and drives the rest of the form.
-  const [category, setCategory] = useState<FileRemarkCategory>("invoice_split");
   // Selection key: request id + file number (a request can carry several
   // live files once splits / changes chain — 19 Aug 2026).
   const [fileKey, setFileKey] = useState("");
@@ -472,7 +473,11 @@ export default function FileRemarksPage() {
                   <select
                     id="fr-category"
                     value={category}
-                    onChange={(e) => setCategory(e.target.value as FileRemarkCategory)}
+                    onChange={(e) => {
+                      // Eligible files differ per category — clear the pick.
+                      setCategory(e.target.value as FileRemarkCategory);
+                      setFileKey("");
+                    }}
                     className={`mt-1 ${inputCls}`}
                   >
                     <option value="invoice_split">Split Invoices</option>
@@ -481,7 +486,11 @@ export default function FileRemarksPage() {
                   </select>
                 </div>
                 <div>
-                  <Label htmlFor="fr-request">Select file (payment completed)</Label>
+                  <Label htmlFor="fr-request">
+                    {category === "invoice_value_change"
+                      ? "Select file (any live request)"
+                      : "Select file (payment completed)"}
+                  </Label>
                   {/* File number only (19 Aug 2026) — no supplier appended;
                       includes files born from approved splits / invoice
                       changes, chainable to any depth. */}
@@ -595,11 +604,11 @@ export default function FileRemarksPage() {
                 </div>
               ) : category === "invoice_value_change" ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Value change (4 Sep 2026): number stays, amount moves —
-                      the merchandiser proposes; Accounts apply the final
-                      figure after approving. */}
+                  {/* Value change (5 Sep 2026 rework): revises the request's
+                      TOTAL proforma invoice amount — usable before payment;
+                      applying the approved figure raises the tranche ceiling. */}
                   <div>
-                    <Label htmlFor="fr-vc-old-amount">Current invoice amount</Label>
+                    <Label htmlFor="fr-vc-old-amount">Current Total Invoice Amount</Label>
                     <input
                       id="fr-vc-old-amount"
                       type="text"
@@ -627,8 +636,10 @@ export default function FileRemarksPage() {
                       className={`mt-1 ${inputCls}`}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Accounts enter the final revised amount after approving —
-                      your proposal pre-fills it.
+                      Accounts enter the final revised amount after approving — your
+                      proposal pre-fills it. Once applied, it UPDATES the request&apos;s
+                      Total Supplier Proforma Invoice Amount, so more tranches can be
+                      added against the new total.
                     </p>
                   </div>
                 </div>
