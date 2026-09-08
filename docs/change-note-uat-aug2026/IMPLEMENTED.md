@@ -1683,3 +1683,33 @@ Workspace all tabs incl. the client-filtered pending queue + Bank Ledger,
 merchandiser My Requests, HoM queue). Backend: GET /requests `priority`
 param (EXISTS subquery on unpaid high tranches). Opt-in — default listing
 untouched. 309 tests green; tsc clean.
+
+## Invoice Value Change rework (5 Sep 2026) — two client bugs fixed
+
+The 4 Sep design treated the value change as a file-ledger entry; the client
+clarified it revises the request's **Total Supplier Proforma Invoice
+Amount**, must work BEFORE payment, and applying it must actually update the
+request (raising the tranche ceiling so more tranches can be added).
+
+1. **Eligibility + prefill**: `/file-remarks/selectable-files?category=
+   invoice_value_change` now lists ANY live request (pending, hold, or
+   processed — cancelled/rejected excluded), one row per request, with the
+   TOTAL proforma invoice amount (bug: it previously listed only
+   payment-completed requests and showed the paid/deposit amount). The form
+   labels it "Current Total Invoice Amount"; Split / File Change eligibility
+   is unchanged (payment-completed live files). `create()` gates the value
+   change on live-status only and derives old_amount from the total.
+2. **Apply updates the request**: `apply_revised_amount` now WRITES the
+   revised figure into `deposit_requests.total_supplier_invoice_amount`
+   (field-level audit old→new), recomputes the stored deposit %, and guards
+   that the new total still covers the existing non-rejected tranche sum.
+   Tranche "% of invoice" figures recompute automatically; the merchandiser
+   can immediately add tranches up to the new total. The notification and
+   the UI dialogs now say so explicitly.
+3. Value changes no longer touch the split/File-Change deposit ledger
+   (they never moved deposit value); the hold-back of files under a pending
+   value change remains.
+
+Tests: full flow rewritten (old_amount = total; total updated on apply;
+below-tranche-sum guard; ledger untouched) + new pre-payment eligibility
+test. 310 backend tests green; tsc clean; no migration.

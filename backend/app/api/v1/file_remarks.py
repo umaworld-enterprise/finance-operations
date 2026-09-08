@@ -57,14 +57,18 @@ async def list_file_remarks(
 
 
 @router.get("/selectable-files")
-async def selectable_files(current_user: User, db: DB) -> list[dict]:
-    """Files the raiser can pick in the New File Remark dropdown (19 Aug
-    2026 chain support): the live files of every payment-completed request —
-    root file plus files born from approved splits / invoice changes, any
-    depth — minus files already under an open remark. File number only, no
-    supplier appended."""
+async def selectable_files(
+    current_user: User,
+    db: DB,
+    category: str | None = Query(None, pattern="^(invoice_split|invoice_amount_change|invoice_value_change)$"),
+) -> list[dict]:
+    """Files the raiser can pick in the New File Remark dropdown, minus files
+    already under an open remark. Split / File Change: live files of
+    payment-completed requests (19 Aug 2026 chain support). Invoice Value
+    Change (5 Sep 2026): any live request — before or after payment — with
+    the TOTAL proforma invoice amount it would revise."""
     return await FileRemarkService(db).selectable_files(
-        current_user.id, current_user.role
+        current_user.id, current_user.role, category=category
     )
 
 

@@ -1401,7 +1401,9 @@ async def notify_file_remark_amount_updated(remark_id: UUID, actor_id: UUID) -> 
             file_ref = remark.old_file_number or request.request_number
             body = (
                 f"Accounts updated the revised amount on Invoice {file_ref} "
-                f"({request.request_number}): {remark.old_amount} → {remark.new_amount}."
+                f"({request.request_number}): {remark.old_amount} → {remark.new_amount}. "
+                "The request's Total Proforma Invoice Amount is updated — "
+                "further tranches can now be added against it."
             )
             if remark.proposed_amount is not None:
                 body += f" Proposed by the merchandiser: {remark.proposed_amount}."

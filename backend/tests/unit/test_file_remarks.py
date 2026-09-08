@@ -453,62 +453,105 @@ def test_value_change_requires_a_proposed_amount():
 
 @pytest.mark.asyncio
 async def test_value_change_full_flow_raise_approve_apply(db_session):
-    """Merchandiser proposes → Accounts approve → Accounts apply the revised
-    amount (separate step) → the live-file ledger carries the final figure."""
+    """5 Sep 2026 rework: the value change revises the request's TOTAL
+    proforma invoice amount. Merchandiser proposes → Accounts approve →
+    Accounts apply → the request's total (and tranche ceiling) update; the
+    split/File-Change deposit ledger is untouched."""
     from decimal import Decimal
+
+    from app.core.exceptions import BusinessRuleError
 
     merch, accounts, request = await _setup(db_session)
     svc = FileRemarkService(db_session)
+    old_total = Decimal(str(request.total_supplier_invoice_amount))  # 10000
     remark = await svc.create(
         _payload(
             request, category="invoice_value_change",
-            new_file_number=None, proposed_amount=Decimal("1250.00"),
+            new_file_number=None, proposed_amount=Decimal("12500.00"),
         ),
         merch.id, UserRole.MERCHANDISER,
     )
     assert remark.status == "open"
-    assert float(remark.old_amount) == 1000.0
-    assert float(remark.proposed_amount) == 1250.0
+    # Old amount = the TOTAL invoice amount (bug fix: was the deposit).
+    assert Decimal(str(remark.old_amount)) == old_total
+    assert float(remark.proposed_amount) == 12500.0
     assert remark.new_amount is None  # nothing applied yet
     assert remark.new_file_number is None  # the number does not change
 
     # The revised amount cannot be applied before approval.
     with pytest.raises(ConflictError, match="APPROVED"):
         await svc.apply_revised_amount(
-            remark.id, Decimal("1300.00"), accounts.id, UserRole.ACCOUNTS_TEAM
+            remark.id, Decimal("13000.00"), accounts.id, UserRole.ACCOUNTS_TEAM
         )
 
     await svc.decide(remark.id, "approved", accounts.id, UserRole.ACCOUNTS_TEAM)
-    # Approved but not applied → the ledger still shows the old amount, and
-    # the file is held back from new remarks until the figure lands.
-    live = await svc.live_files_for_request(request)
-    assert live == {request.request_number: Decimal("1000.00")}
-    rows = await svc.selectable_files(merch.id, UserRole.MERCHANDISER)
-    assert [r for r in rows if r["deposit_request_id"] == str(request.id)] == []
+    # Approved but not applied → the request total is unchanged.
+    assert Decimal(str(request.total_supplier_invoice_amount)) == old_total
 
     # Only decider roles may apply.
     with pytest.raises(AuthorizationError):
         await svc.apply_revised_amount(
-            remark.id, Decimal("1300.00"), merch.id, UserRole.MERCHANDISER
+            remark.id, Decimal("13000.00"), merch.id, UserRole.MERCHANDISER
+        )
+    # The revised total must still cover the planned tranches (deposit 1000).
+    with pytest.raises(BusinessRuleError, match="below the request's existing tranche total"):
+        await svc.apply_revised_amount(
+            remark.id, Decimal("500.00"), accounts.id, UserRole.ACCOUNTS_TEAM
         )
 
     applied = await svc.apply_revised_amount(
-        remark.id, Decimal("1300.00"), accounts.id, UserRole.ACCOUNTS_TEAM
+        remark.id, Decimal("13000.00"), accounts.id, UserRole.ACCOUNTS_TEAM
     )
-    assert float(applied.new_amount) == 1300.0
+    assert float(applied.new_amount) == 13000.0
+    # THE FIX (client bug 2): the request itself updates — the merchandiser
+    # can now add tranches against the new total.
+    assert Decimal(str(request.total_supplier_invoice_amount)) == Decimal("13000.00")
+    # The deposit ledger (splits / File Change) is untouched by value changes.
     live = await svc.live_files_for_request(request)
-    assert live == {request.request_number: Decimal("1300.00")}
-    rows = await svc.selectable_files(merch.id, UserRole.MERCHANDISER)
-    mine = [r for r in rows if r["deposit_request_id"] == str(request.id)]
-    assert [(r["file_number"], r["amount"]) for r in mine] == [
-        (request.request_number, 1300.0)
-    ]
+    assert live == {request.request_number: Decimal("1000.00")}
 
     # Applied exactly once.
     with pytest.raises(ConflictError, match="already been applied"):
         await svc.apply_revised_amount(
-            remark.id, Decimal("1400.00"), accounts.id, UserRole.ACCOUNTS_TEAM
+            remark.id, Decimal("14000.00"), accounts.id, UserRole.ACCOUNTS_TEAM
         )
+
+
+@pytest.mark.asyncio
+async def test_value_change_available_before_payment(db_session):
+    """Client bug 1: an invoice value change can be raised on a request whose
+    payment is NOT completed, and the dropdown carries the TOTAL invoice
+    amount."""
+    from decimal import Decimal
+
+    merch = await make_user(db_session, UserRole.MERCHANDISER)
+    supplier = await make_supplier(db_session)
+    customer = await make_customer(db_session)
+    pending = await make_request(
+        db_session, supplier=supplier, customer=customer, created_by=merch,
+        status=RequestStatus.PENDING_PAYMENT,
+    )
+    svc = FileRemarkService(db_session)
+
+    # Split / File Change still exclude the pending request…
+    default_rows = await svc.selectable_files(merch.id, UserRole.MERCHANDISER)
+    assert [r for r in default_rows if r["deposit_request_id"] == str(pending.id)] == []
+    # …but the value-change dropdown lists it with the TOTAL amount (10000).
+    vc_rows = await svc.selectable_files(
+        merch.id, UserRole.MERCHANDISER, category="invoice_value_change"
+    )
+    mine = [r for r in vc_rows if r["deposit_request_id"] == str(pending.id)]
+    assert len(mine) == 1
+    assert mine[0]["amount"] == 10000.0
+
+    remark = await svc.create(
+        _payload(
+            pending, category="invoice_value_change",
+            new_file_number=None, proposed_amount=Decimal("15000.00"),
+        ),
+        merch.id, UserRole.MERCHANDISER,
+    )
+    assert Decimal(str(remark.old_amount)) == Decimal("10000.00")
 
 
 @pytest.mark.asyncio
