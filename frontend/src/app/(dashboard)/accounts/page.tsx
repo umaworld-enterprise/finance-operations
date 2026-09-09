@@ -32,6 +32,7 @@ import { ExportButton } from "@/components/ui/ExportButton";
 import { bankLedgerEntries, exportBankLedgerToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
 import { BankLedgerTable } from "@/components/tables/BankLedgerTable";
 import { filterParams, matchesRequestFilters, RequestFilterBar, type RequestFilterValues } from "@/components/filters/RequestFilterBar";
+import { BulkPayDialog, nextPayableTranche } from "@/components/accounts/BulkPayDialog";
 import { Clock, CheckCircle, AlertTriangle, BookOpen, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
 import Link from "next/link";
 import type { DepositRequest } from "@/types";
@@ -90,12 +91,20 @@ function PendingTable({
   loading,
   title,
   subtitle,
+  selectedIds,
+  onToggleSelect,
+  canSelect,
 }: {
   rows: DepositRequest[];
   loading: boolean;
   title: string;
   subtitle: string;
+  /** Bulk payment (9 Sep 2026): row checkboxes when provided. */
+  selectedIds?: Set<string>;
+  onToggleSelect?: (req: DepositRequest) => void;
+  canSelect?: (req: DepositRequest) => boolean;
 }) {
+  const selectable = !!onToggleSelect;
   // Each bucket paginates client-side (10 Aug 2026, app-wide table
   // controls) — the page-level search/sort apply before the split.
   const [page, setPage] = useState(1);
@@ -183,6 +192,7 @@ function PendingTable({
         <Table>
           <TableHeader>
             <TableRow>
+              {selectable && <TableHead className="w-8" aria-label="Select for bulk payment" />}
               <TableHead>Request #</TableHead>
               <TableHead>Request Date</TableHead>
               <TableHead>Invoice #</TableHead>
@@ -198,16 +208,26 @@ function PendingTable({
               <TableHead>Currency</TableHead>
               <TableHead>Tentative Payment</TableHead>
               <TableHead>Waiting</TableHead>
-              <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableSkeleton rows={5} cols={15} />
+              <TableSkeleton rows={5} cols={selectable ? 15 : 14} />
             ) : rows.length === 0 ? (
-              <tr><td colSpan={15}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
+              <tr><td colSpan={selectable ? 15 : 14}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id}>
+                {selectable && (
+                  <TableCell className="w-8">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${requestDisplayNumber(req)} for bulk payment`}
+                      checked={selectedIds?.has(req.id) ?? false}
+                      disabled={!(selectedIds?.has(req.id) || canSelect?.(req))}
+                      onChange={() => onToggleSelect?.(req)}
+                    />
+                  </TableCell>
+                )}
                 <TableCell>
                   <div className="flex items-center gap-1.5">
                     <Link href={`/accounts/${req.id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
@@ -233,12 +253,9 @@ function PendingTable({
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs font-medium">{currencyDisplayLabel(req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDate(nextTentativeDate(req))}</TableCell>
+                {/* Process column removed (9 Sep 2026) — the Request # link
+                    opens the request. */}
                 <TableCell>{agingBadge(req.created_at)}</TableCell>
-                <TableCell>
-                  <Button size="sm" asChild>
-                    <Link href={`/accounts/${req.id}`} className="gap-1.5">Process <ArrowRight className="h-3 w-3" /></Link>
-                  </Button>
-                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -502,6 +519,10 @@ export default function AccountsDashboard() {
   // Dynamic filter module (4 Sep 2026): supplier / customer / vertical /
   // merchandiser / currency / request-date range — applied to every tab.
   const [filters, setFilters]   = useState<RequestFilterValues>({});
+  // Bulk payment (9 Sep 2026): selection on the pending tab — SAME supplier
+  // only (wrong-supplier safety), and only rows with a payable tranche.
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
   const debouncedSearch = useDebouncedValue(search.trim());
   const listParams = {
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
@@ -596,6 +617,21 @@ export default function AccountsDashboard() {
 
   // Label refinement (10 Aug): plain "YTD", not "FY 2026–27 to date".
   const fySubtext = "YTD";
+
+  // Bulk payment helpers (9 Sep 2026): the selection is same-supplier only.
+  const selectedRequests = queue.filter((r) => bulkSelected.has(r.id));
+  const bulkSupplierId = selectedRequests[0]?.supplier?.id ?? null;
+  const canBulkSelect = (req: DepositRequest) =>
+    !frozenForAccounts(req) &&
+    nextPayableTranche(req) !== null &&
+    (bulkSupplierId === null || req.supplier?.id === bulkSupplierId);
+  const toggleBulkSelect = (req: DepositRequest) =>
+    setBulkSelected((prev) => {
+      const nextSet = new Set(prev);
+      if (nextSet.has(req.id)) nextSet.delete(req.id);
+      else nextSet.add(req.id);
+      return nextSet;
+    });
 
   // KPI tiles are links to their listing tab (19 Aug 2026): clicking a tile
   // opens the matching tab and brings the table into view.
@@ -741,7 +777,19 @@ export default function AccountsDashboard() {
           <TabsContent value="pending">
             {/* Single pending table (11 Aug — the > 10 days split was
                 removed); the Tentative Payment column carries the date. */}
-            <div className="flex justify-end mb-2">
+            <div className="flex items-center justify-end gap-2 mb-2 flex-wrap">
+              {/* Bulk payment (9 Sep 2026): pay the selected same-supplier
+                  requests' next payable tranches with one shared TT copy. */}
+              {bulkSelected.size > 0 && (
+                <>
+                  <Button size="sm" onClick={() => setBulkOpen(true)}>
+                    Pay Selected ({bulkSelected.size})
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setBulkSelected(new Set())}>
+                    Clear selection
+                  </Button>
+                </>
+              )}
               <ExportButton
                 count={filteredQueue.length}
                 onExport={() => exportRequestsToExcel(filteredQueue, "pending-payments.xlsx")}
@@ -752,7 +800,10 @@ export default function AccountsDashboard() {
               rows={filteredQueue}
               loading={queueLoading}
               title="Pending Payment"
-              subtitle="Latest requests first — the Tentative Payment column shows each file's next due date"
+              subtitle="Latest requests first — tick same-supplier rows to pay them together (Pay Selected)"
+              selectedIds={bulkSelected}
+              onToggleSelect={toggleBulkSelect}
+              canSelect={canBulkSelect}
             />
           </TabsContent>
 
@@ -969,6 +1020,17 @@ export default function AccountsDashboard() {
         {/* Analytical Snapshot — all shipments (Aug 2026, item 4.2) */}
         <ShipmentsTable linkBase="/accounts" />
       </main>
+
+      {/* Bulk payment dialog (9 Sep 2026). */}
+      <BulkPayDialog
+        open={bulkOpen}
+        requests={selectedRequests}
+        onClose={() => setBulkOpen(false)}
+        onDone={() => {
+          setBulkOpen(false);
+          setBulkSelected(new Set());
+        }}
+      />
     </RoleGuard>
   );
 }

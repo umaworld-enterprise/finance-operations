@@ -311,7 +311,22 @@ class DepositRequestService:
         user_agent: str | None = None,
     ) -> DepositRequest:
         request = await self._get_scalar_or_404(request_id)
-        assert_record_not_locked(request.is_locked, role)
+
+        # Invoice-number corrections by Accounts / Super Admin bypass the
+        # completion lock AND terminal-status freezes (9 Sep 2026 client
+        # decision): a wrong Sunshine / proforma number must be fixable on
+        # closed requests too — every change is audited old → new, and the
+        # cross-request uniqueness check below still applies.
+        _changed_fields = set(data.model_dump(exclude_unset=True))
+        invoice_numbers_only = _changed_fields and _changed_fields <= {
+            "sunshine_invoice_number",
+            "supplier_invoice_number",
+        }
+        if not (
+            invoice_numbers_only
+            and role in {UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN}
+        ):
+            assert_record_not_locked(request.is_locked, role)
 
         if role == UserRole.MERCHANDISER and request.created_by != user_id:
             raise AuthorizationError("You can only edit your own requests.")

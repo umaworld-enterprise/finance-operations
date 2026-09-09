@@ -281,7 +281,8 @@ export default function AccountsPaymentPage() {
               <div>
                 <h2 className="font-semibold text-foreground text-sm">Invoice Numbers</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Update these when a file is changed in whole (approved Invoice Change).
+                  Update these when a file is changed in whole (approved File Change) —
+                  editable at any status, closed requests included (9 Sep 2026).
                   Every change is recorded in the audit log with its old and new value.
                 </p>
               </div>
