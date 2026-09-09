@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { useRequest, useHomApprove, useHomReject, useFieldVisibility, usePayment } from "@/hooks/useRequests";
+import { useRequest, useHomApprove, useHomReject, useHomSupplierHistory, useFieldVisibility, usePayment } from "@/hooks/useRequests";
 import { DecisionDialog } from "@/components/hom/DecisionDialog";
 import { SupplierDefaultHistory } from "@/components/forms/SupplierDefaultHistory";
 import { TrancheList } from "@/components/tranches/TrancheList";
@@ -27,6 +27,8 @@ export default function HomRequestDetail() {
   const { data: fv = {} } = useFieldVisibility();
   const homApprove = useHomApprove();
   const homReject = useHomReject();
+  // Retrospective HoM decisions on this supplier's earlier files (9 Sep 2026).
+  const { data: homHistory = [] } = useHomSupplierHistory(id);
   const [approveOpen, setApproveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
 
@@ -189,6 +191,63 @@ export default function HomRequestDetail() {
                 currency={req.currency}
                 mode="readonly"
               />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Retrospective HoM remarks (9 Sep 2026): past approve/reject
+            decisions on this supplier's earlier files, visible while
+            processing the new one. */}
+        {homHistory.length > 0 && (
+          <Card>
+            <CardContent className="p-5 md:p-6 space-y-3">
+              <div>
+                <h2 className="font-semibold text-foreground text-sm">
+                  Previous HoM Decisions — {req.supplier.name}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Your earlier approve / reject remarks on this supplier&apos;s files.
+                </p>
+              </div>
+              <div className="space-y-2">
+                {homHistory.map((h) => (
+                  <div
+                    key={`${h.request_id}-${h.decided_at}`}
+                    className="flex items-start justify-between gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2"
+                  >
+                    <div className="min-w-0 space-y-0.5">
+                      <p className="text-sm flex items-center gap-2 flex-wrap">
+                        <Link
+                          href={`/hom/${h.request_id}`}
+                          className="font-mono text-xs font-semibold text-foreground hover:underline underline-offset-2"
+                        >
+                          {h.request_number}
+                        </Link>
+                        {h.sunshine_invoice_number && (
+                          <span className="text-xs text-muted-foreground font-mono">
+                            {h.sunshine_invoice_number}
+                          </span>
+                        )}
+                        <span
+                          className={`inline-flex items-center text-xs font-medium border px-2 py-0.5 rounded-full ${
+                            h.decision === "approved"
+                              ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                              : "text-red-700 bg-red-50 border-red-200"
+                          }`}
+                        >
+                          {h.decision === "approved" ? "Approved" : "Rejected"}
+                        </span>
+                      </p>
+                      {h.remarks && (
+                        <p className="text-xs text-muted-foreground italic">&ldquo;{h.remarks}&rdquo;</p>
+                      )}
+                    </div>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+                      {h.decided_by ? `${h.decided_by} · ` : ""}{formatDate(h.decided_at)}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
         )}

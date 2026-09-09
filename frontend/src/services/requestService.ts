@@ -46,6 +46,17 @@ export interface CreateRequestPayload {
 
 export type UpdateRequestPayload = Partial<CreateRequestPayload>;
 
+/** One past HoM decision on the same supplier (9 Sep 2026). */
+export interface HomHistoryEntry {
+  request_id: string;
+  request_number: string;
+  sunshine_invoice_number: string | null;
+  decision: "approved" | "rejected";
+  remarks: string | null;
+  decided_by: string | null;
+  decided_at: string;
+}
+
 const requestService = {
   list: async (params?: Record<string, string>): Promise<DepositRequest[]> => {
     // Fetch up to 1000 records for legacy callers (analytics, drill pages) that need all data.
@@ -282,6 +293,40 @@ const requestService = {
       form,
       { headers: { "Content-Type": "multipart/form-data" } },
     );
+    return data;
+  },
+
+  // Bulk payment (9 Sep 2026): pay the next payable tranche of several
+  // same-supplier requests in one action — shared details + one TT copy.
+  bulkPay: async (payload: {
+    requestIds: string[];
+    paymentDate: string;
+    bank: string;
+    paymentReferenceNumber?: string;
+    accountsRemarks?: string;
+    secondaryCurrency?: string;
+    secondaryAmount?: number;
+    file: File;
+  }): Promise<{ supplier: string | null; paid: { request_number: string; tranche_label: string; amount: number }[] }> => {
+    const form = new FormData();
+    for (const id of payload.requestIds) form.append("request_ids", id);
+    form.append("payment_date", payload.paymentDate);
+    form.append("bank", payload.bank);
+    if (payload.paymentReferenceNumber) form.append("payment_reference_number", payload.paymentReferenceNumber);
+    if (payload.accountsRemarks) form.append("accounts_remarks", payload.accountsRemarks);
+    if (payload.secondaryCurrency) form.append("secondary_currency", payload.secondaryCurrency);
+    if (payload.secondaryAmount != null) form.append("secondary_amount", String(payload.secondaryAmount));
+    form.append("file", payload.file);
+    const { data } = await api.post("/requests/bulk-pay", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return data;
+  },
+
+  // Retrospective HoM decisions on the same supplier's earlier requests
+  // (9 Sep 2026) — shown while HoM processes a new file.
+  homSupplierHistory: async (id: string): Promise<HomHistoryEntry[]> => {
+    const { data } = await api.get<HomHistoryEntry[]>(`/requests/${id}/hom-history`);
     return data;
   },
 

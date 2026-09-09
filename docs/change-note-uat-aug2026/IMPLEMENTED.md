@@ -1713,3 +1713,39 @@ request (raising the tranche ceiling so more tranches can be added).
 Tests: full flow rewritten (old_amount = total; total updated on apply;
 below-tranche-sum guard; ledger untouched) + new pre-payment eligibility
 test. 310 backend tests green; tsc clean; no migration.
+
+## Batch (9 Sep 2026) — analytics visibility, queue cleanup, invoice edits,
+## BULK PAYMENT, HoM retrospective remarks
+
+1. **By Merchandiser tab invisible to Accounts** — root cause: a stored
+   `analytics_permissions` system_config row (saved under the old role
+   scheme) overrides the 4 Sep all-open defaults. **Migration 0036** deletes
+   the stored row once; the all-open defaults apply and the Super Admin
+   toggles keep working (saving recreates the row).
+2. **Pending queue "Process" column removed** (desktop) — the Request #
+   hyperlink opens the request; mobile cards keep their button.
+3. **Invoice numbers editable at ANY status** (client decision): Accounts /
+   Super Admin invoice-number-only updates bypass the completion lock and
+   terminal freezes in `DepositRequestService.update` — all other fields
+   keep the existing lock rules; cross-request uniqueness + old→new audit
+   unchanged. Tests: locked-request edit allowed, other fields still locked.
+4. **Bulk payment** (`POST /requests/bulk-pay`, multipart): Accounts tick
+   same-supplier rows on the Pending tab (checkbox column; rows without a
+   payable tranche or of a different supplier than the first pick are
+   disabled — the wrong-supplier safety) → "Pay Selected (n)" opens the
+   BulkPayDialog (`components/accounts/BulkPayDialog.tsx`): the per-tranche
+   payment form (date, bank, ref, remarks, secondary currency/amount) + ONE
+   TT copy. Client decisions: pays each request's NEXT payable tranche
+   (lowest-numbered unpaid + released) and marks it PAID in one atomic
+   action (any failure rolls the whole batch back). One Drive upload shared
+   by every tranche (filename TT_BULK_{supplier_code}_{date}); per-request
+   snapshot reseed, paid notification and executive TT email; batch capped
+   at 25.
+5. **HoM retrospective remarks**: `GET /requests/{id}/hom-history` returns
+   past HoM approve/reject decisions (status-history rows leaving
+   pending_hom_approval) on the SAME supplier's earlier requests, newest
+   first. The HoM request page shows a "Previous HoM Decisions" card
+   (decision pill, remark, who/when, links) above the default history.
+
+312 backend tests green; tsc clean. Deploy: `alembic upgrade head` (0036) +
+backend & frontend together.

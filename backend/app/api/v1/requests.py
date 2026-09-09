@@ -2,10 +2,11 @@
 
 import asyncio
 from datetime import date
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request, UploadFile, status
 from pydantic import BaseModel
 
 from app.analytics.snapshot_job import seed_snapshot_for_request
@@ -30,6 +31,7 @@ from app.schemas.deposit_request import (
     StatusChangeRequest,
 )
 from app.schemas.common import MessageResponse, PaginatedResponse
+from app.schemas.tranche import TranchePaymentDetailsUpdate
 from app.services.deposit_request_service import DepositRequestService
 from app.services.notification_service import (
     notify_hom_decision,
@@ -330,6 +332,203 @@ async def update_request(
     # snapshot so edits are reflected without waiting for the bulk job.
     background_tasks.add_task(seed_snapshot_for_request, req.id)
     return DepositRequestResponse.model_validate(req)
+
+
+@router.post("/bulk-pay")
+async def bulk_pay(
+    current_user: User,
+    request: Request,
+    db: DB,
+    background_tasks: BackgroundTasks,
+    file: UploadFile,
+    request_ids: list[UUID] = Form(...),
+    payment_date: date = Form(...),
+    bank: str = Form(...),
+    payment_reference_number: str | None = Form(None),
+    accounts_remarks: str | None = Form(None),
+    secondary_currency: str | None = Form(None),
+    secondary_amount: Decimal | None = Form(None),
+) -> dict:
+    """Bulk payment (9 Sep 2026 client request): Accounts select multiple
+    requests of the SAME supplier and pay each one's NEXT payable tranche in
+    a single action — one shared TT copy (uploaded once to Drive, attached to
+    every tranche) plus the same payment details, then Mark Paid per tranche.
+
+    Atomic: any failure rolls the whole batch back. Wrong-supplier safety:
+    mixing suppliers is refused.
+    """
+    from app.core.exceptions import BusinessRuleError, ValidationError
+    from app.integrations.google_drive.drive_service import (
+        ALLOWED_MIME_TYPES,
+        upload_tt_copy_to_drive,
+        validate_tt_copy,
+    )
+    from app.models.enums import TrancheStatus
+    from app.services.notification_service import (
+        email_tt_copy_uploaded,
+        notify_tranche_event,
+    )
+    from app.services.tranche_service import TrancheService
+
+    if not request_ids:
+        raise ValidationError("Select at least one request.")
+    if len(request_ids) > 25:
+        raise ValidationError("Bulk payment is limited to 25 requests at a time.")
+    if len(set(request_ids)) != len(request_ids):
+        raise ValidationError("Duplicate requests in the selection.")
+
+    content = await file.read()
+    error = validate_tt_copy(file.content_type, len(content))
+    if error:
+        raise ValidationError(error)
+
+    repo = DepositRequestRepository(db)
+    svc = TrancheService(db)
+    ip = _ip(request)
+    ua = request.headers.get("user-agent")
+
+    # Load + wrong-supplier guard.
+    requests_loaded: list[DepositRequest] = []
+    for rid in request_ids:
+        req = await repo.get_for_validation(rid)
+        if not req:
+            raise NotFoundError(f"Request {rid} not found.")
+        requests_loaded.append(req)
+    supplier_ids = {r.supplier_id for r in requests_loaded}
+    if len(supplier_ids) > 1:
+        raise BusinessRuleError(
+            "Bulk payment covers ONE supplier at a time — the selection mixes "
+            "different suppliers. Deselect the odd ones out."
+        )
+
+    # Resolve each request's NEXT payable tranche (lowest-numbered UNPAID,
+    # released or tranche 1) before writing anything.
+    targets: list[tuple[DepositRequest, object]] = []
+    for req in requests_loaded:
+        tranches = await svc.list_for_request(req.id)
+        payable = sorted(
+            (
+                t for t in tranches
+                if t.status == TrancheStatus.UNPAID
+                and (t.released_at is not None or t.tranche_number == 1)
+            ),
+            key=lambda t: t.tranche_number,
+        )
+        if not payable:
+            raise BusinessRuleError(
+                f"{req.request_number} has no payable tranche (nothing unpaid, "
+                "or the next tranche is still awaiting the merchandiser's release)."
+            )
+        targets.append((req, payable[0]))
+
+    # One Drive upload shared by every tranche.
+    from datetime import date as date_cls
+
+    from app.models.masters import Supplier
+
+    supplier = await db.get(Supplier, next(iter(supplier_ids)))
+    ext = ALLOWED_MIME_TYPES[file.content_type]
+    filename = (
+        f"TT_BULK_{supplier.supplier_code if supplier else 'SUP'}_"
+        f"{date_cls.today().strftime('%Y%m%d')}{ext}"
+    )
+    file_id, link = await asyncio.to_thread(
+        upload_tt_copy_to_drive, content, filename, file.content_type
+    )
+
+    details = TranchePaymentDetailsUpdate(
+        payment_date=payment_date,
+        bank=bank.strip(),
+        payment_reference_number=(payment_reference_number or "").strip() or None,
+        accounts_remarks=(accounts_remarks or "").strip() or None,
+        secondary_currency=(secondary_currency or "").strip() or None,
+        secondary_amount=secondary_amount,
+    )
+
+    paid: list[dict] = []
+    for req, tranche in targets:
+        await svc.attach_tt_copy(
+            req.id, tranche.id,
+            tt_copy_url=link, tt_copy_file_id=file_id, tt_copy_filename=filename,
+            user_id=current_user.id, role=current_user.role,
+            ip_address=ip, user_agent=ua,
+        )
+        await svc.update_payment_details(
+            req.id, tranche.id, details, current_user.id, current_user.role,
+            ip_address=ip, user_agent=ua,
+        )
+        await svc.pay_tranche(
+            req.id, tranche.id, current_user.id, current_user.role,
+            ip_address=ip, user_agent=ua,
+        )
+        paid.append({
+            "request_id": str(req.id),
+            "request_number": req.request_number,
+            "tranche_label": tranche.label,
+            "amount": float(tranche.amount),
+        })
+        background_tasks.add_task(seed_snapshot_for_request, req.id)
+        background_tasks.add_task(notify_tranche_event, req.id, tranche.id, "paid")
+        # Executive TT email per request — same shared attachment.
+        background_tasks.add_task(
+            email_tt_copy_uploaded, req.id, tranche.id, content,
+            file.content_type or "application/octet-stream", filename,
+        )
+
+    return {"supplier": supplier.name if supplier else None, "paid": paid}
+
+
+@router.get("/{request_id}/hom-history")
+async def hom_supplier_history(
+    request_id: UUID,
+    current_user: User,
+    db: DB,
+    limit: int = Query(15, ge=1, le=50),
+) -> list[dict]:
+    """Retrospective HoM decisions (9 Sep 2026 client request): while
+    processing a request, the Head of Merchandiser sees the past HoM
+    approve/reject remarks on EARLIER requests of the SAME supplier —
+    status-history rows leaving pending_hom_approval, newest first."""
+    from sqlalchemy import select as sa_select
+
+    from app.models.workflow import StatusHistory
+
+    repo = DepositRequestRepository(db)
+    req = await repo.get_for_validation(request_id)
+    if not req:
+        raise NotFoundError(f"Request {request_id} not found.")
+
+    rows = (
+        await db.execute(
+            sa_select(StatusHistory, DepositRequest, UserModel.full_name)
+            .join(DepositRequest, DepositRequest.id == StatusHistory.deposit_request_id)
+            .outerjoin(UserModel, UserModel.id == StatusHistory.changed_by)
+            .where(
+                DepositRequest.supplier_id == req.supplier_id,
+                DepositRequest.id != req.id,
+                DepositRequest.is_deleted == False,  # noqa: E712
+                StatusHistory.old_status == RequestStatus.PENDING_HOM_APPROVAL,
+            )
+            .order_by(StatusHistory.changed_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    return [
+        {
+            "request_id": str(r.id),
+            "request_number": r.request_number,
+            "sunshine_invoice_number": r.sunshine_invoice_number,
+            "decision": (
+                "approved"
+                if h.new_status == RequestStatus.PENDING_PAYMENT
+                else "rejected"
+            ),
+            "remarks": h.remarks,
+            "decided_by": name,
+            "decided_at": h.changed_at.isoformat(),
+        }
+        for h, r, name in rows
+    ]
 
 
 @router.delete("/{request_id}", response_model=MessageResponse)

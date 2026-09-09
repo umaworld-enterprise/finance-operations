@@ -351,6 +351,25 @@ export function useUploadTrancheTtCopy(requestId: string) {
   });
 }
 
+// Bulk payment (9 Sep 2026) — invalidate everything request-shaped after.
+export function useBulkPay() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: Parameters<typeof requestService.bulkPay>[0]) =>
+      requestService.bulkPay(payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...REQUESTS_KEY] }),
+  });
+}
+
+// Retrospective HoM decisions on the same supplier (9 Sep 2026).
+export function useHomSupplierHistory(requestId: string) {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, requestId, "hom-history"],
+    queryFn: () => requestService.homSupplierHistory(requestId),
+    staleTime: 60_000,
+  });
+}
+
 // Delete a tranche's TT copy (4 Sep 2026) — Accounts only.
 export function useDeleteTrancheTtCopy(requestId: string) {
   const qc = useQueryClient();
