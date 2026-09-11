@@ -149,8 +149,9 @@ async def pending_payment_queue(
     if current_user.role not in _ALLOWED:
         raise AuthorizationError("Access to the payment queue is not permitted for your role.")
     svc = DepositRequestService(db)
-    created_by_filter = current_user.id if current_user.role == UserRole.MERCHANDISER else None
-    requests = await svc.get_pending_payment_queue(created_by=created_by_filter)
+    # Merchandisers see the FULL queue since 11 Sep 2026 (executive request:
+    # all requests visible to all merchandisers) — actions stay owner-only.
+    requests = await svc.get_pending_payment_queue()
     return [DepositRequestResponse.model_validate(r) for r in requests]
 
 
@@ -197,8 +198,9 @@ async def pending_release(
     """'Yet to be Released' tranches (2 onwards, unpaid, unreleased) on live
     pending-payment requests (19 Aug 2026). Drives the merchandiser
     'Tranche Payments to be Released' tile and the Accounts Workspace
-    'Yet to be Released by Merchandiser' tile + tab. Merchandisers see their
-    own; accounts / HoM / finance / super admins see all."""
+    'Yet to be Released by Merchandiser' tile + tab. Every role sees all
+    rows — merchandisers included (11 Sep 2026: full rights on every
+    request for every merchandiser)."""
     from app.models.enums import TrancheStatus
     from app.models.masters import Supplier
     from app.models.tranche import PaymentTranche, tranche_label
@@ -218,8 +220,6 @@ async def pending_release(
         )
         .order_by(PaymentTranche.tentative_payment_date.asc().nulls_last())
     )
-    if current_user.role == UserRole.MERCHANDISER:
-        stmt = stmt.where(DepositRequest.created_by == current_user.id)
     rows = (await db.execute(stmt)).all()
     return [
         {
@@ -285,11 +285,11 @@ async def get_request(
     current_user: User,
     db: DB,
 ) -> DepositRequestDetailResponse:
-    from app.models.enums import UserRole
     svc = DepositRequestService(db)
+    # Merchandisers may open ANY request since 11 Sep 2026 (executive
+    # request) — the service layer still rejects writes on ones they
+    # did not create.
     request = await svc.get_detail(request_id, current_user.id, current_user.role)
-    if current_user.role == UserRole.MERCHANDISER and request.created_by != current_user.id:
-        raise NotFoundError(f"Deposit request {request_id} not found.")
     response = DepositRequestDetailResponse.model_validate(request)
     actors = await svc.get_last_status_actors([request.id])
     response.last_status_change_by = actors.get(request.id)

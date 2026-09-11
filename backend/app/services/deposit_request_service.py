@@ -283,10 +283,9 @@ class DepositRequestService:
         role: UserRole,
         remarks: str | None,
     ) -> DepositRequest:
-        """Merchandiser adds/updates remarks on their own request. Super Admin can do any."""
+        """Any merchandiser adds/updates remarks on any request (ownership
+        guard removed 11 Sep 2026, executive request). Super Admin can do any."""
         request = await self._get_scalar_or_404(request_id)
-        if role == UserRole.MERCHANDISER and request.created_by != user_id:
-            raise AuthorizationError("You can only add remarks to your own requests.")
         # Rejected/cancelled requests are closed to the merchandiser entirely
         # (UAT Aug 2026, item 18) — remarks included.
         if (
@@ -328,8 +327,8 @@ class DepositRequestService:
         ):
             assert_record_not_locked(request.is_locked, role)
 
-        if role == UserRole.MERCHANDISER and request.created_by != user_id:
-            raise AuthorizationError("You can only edit your own requests.")
+        # Ownership guard removed 11 Sep 2026 (executive request): every
+        # merchandiser has full rights on every request.
         # Once a request is rejected or cancelled, the merchandiser can no
         # longer change anything on it (UAT Aug 2026, item 18).
         if (
@@ -340,8 +339,9 @@ class DepositRequestService:
                 "This request can no longer be edited "
                 f"(current status: {request.current_status.value})."
             )
-        # Merchandiser form editing (2 Sep 2026): the OWNER may edit the form
-        # fields while the request is still pending (HoM approval or the
+        # Merchandiser form editing (2 Sep 2026; any merchandiser since
+        # 11 Sep 2026): the form fields can be edited while the request is
+        # still pending (HoM approval or the
         # payment queue) AND Accounts have not acted on it in any way — no
         # request-wide write and no tranche paid / TT'd / detailed. Super
         # admin keeps the pre-existing broader rights.
@@ -415,9 +415,8 @@ class DepositRequestService:
     ) -> DepositRequest:
         request = await self._get_scalar_or_404(request_id)
 
-        # Merchandiser can only act on own records
-        if role == UserRole.MERCHANDISER and request.created_by != user_id:
-            raise AuthorizationError("You can only change status of your own requests.")
+        # Ownership guard removed 11 Sep 2026 (executive request): every
+        # merchandiser may hold / resume / cancel any request.
 
         assert_transition_allowed(request.current_status, target, role)
         assert_record_not_locked(request.is_locked, role)

@@ -62,12 +62,11 @@ def _ip(req: Request) -> str | None:
 async def _request_or_404(
     db: AsyncSession, request_id: UUID, current_user: CurrentUser
 ) -> DepositRequest:
-    """Load the request applying the same visibility rule as GET /requests/{id}:
-    merchandisers only see their own records."""
+    """Load the request applying the same visibility rule as GET /requests/{id}.
+    Since 11 Sep 2026 merchandisers see ALL requests (executive request) —
+    the mutation endpoints below still enforce ownership via the service."""
     request = await DepositRequestRepository(db).get_for_validation(request_id)
     if not request:
-        raise NotFoundError(f"Request {request_id} not found.")
-    if current_user.role == UserRole.MERCHANDISER and request.created_by != current_user.id:
         raise NotFoundError(f"Request {request_id} not found.")
     return request
 

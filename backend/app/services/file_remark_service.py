@@ -148,8 +148,8 @@ class FileRemarkService:
             stmt = stmt.where(
                 DepositRequest.current_status == RequestStatus.PAYMENT_PROCESSED
             )
-        if role == UserRole.MERCHANDISER:
-            stmt = stmt.where(DepositRequest.created_by == user_id)
+        # Ownership scoping removed 11 Sep 2026 (executive request): every
+        # merchandiser may raise a Modify Request on any request.
         requests = list((await self._session.execute(stmt)).scalars().all())
         if not requests:
             return []
@@ -224,8 +224,8 @@ class FileRemarkService:
         request = await self._request_repo.get_for_validation(data.deposit_request_id)
         if not request:
             raise NotFoundError(f"Request {data.deposit_request_id} not found.")
-        if role == UserRole.MERCHANDISER and request.created_by != user_id:
-            raise AuthorizationError("You can only raise file remarks on your own requests.")
+        # Ownership guard removed 11 Sep 2026 (executive request): every
+        # merchandiser may raise a Modify Request on any request.
         from decimal import Decimal
 
         _TERMINAL = (
@@ -504,8 +504,8 @@ class FileRemarkService:
             .order_by(FileRemark.created_at.desc())
             .limit(limit)
         )
-        if role == UserRole.MERCHANDISER:
-            stmt = stmt.where(FileRemark.created_by == user_id)
+        # Ownership scoping removed 11 Sep 2026 (executive request):
+        # merchandisers see every Modify Request, like Accounts do.
         if status:
             stmt = stmt.where(FileRemark.status == status)
         if deposit_request_id:

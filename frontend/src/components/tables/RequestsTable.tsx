@@ -22,12 +22,16 @@ interface RequestsTableProps {
   requests: DepositRequest[];
   basePath?: string;
   emptyMessage?: string;
+  /** Show WHO raised each request — used since all requests became visible
+   * to every merchandiser (11 Sep 2026). */
+  showMerchandiser?: boolean;
 }
 
 export function RequestsTable({
   requests,
   basePath = "/merchandiser",
   emptyMessage = "Requests you submit will appear here.",
+  showMerchandiser = false,
 }: RequestsTableProps) {
   if (requests.length === 0) {
     return (
@@ -49,6 +53,9 @@ export function RequestsTable({
             <TableHead>Supplier</TableHead>
             <TableHead>Customer</TableHead>
             <TableHead className="hidden md:table-cell">Vertical</TableHead>
+            {showMerchandiser && (
+              <TableHead className="hidden md:table-cell">Merchandiser</TableHead>
+            )}
             <TableHead className="hidden sm:table-cell text-right">Amount Payable</TableHead>
             <TableHead className="text-right">Deposit</TableHead>
             <TableHead>Status</TableHead>
@@ -84,6 +91,11 @@ export function RequestsTable({
               <TableCell className="hidden md:table-cell text-muted-foreground text-xs">
                 {req.vertical?.name ?? "—"}
               </TableCell>
+              {showMerchandiser && (
+                <TableCell className="hidden md:table-cell text-muted-foreground text-xs">
+                  {req.creator?.full_name ?? "—"}
+                </TableCell>
+              )}
               <TableCell className="hidden sm:table-cell text-right font-semibold text-foreground">
                 {formatCurrency(amountPayable(req), req.currency)}
               </TableCell>

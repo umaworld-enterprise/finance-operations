@@ -72,6 +72,10 @@ export default function MerchandiserRequestDetail() {
     if (req?.remarks !== undefined) setMerchandiserNote(req.remarks ?? "");
   }, [req?.id, req?.remarks]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // All requests are visible to every merchandiser WITH FULL RIGHTS
+  // (11 Sep 2026, executive request) — the page behaves the same whether
+  // or not the viewer raised the request.
+
   // Terminal statuses: the request is closed to the merchandiser entirely
   // (UAT Aug 2026, item 18) — no edits, not even remarks.
   const requestClosed =
@@ -153,7 +157,7 @@ export default function MerchandiserRequestDetail() {
             description="This request may have been deleted or you don't have access to it."
             action={
               <Button asChild variant="outline">
-                <Link href="/merchandiser">Back to my requests</Link>
+                <Link href="/merchandiser">Back to requests</Link>
               </Button>
             }
           />
@@ -177,7 +181,7 @@ export default function MerchandiserRequestDetail() {
           href="/merchandiser"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
         >
-          <ArrowLeft className="h-4 w-4" /> Back to my requests
+          <ArrowLeft className="h-4 w-4" /> Back to requests
         </Link>
 
         <div className="flex flex-wrap items-center gap-3">

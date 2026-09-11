@@ -50,11 +50,12 @@ async def list_adjustments(
     db: DB,
     limit: int = Query(100, ge=1, le=500),
 ) -> list[AdjustmentResponse]:
-    """Adjustment history. Merchandisers see only adjustments they raised."""
+    """Adjustment history. Merchandisers see ALL adjustments since 11 Sep
+    2026 (executive request: full rights on every request for every
+    merchandiser)."""
     if current_user.role not in _VIEW_ROLES:
         raise AuthorizationError("Access to invoice adjustments is not permitted for your role.")
-    performed_by = current_user.id if current_user.role == UserRole.MERCHANDISER else None
-    return await AdjustmentService(db).list_recent(limit=limit, performed_by=performed_by)
+    return await AdjustmentService(db).list_recent(limit=limit)
 
 
 @router.get("/pending", response_model=list[AdjustmentResponse])

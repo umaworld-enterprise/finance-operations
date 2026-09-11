@@ -2,13 +2,13 @@
 
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.deposit_request import DepositRequest
 from app.models.enums import RequestStatus, UserRole
-from app.models.masters import Customer, Supplier, User
+from app.models.masters import Customer, Supplier
 from app.repositories.base import BaseRepository
 
 _StatusArg = RequestStatus | list[RequestStatus] | None
@@ -48,20 +48,12 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         priority: str | None = None,
         search: str | None = None,
     ):
-        if role == UserRole.MERCHANDISER:
-            # Include: requests the user created in-app OR submitted via the
-            # public form using their registered email (legacy records where
-            # created_by was NULL before the email-lookup fix).
-            user_email_sq = select(User.email).where(User.id == user_id).scalar_subquery()
-            stmt = stmt.where(
-                or_(
-                    DepositRequest.created_by == user_id,
-                    and_(
-                        DepositRequest.created_by.is_(None),
-                        DepositRequest.submitter_email == user_email_sq,
-                    ),
-                )
-            )
+        # Merchandiser own-requests scoping REMOVED (11 Sep 2026, executive
+        # request): every merchandiser now sees ALL requests. Write access is
+        # unchanged — the service layer still rejects edits / status changes /
+        # tranche actions on requests a merchandiser did not create. "Mine
+        # only" viewing is the opt-in Merchandiser chip in the filter bar
+        # (the created_by param below).
         if status is not None:
             if isinstance(status, list):
                 stmt = stmt.where(DepositRequest.current_status.in_(status))
