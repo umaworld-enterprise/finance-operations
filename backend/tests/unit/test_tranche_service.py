@@ -97,15 +97,17 @@ async def test_owner_can_edit_unpaid_tranche(db_session):
     assert {log.field_name for log in logs} == {"amount", "tentative_payment_date"}
 
 
-async def test_non_owner_merchandiser_cannot_edit(db_session):
+async def test_non_owner_merchandiser_can_edit(db_session):
+    """11 Sep 2026 (executive request): every merchandiser has full rights
+    on every request — the ownership guard is gone."""
     _, _, request, (tranche,) = await _setup(db_session)
     other = await make_user(db_session, UserRole.MERCHANDISER)
     svc = TrancheService(db_session)
-    with pytest.raises(AuthorizationError):
-        await svc.update_tranche(
-            request.id, tranche.id, TrancheUpdate(amount=Decimal("1.00")),
-            other.id, UserRole.MERCHANDISER,
-        )
+    updated = await svc.update_tranche(
+        request.id, tranche.id, TrancheUpdate(amount=Decimal("1.00")),
+        other.id, UserRole.MERCHANDISER,
+    )
+    assert updated.amount == Decimal("1.00")
 
 
 async def test_accounts_role_cannot_edit_tranche(db_session):
@@ -800,20 +802,21 @@ async def test_delete_blocked_after_accounts_touch(db_session):
         await svc.delete_tranche(request.id, t2.id, merch.id, UserRole.MERCHANDISER)
 
 
-async def test_non_owner_cannot_add_or_delete(db_session):
+async def test_non_owner_can_add_and_delete(db_session):
+    """11 Sep 2026 (executive request): every merchandiser has full rights
+    on every request — add and delete work across owners."""
     _, _, request, (t1, t2) = await _setup(
         db_session, tranche_amounts=("600.00", "400.00")
     )
     other = await make_user(db_session, UserRole.MERCHANDISER)
     svc = TrancheService(db_session)
-    with pytest.raises(AuthorizationError):
-        await svc.add_tranche(
-            request.id,
-            TrancheCreate(amount=Decimal("100.00"), tentative_payment_date=date(2026, 9, 1)),
-            other.id, UserRole.MERCHANDISER,
-        )
-    with pytest.raises(AuthorizationError):
-        await svc.delete_tranche(request.id, t2.id, other.id, UserRole.MERCHANDISER)
+    added = await svc.add_tranche(
+        request.id,
+        TrancheCreate(amount=Decimal("100.00"), tentative_payment_date=date(2026, 9, 1)),
+        other.id, UserRole.MERCHANDISER,
+    )
+    assert added.deposit_request_id == request.id
+    await svc.delete_tranche(request.id, t2.id, other.id, UserRole.MERCHANDISER)
 
 
 async def test_accounts_touched_reason_is_none_when_untouched(db_session):
@@ -982,12 +985,10 @@ async def test_release_permissions_and_conflicts(db_session):
     # Accounts cannot release.
     with pytest.raises(AuthorizationError):
         await svc.release_tranche(request.id, t2.id, accounts.id, UserRole.ACCOUNTS_TEAM)
-    # Another merchandiser cannot release.
+    # ANY merchandiser releases (11 Sep 2026: full rights on every request
+    # for every merchandiser); double release conflicts.
     other = await make_user(db_session, UserRole.MERCHANDISER)
-    with pytest.raises(AuthorizationError):
-        await svc.release_tranche(request.id, t2.id, other.id, UserRole.MERCHANDISER)
-    # Owner releases; double release conflicts.
-    await svc.release_tranche(request.id, t2.id, merch.id, UserRole.MERCHANDISER)
+    await svc.release_tranche(request.id, t2.id, other.id, UserRole.MERCHANDISER)
     with pytest.raises(ConflictError, match="already released"):
         await svc.release_tranche(request.id, t2.id, merch.id, UserRole.MERCHANDISER)
     # Paid and rejected tranches cannot be released.

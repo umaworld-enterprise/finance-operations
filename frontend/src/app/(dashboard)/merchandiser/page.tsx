@@ -147,7 +147,9 @@ export default function MerchandiserDashboard() {
 
   return (
     <RoleGuard allowedRoles={["merchandiser", "super_admin"]}>
-      <TopNav title="My Requests" subtitle="Track and manage your Supplier Advance Payment Requests" />
+      {/* All requests are visible to every merchandiser with full rights
+          (11 Sep 2026, executive request). */}
+      <TopNav title="Requests" subtitle="All Supplier Advance Payment Requests across every merchandiser" />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
 
         {/* Projections gate (4 Sep 2026): blocked merchandisers see the
@@ -278,12 +280,14 @@ export default function MerchandiserDashboard() {
           <SortSelect value={sort} onChange={changeSort} className="sm:w-52" />
           <ExportButton
             count={requests.length}
-            onExport={() => exportRequestsToExcel(requests, `my-requests-${activeTab}.xlsx`)}
+            onExport={() => exportRequestsToExcel(requests, `requests-${activeTab}.xlsx`)}
           />
         </div>
 
-        {/* Dynamic filter module (4 Sep 2026) — applies to every tab. */}
-        <RequestFilterBar values={filters} onChange={changeFilters} />
+        {/* Dynamic filter module (4 Sep 2026) — applies to every tab. The
+            Merchandiser chip (11 Sep 2026) filters back down to one person's
+            requests now that everyone's are listed. */}
+        <RequestFilterBar values={filters} onChange={changeFilters} showMerchandiser />
 
         <Tabs value={activeTab} onValueChange={changeTab} id="status-tabs" className="scroll-mt-4">
           <TabsList className="w-full">
@@ -332,7 +336,7 @@ export default function MerchandiserDashboard() {
                 )
               ) : (
                 <div className={isFetching ? "opacity-70 transition-opacity" : ""}>
-                  <RequestsTable requests={requests} basePath="/merchandiser" />
+                  <RequestsTable requests={requests} basePath="/merchandiser" showMerchandiser />
                   <Pagination
                     page={page}
                     totalPages={totalPages}

@@ -186,11 +186,16 @@ async def save_field_visibility(session: AsyncSession, config: dict[str, dict[st
 def _merchandiser_scope(role: UserRole, user_id: UUID):
     """WHERE predicate limiting rows to the merchandiser's own requests.
 
-    Returns None for every other role. Own requests = created in-app OR
-    submitted via the public form with the user's registered email (legacy
-    rows where created_by was NULL before the email-lookup fix). Mirrors
-    DepositRequestRepository._apply_filters — keep the two in sync.
+    Since 11 Sep 2026 (executive request: all requests visible to all
+    merchandisers with full rights) this always returns None — analytics is
+    unscoped for every role. The function is kept so its call sites stay
+    unchanged should per-merchandiser scoping ever come back.
     """
+    return None
+
+
+def _merchandiser_scope_pre_sep2026(role: UserRole, user_id: UUID):  # pragma: no cover
+    """Retired own-requests predicate — kept for reference only."""
     if role != UserRole.MERCHANDISER:
         return None
     user_email_sq = select(User.email).where(User.id == user_id).scalar_subquery()

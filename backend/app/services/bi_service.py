@@ -37,7 +37,7 @@ request submission through payment to shipment, covering payment status, overdue
 supplier risk, cost of fund, and breakdown analytics by merchandiser, vertical, and customer.
 
 Roles: super_admin (full access) · finance_admin (supplier risk + analytics) ·
-accounts_team (payment queue) · merchandiser (their own requests only)
+accounts_team (payment queue) · merchandiser (all requests, full rights)
 
 The tracker supports multi-currency deposits: USD, CNY, EUR, GBP, AED, INR.
 

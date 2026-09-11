@@ -134,13 +134,17 @@ async def test_merchandiser_raises_remark_on_own_locked_request(db_session):
 
 
 @pytest.mark.asyncio
-async def test_non_owner_and_ineligible_roles_blocked(db_session):
+async def test_any_merchandiser_may_raise_but_ineligible_roles_blocked(db_session):
+    """11 Sep 2026: every merchandiser has full rights on every request —
+    a non-owner merchandiser may raise a Modify Request; ineligible roles
+    (HoM) stay blocked."""
     merch, _, request = await _setup(db_session)
     other = await make_user(db_session, UserRole.MERCHANDISER)
     hom = await make_user(db_session, UserRole.HEAD_OF_MERCHANDISER)
     svc = FileRemarkService(db_session)
-    with pytest.raises(AuthorizationError, match="own requests"):
-        await svc.create(_payload(request), other.id, UserRole.MERCHANDISER)
+    remark = await svc.create(_payload(request), other.id, UserRole.MERCHANDISER)
+    assert remark.status == "open"
+    assert remark.created_by == other.id
     with pytest.raises(AuthorizationError):
         await svc.create(_payload(request), hom.id, UserRole.HEAD_OF_MERCHANDISER)
 
@@ -252,8 +256,10 @@ async def test_list_scoping_and_filters(db_session):
     )
     await svc.decide(theirs.id, "approved", accounts.id, UserRole.ACCOUNTS_TEAM)
 
-    own = await svc.list(merch.id, UserRole.MERCHANDISER)
-    assert {r.id for r in own} == {mine.id}
+    # 11 Sep 2026: merchandisers see EVERY Modify Request, like Accounts do.
+    merch_rows = await svc.list(merch.id, UserRole.MERCHANDISER)
+    assert {r.id for r in merch_rows} == {mine.id, theirs.id}
+    own = [r for r in merch_rows if r.id == mine.id]
     assert own[0].request_number == request.request_number
     # The request's currency travels with the remark (19 Aug 2026) — shown
     # next to every amount in the details display.

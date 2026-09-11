@@ -98,9 +98,9 @@ class TrancheService:
         request = await self._get_request_or_404(request_id)
 
         if role not in {UserRole.MERCHANDISER, UserRole.SUPER_ADMIN}:
-            raise AuthorizationError("Only the request's merchandiser can edit tranches.")
-        if role == UserRole.MERCHANDISER and request.created_by != user_id:
-            raise AuthorizationError("You can only edit tranches on your own requests.")
+            raise AuthorizationError("Only merchandisers can edit tranches.")
+        # Ownership guard removed 11 Sep 2026 (executive request): every
+        # merchandiser has full rights on every request.
         assert_record_not_locked(request.is_locked, role)
         if request.current_status in _TERMINAL_STATUSES:
             raise ConflictError("Tranches cannot be edited on a cancelled or rejected request.")
@@ -166,9 +166,9 @@ class TrancheService:
         it into the payment queue for the additional amount)."""
         request = await self._get_request_or_404(request_id)
         if role not in {UserRole.MERCHANDISER, UserRole.SUPER_ADMIN}:
-            raise AuthorizationError("Only the request's merchandiser can add tranches.")
-        if role == UserRole.MERCHANDISER and request.created_by != user_id:
-            raise AuthorizationError("You can only add tranches on your own requests.")
+            raise AuthorizationError("Only merchandisers can add tranches.")
+        # Ownership guard removed 11 Sep 2026 (executive request): every
+        # merchandiser has full rights on every request.
         if request.current_status in _TERMINAL_STATUSES:
             raise ConflictError("Tranches cannot be added on a cancelled or rejected request.")
         reopening = request.current_status == RequestStatus.PAYMENT_PROCESSED
@@ -267,9 +267,9 @@ class TrancheService:
         for payment (19 Aug 2026) — only then can Accounts mark it paid."""
         request = await self._get_request_or_404(request_id)
         if role not in {UserRole.MERCHANDISER, UserRole.SUPER_ADMIN}:
-            raise AuthorizationError("Only the request's merchandiser can release tranches.")
-        if role == UserRole.MERCHANDISER and request.created_by != user_id:
-            raise AuthorizationError("You can only release tranches on your own requests.")
+            raise AuthorizationError("Only merchandisers can release tranches.")
+        # Ownership guard removed 11 Sep 2026 (executive request): every
+        # merchandiser has full rights on every request.
         if request.current_status in _TERMINAL_STATUSES:
             raise ConflictError("Tranches cannot be released on a cancelled or rejected request.")
 
@@ -308,9 +308,9 @@ class TrancheService:
         Accounts notification — the row is gone afterwards)."""
         request = await self._get_request_or_404(request_id)
         if role not in {UserRole.MERCHANDISER, UserRole.SUPER_ADMIN}:
-            raise AuthorizationError("Only the request's merchandiser can delete tranches.")
-        if role == UserRole.MERCHANDISER and request.created_by != user_id:
-            raise AuthorizationError("You can only delete tranches on your own requests.")
+            raise AuthorizationError("Only merchandisers can delete tranches.")
+        # Ownership guard removed 11 Sep 2026 (executive request): every
+        # merchandiser has full rights on every request.
         assert_record_not_locked(request.is_locked, role)
         if request.current_status in _TERMINAL_STATUSES:
             raise ConflictError("Tranches cannot be deleted on a cancelled or rejected request.")

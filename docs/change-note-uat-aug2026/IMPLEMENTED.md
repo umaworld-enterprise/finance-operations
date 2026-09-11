@@ -1749,3 +1749,41 @@ test. 310 backend tests green; tsc clean; no migration.
 
 312 backend tests green; tsc clean. Deploy: `alembic upgrade head` (0036) +
 backend & frontend together.
+
+## All requests visible to ALL merchandisers with FULL RIGHTS (11 Sep 2026)
+
+Executive request, delivered in two steps within the same session: first the
+read boundary was lifted, then (per the follow-up "they will be having all the
+same rights not just read only") the ownership guards on every write path were
+removed too. Any merchandiser can now see AND act on any request.
+
+**Backend**
+- `DepositRequestRepository._apply_filters` — MERCHANDISER own-requests
+  scoping removed (listing + counts). The `created_by` param remains for the
+  opt-in Merchandiser filter chip.
+- `GET /requests/{id}` + tranches `_request_or_404` — non-owner 404 removed.
+- `GET /requests/pending-payment-queue` and `GET /requests/pending-release` —
+  merchandisers see all rows.
+- Ownership guards removed (role gates kept): `DepositRequestService.update`,
+  `transition_status` (hold/resume/cancel), `update_remarks`;
+  `TrancheService` add/update/delete/release; `FileRemarkService`
+  selectable-files, create, and list (merchandisers now see every Modify
+  Request, like Accounts).
+- `GET /adjustments` — merchandiser `performed_by` scoping removed.
+- Analytics `_merchandiser_scope` now returns None (unscoped for all roles);
+  the old predicate is kept as `_merchandiser_scope_pre_sep2026` for reference.
+- New `tests/unit/test_merchandiser_visibility.py` (5 tests: sees-all,
+  mine-only filter, cross-owner edit / status change / add tranche);
+  3 tranche-service ownership tests and 2 file-remark tests flipped to the
+  new behavior. 317 backend tests green; tsc clean. No migration.
+
+**Frontend**
+- Merchandiser workspace: sidebar/title "My Requests" → "Requests"; subtitle
+  says all requests across every merchandiser; Merchandiser filter chip
+  enabled (`showMerchandiser` on RequestFilterBar); new opt-in Merchandiser
+  column on RequestsTable; export renamed `requests-{tab}.xlsx`.
+- Detail page unchanged functionally — same edit/hold/cancel/tranche powers
+  regardless of who raised the request ("Back to requests" wording updated).
+
+**Note**: audit trail unchanged — every action still records WHO did it, so
+cross-merchandiser edits stay fully attributable.
