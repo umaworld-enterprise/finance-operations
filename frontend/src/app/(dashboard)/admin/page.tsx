@@ -24,7 +24,7 @@ import { NpaPanel } from "@/components/analytics/NpaPanel";
 import { formatCurrency, formatDate, requestDisplayNumber } from "@/lib/utils";
 import {
   Users, ClipboardList, TrendingUp, AlertTriangle, ArrowUpRight,
-  LayoutDashboard, ScrollText, BarChart3, ShieldCheck, FormInput, Eye, Link2, ListChecks,
+  Boxes, LayoutDashboard, ScrollText, BarChart3, ShieldCheck, Eye, Landmark, ListChecks,
 } from "lucide-react";
 import Link from "next/link";
 import type { DepositRequest } from "@/types";
@@ -32,31 +32,37 @@ import type { DepositRequest } from "@/types";
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 type PageSizeOption = typeof PAGE_SIZE_OPTIONS[number];
 
-const TAB_PARAMS = {
-  all:       {} as Record<string, string | string[]>,
+const TAB_PARAMS: Record<"all" | "pending" | "processed" | "cancelled", Record<string, string | string[]>> = {
+  all:       {},
   pending:   { status: "pending_payment" },
   processed: { status: "payment_processed" },
   cancelled: { status: ["cancelled_by_merchandiser", "cancelled_by_accounts"] },
-} as const;
+};
 type Tab = keyof typeof TAB_PARAMS;
 
+// Form Configuration and Form Links were removed when the public (login-free)
+// request form was retired (Aug 2026) — the pages still exist by direct URL
+// with a deprecation banner, but are no longer part of the admin workflow.
 const QUICK_LINKS = [
   { label: "Manage Users",      href: "/admin/users",             desc: "Add, edit, assign roles",                                     icon: Users },
   { label: "Audit Logs",        href: "/admin/audit",             desc: "Full field-level change trail",                               icon: ScrollText },
   { label: "Analytics",         href: "/analytics",               desc: "Metrics & cost of fund",                                      icon: BarChart3 },
   { label: "Analytics Access",  href: "/admin/analytics-access",  desc: "Control which roles see which analytics sections",            icon: ShieldCheck },
-  { label: "Form Configuration",href: "/admin/form-config",       desc: "Customise fields on the public deposit request form",         icon: FormInput },
   { label: "Field Visibility",  href: "/admin/field-visibility",  desc: "Control which columns each role sees in request details",     icon: Eye },
-  { label: "Form Links",        href: "/admin/form-links",        desc: "Create shareable public form links with custom slugs",        icon: Link2 },
   { label: "Payment Terms",     href: "/admin/payment-terms",     desc: "Manage the payment terms available in request forms",         icon: ListChecks },
+  { label: "Banks",             href: "/admin/banks",             desc: "Bank names for the tranche payment dropdown",                 icon: Landmark },
+  { label: "Masters",           href: "/admin/masters",           desc: "Add and manage suppliers, customers and verticals",           icon: Boxes },
 ];
 
 function RequestRow({ req }: { req: DepositRequest }) {
   return (
     <TableRow>
       <TableCell>
-        <span className="font-mono text-xs text-foreground font-semibold">{requestDisplayNumber(req)}</span>
+        <Link href={`/accounts/${req.id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
+          {requestDisplayNumber(req)}
+        </Link>
       </TableCell>
+      <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
       <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
       <TableCell className="hidden md:table-cell text-muted-foreground">{req.customer.name}</TableCell>
       <TableCell className="text-right font-semibold text-foreground">
@@ -128,6 +134,7 @@ export default function AdminDashboard() {
     <TableHeader>
       <TableRow>
         <TableHead>Request #</TableHead>
+        <TableHead>Invoice #</TableHead>
         <TableHead>Supplier</TableHead>
         <TableHead className="hidden md:table-cell">Customer</TableHead>
         <TableHead className="text-right">Deposit</TableHead>
@@ -256,7 +263,7 @@ export default function AdminDashboard() {
               {isLoading ? (
                 <Table>
                   {TABLE_HEADER}
-                  <TableBody><TableSkeleton rows={pageSize > 25 ? 10 : 5} cols={7} /></TableBody>
+                  <TableBody><TableSkeleton rows={pageSize > 25 ? 10 : 5} cols={8} /></TableBody>
                 </Table>
               ) : items.length === 0 ? (
                 <EmptyState icon={ClipboardList} title="No requests" description="No requests match this filter." />

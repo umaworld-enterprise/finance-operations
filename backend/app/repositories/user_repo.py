@@ -1,8 +1,6 @@
 """Repository for User / Team Member Master."""
 
-from uuid import UUID
-
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.masters import User
@@ -14,16 +12,10 @@ class UserRepository(BaseRepository[User]):
         super().__init__(session, User)
 
     async def get_by_email(self, email: str) -> User | None:
+        # Case-insensitive: Google reports lowercase addresses while admins may
+        # register users with mixed case.
         result = await self._session.execute(
-            select(User).where(User.email == email, User.is_deleted == False)  # noqa: E712
-            if hasattr(User, "is_deleted")
-            else select(User).where(User.email == email)
-        )
-        return result.scalar_one_or_none()
-
-    async def get_by_supabase_uid(self, supabase_uid: UUID) -> User | None:
-        result = await self._session.execute(
-            select(User).where(User.supabase_uid == supabase_uid)
+            select(User).where(func.lower(User.email) == email.strip().lower())
         )
         return result.scalar_one_or_none()
 
@@ -31,4 +23,10 @@ class UserRepository(BaseRepository[User]):
         result = await self._session.execute(
             select(User).where(User.is_active == True).order_by(User.full_name)  # noqa: E712
         )
+        return list(result.scalars().all())
+
+    async def list_all(self) -> list[User]:
+        """Active AND deactivated — the admin Users page needs both so a
+        deactivated user can be reactivated (19 Aug 2026 fix)."""
+        result = await self._session.execute(select(User).order_by(User.full_name))
         return list(result.scalars().all())

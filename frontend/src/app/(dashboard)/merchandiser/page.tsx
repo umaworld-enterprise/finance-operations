@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TopNav } from "@/components/layout/TopNav";
+import { NewRequestForm } from "@/components/forms/NewRequestForm";
 import { RoleGuard } from "@/components/layout/RoleGuard";
 import { StatCard } from "@/components/ui/StatCard";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
@@ -10,14 +11,20 @@ import { Pagination } from "@/components/ui/Pagination";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { RequestsTable } from "@/components/tables/RequestsTable";
+import { ExportButton } from "@/components/ui/ExportButton";
+import { exportRequestsToExcel } from "@/lib/exportExcel";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
-import { useRequestsPaginated, useMyActivity } from "@/hooks/useRequests";
+import { useRequestsPaginated, useMyActivity, usePendingRelease } from "@/hooks/useRequests";
+import { useProjectionStatus } from "@/hooks/useProjections";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useRouter } from "next/navigation";
+import { filterParams, RequestFilterBar, type RequestFilterValues } from "@/components/filters/RequestFilterBar";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   Table, TableHeader, TableBody, TableRow, TableHead,
 } from "@/components/ui/table";
-import { ClipboardList, Clock, CheckCircle, XCircle, Bell, ArrowRight, Plus } from "lucide-react";
+import { ClipboardList, Clock, CheckCircle, XCircle, Ban, PauseCircle, Bell, ArrowRight, Plus, ChevronDown, CalendarClock } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { timeAgo } from "@/lib/utils";
@@ -34,14 +41,19 @@ const STATUS_BORDER: Record<RequestStatus, string> = {
   cancelled_by_merchandiser: "border-l-red-500",
   cancelled_by_accounts: "border-l-red-500",
   rejected_by_hom: "border-l-red-500",
+  rejected_by_accounts: "border-l-red-500",
   reopened: "border-l-blue-500",
 };
 
+// Every status lives in exactly one bucket so the cards and tabs sum to the
+// All/Total figure (10 Aug fix — Rejected was missing entirely, and
+// awaiting-HoM/reopened requests were counted in Total but shown nowhere).
 const TAB_PARAMS: Record<string, Record<string, string | string[]>> = {
   all:       {},
-  pending:   { status: "pending_payment" },
+  pending:   { status: ["pending_payment", "pending_hom_approval", "reopened"] },
   hold:      { status: ["hold_by_merchandiser", "hold_by_accounts"] },
   processed: { status: "payment_processed" },
+  rejected:  { status: ["rejected_by_hom", "rejected_by_accounts"] },
   cancelled: { status: ["cancelled_by_merchandiser", "cancelled_by_accounts"] },
 };
 
@@ -50,27 +62,70 @@ export default function MerchandiserDashboard() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<RequestSort>("newest");
+  // Dynamic filter module (4 Sep 2026) — grew out of the morning's vertical
+  // filter: supplier / customer / vertical / currency / request-date range.
+  const [filters, setFilters] = useState<RequestFilterValues>({});
+  const [formOpen, setFormOpen] = useState(false);
   const debouncedSearch = useDebouncedValue(search.trim());
+  const router = useRouter();
   const { data: activity = [] } = useMyActivity();
+  // Projections module (4 Sep 2026): during the 25th→EOM window the popup
+  // returns EVERY DAY until the form is complete (the key carries today's
+  // date — sessions live 72h, so a per-month key would fire only once); a
+  // missing CURRENT month shows the blocked banner (the backend refuses
+  // request creation regardless).
+  const { data: projStatus } = useProjectionStatus();
+  const [projNagDismissed, setProjNagDismissed] = useState(false);
+  const projPeriodKey = projStatus
+    ? `proj-nag-${projStatus.target_year}-${projStatus.target_month}-${new Date().toISOString().slice(0, 10)}`
+    : "";
+  const showProjNag =
+    !!projStatus &&
+    projStatus.window_open &&
+    projStatus.missing_target.length > 0 &&
+    !projNagDismissed &&
+    (typeof window === "undefined" || !sessionStorage.getItem(projPeriodKey));
+  // "Yet to be Released" tranches (2 onwards) awaiting this merchandiser's
+  // release (19 Aug 2026).
+  const { data: pendingRelease = [] } = usePendingRelease();
+
+  // /merchandiser/new redirects here with ?new=1 — auto-expand the form so
+  // old bookmarks still land on an open request form.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("new") === "1") {
+      setFormOpen(true);
+    }
+  }, []);
 
   const { data, isLoading, isFetching } = useRequestsPaginated(page, PAGE_SIZE, {
     ...TAB_PARAMS[activeTab],
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(sort !== "newest" ? { sort } : {}),
+    ...filterParams(filters),
   });
   const requests = data?.items ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
-  // Pre-fetch counts for stat cards (page 1 only, just to get totals)
+  // Pre-fetch counts for stat cards (page 1 only, just to get totals) —
+  // one query per bucket, same status sets as the tabs so both agree.
   const { data: allData }       = useRequestsPaginated(1, 1, {});
-  const { data: pendingData }   = useRequestsPaginated(1, 1, { status: "pending_payment" });
-  const { data: processedData } = useRequestsPaginated(1, 1, { status: "payment_processed" });
-  const { data: cancelledData } = useRequestsPaginated(1, 1, { status: ["cancelled_by_merchandiser", "cancelled_by_accounts"] });
+  const { data: pendingData }   = useRequestsPaginated(1, 1, TAB_PARAMS.pending);
+  const { data: holdData }      = useRequestsPaginated(1, 1, TAB_PARAMS.hold);
+  const { data: processedData } = useRequestsPaginated(1, 1, TAB_PARAMS.processed);
+  const { data: rejectedData }  = useRequestsPaginated(1, 1, TAB_PARAMS.rejected);
+  const { data: cancelledData } = useRequestsPaginated(1, 1, TAB_PARAMS.cancelled);
 
   function changeTab(tab: string) {
     setActiveTab(tab);
     setPage(1);
+  }
+
+  // KPI tiles are links to their listing tab (19 Aug 2026): clicking a tile
+  // opens the matching tab and brings the table into view.
+  function goToTab(tab: string) {
+    changeTab(tab);
+    document.getElementById("status-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function changeSearch(value: string) {
@@ -83,18 +138,81 @@ export default function MerchandiserDashboard() {
     setPage(1);
   }
 
+  function changeFilters(value: RequestFilterValues) {
+    setFilters(value);
+    setPage(1);
+  }
+
   const stripItems = activity.slice(0, 5);
 
   return (
     <RoleGuard allowedRoles={["merchandiser", "super_admin"]}>
-      <TopNav title="My Requests" subtitle="Track and manage your advance deposit requests" />
+      {/* All requests are visible to every merchandiser with full rights
+          (11 Sep 2026, executive request). */}
+      <TopNav title="Requests" subtitle="All Supplier Advance Payment Requests across every merchandiser" />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard label="Total Requests"   value={allData?.total ?? "—"}       icon={ClipboardList} />
-          <StatCard label="Pending Payment"  value={pendingData?.total ?? "—"}   icon={Clock}         subtext="Awaiting accounts" />
-          <StatCard label="Processed"        value={processedData?.total ?? "—"} icon={CheckCircle} />
-          <StatCard label="Cancelled"        value={cancelledData?.total ?? "—"} icon={XCircle} />
+
+        {/* Projections gate (4 Sep 2026): blocked merchandisers see the
+            formal notice; the backend refuses creation regardless. */}
+        {projStatus?.blocked && (
+          <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg p-3">
+            {projStatus.block_message}{" "}
+            <Link href="/projections" className="underline underline-offset-2 font-medium">
+              View projections
+            </Link>
+          </p>
+        )}
+
+        {/* New Request — the Supplier Advance Payment Request form lives in
+            the queue as a collapsible section (Aug 2026 batch, item 2.2). */}
+        <Card className="overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setFormOpen((open) => !open)}
+            aria-expanded={formOpen}
+            className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-muted/40 transition-colors"
+          >
+            <span className="flex items-center gap-2 font-semibold text-foreground text-sm">
+              <Plus className="h-4 w-4" />
+              New Supplier Advance Payment Request
+            </span>
+            <ChevronDown
+              className={`h-4 w-4 text-muted-foreground transition-transform ${formOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+          {formOpen && (
+            <div className="border-t border-border p-4 md:p-6 bg-muted/20">
+              <NewRequestForm
+                onSuccess={() => setFormOpen(false)}
+                onCancel={() => setFormOpen(false)}
+              />
+            </div>
+          )}
+        </Card>
+
+        {/* One card per bucket — together they sum to Total Requests. Each
+            tile opens its listing tab (19 Aug 2026). */}
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+          <StatCard label="Total Requests"   value={allData?.total ?? "—"}       icon={ClipboardList} onClick={() => goToTab("all")} />
+          <StatCard label="Pending"          value={pendingData?.total ?? "—"}   icon={Clock}         onClick={() => goToTab("pending")} />
+          <StatCard label="On Hold"          value={holdData?.total ?? "—"}      icon={PauseCircle}   onClick={() => goToTab("hold")} />
+          <StatCard label="Processed"        value={processedData?.total ?? "—"} icon={CheckCircle}   onClick={() => goToTab("processed")} />
+          <StatCard label="Rejected"         value={rejectedData?.total ?? "—"}  icon={XCircle}       subtext="By HoM or Accounts" onClick={() => goToTab("rejected")} />
+          <StatCard label="Cancelled"        value={cancelledData?.total ?? "—"} icon={Ban}           onClick={() => goToTab("cancelled")} />
         </div>
+
+        {/* Tranche release tile (19 Aug 2026) — tranches 2+ awaiting this
+            merchandiser's release before Accounts can pay them. */}
+        {pendingRelease.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            <StatCard
+              label="Tranche Payments to be Released"
+              value={pendingRelease.length}
+              icon={CalendarClock}
+              subtext="Open the request and click Release so Accounts can pay"
+            />
+          </div>
+        )}
 
         {activity.length > 0 && (
           <div className="space-y-2">
@@ -147,14 +265,12 @@ export default function MerchandiserDashboard() {
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-foreground">Request History</h2>
-          <Button asChild className="w-full sm:w-auto">
-            <Link href="/merchandiser/new" className="gap-2">
-              <Plus className="h-4 w-4" /> New Request
-            </Link>
+          <Button onClick={() => setFormOpen(true)} className="w-full sm:w-auto gap-2">
+            <Plus className="h-4 w-4" /> New Request
           </Button>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
           <SearchInput
             value={search}
             onChange={changeSearch}
@@ -162,18 +278,28 @@ export default function MerchandiserDashboard() {
             className="sm:max-w-md flex-1"
           />
           <SortSelect value={sort} onChange={changeSort} className="sm:w-52" />
+          <ExportButton
+            count={requests.length}
+            onExport={() => exportRequestsToExcel(requests, `requests-${activeTab}.xlsx`)}
+          />
         </div>
 
-        <Tabs value={activeTab} onValueChange={changeTab}>
+        {/* Dynamic filter module (4 Sep 2026) — applies to every tab. The
+            Merchandiser chip (11 Sep 2026) filters back down to one person's
+            requests now that everyone's are listed. */}
+        <RequestFilterBar values={filters} onChange={changeFilters} showMerchandiser />
+
+        <Tabs value={activeTab} onValueChange={changeTab} id="status-tabs" className="scroll-mt-4">
           <TabsList className="w-full">
             <TabsTrigger value="all">All {allData ? `(${allData.total})` : ""}</TabsTrigger>
             <TabsTrigger value="pending">Pending {pendingData ? `(${pendingData.total})` : ""}</TabsTrigger>
-            <TabsTrigger value="hold">On Hold</TabsTrigger>
+            <TabsTrigger value="hold">On Hold {holdData ? `(${holdData.total})` : ""}</TabsTrigger>
             <TabsTrigger value="processed">Processed {processedData ? `(${processedData.total})` : ""}</TabsTrigger>
+            <TabsTrigger value="rejected">Rejected {rejectedData ? `(${rejectedData.total})` : ""}</TabsTrigger>
             <TabsTrigger value="cancelled">Cancelled {cancelledData ? `(${cancelledData.total})` : ""}</TabsTrigger>
           </TabsList>
 
-          {(["all", "pending", "hold", "processed", "cancelled"] as const).map((tab) => (
+          {(["all", "pending", "hold", "processed", "rejected", "cancelled"] as const).map((tab) => (
             <TabsContent key={tab} value={tab}>
               {isLoading ? (
                 <Card className="overflow-hidden">
@@ -200,7 +326,8 @@ export default function MerchandiserDashboard() {
                       </div>
                       <p className="font-semibold text-foreground text-base">No requests yet</p>
                       <p className="text-sm text-muted-foreground mt-1 max-w-xs">
-                        Submit a request through the public form and it will appear here once linked to your account.
+                        Use the New Request section above to raise your first
+                        Supplier Advance Payment Request.
                       </p>
                     </div>
                   </Card>
@@ -209,7 +336,7 @@ export default function MerchandiserDashboard() {
                 )
               ) : (
                 <div className={isFetching ? "opacity-70 transition-opacity" : ""}>
-                  <RequestsTable requests={requests} basePath="/merchandiser" />
+                  <RequestsTable requests={requests} basePath="/merchandiser" showMerchandiser />
                   <Pagination
                     page={page}
                     totalPages={totalPages}
@@ -223,6 +350,26 @@ export default function MerchandiserDashboard() {
           ))}
         </Tabs>
       </main>
+
+      {/* Fill-your-projections popup (4 Sep 2026) — once per session while
+          the 25th→EOM window is open and verticals are missing. */}
+      <ConfirmDialog
+        open={showProjNag}
+        onOpenChange={(open) => {
+          if (!open) {
+            setProjNagDismissed(true);
+            try { sessionStorage.setItem(projPeriodKey, "1"); } catch {}
+          }
+        }}
+        title="Monthly projections pending"
+        description={`Your projections for ${projStatus?.missing_target.join(", ") ?? ""} are still pending. Fill them before the end of the month — otherwise new request creation will be stopped until the Super Admin adds them on your behalf.`}
+        confirmLabel="Fill projections now"
+        onConfirm={() => {
+          setProjNagDismissed(true);
+          try { sessionStorage.setItem(projPeriodKey, "1"); } catch {}
+          router.push("/projections");
+        }}
+      />
     </RoleGuard>
   );
 }

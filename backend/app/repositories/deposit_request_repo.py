@@ -2,13 +2,13 @@
 
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.deposit_request import DepositRequest
 from app.models.enums import RequestStatus, UserRole
-from app.models.masters import Customer, Supplier, User
+from app.models.masters import Customer, Supplier
 from app.repositories.base import BaseRepository
 
 _StatusArg = RequestStatus | list[RequestStatus] | None
@@ -28,6 +28,7 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
                 selectinload(DepositRequest.vertical),
                 selectinload(DepositRequest.creator),
                 selectinload(DepositRequest.payment),
+                selectinload(DepositRequest.tranches),
             )
         )
 
@@ -41,22 +42,18 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         customer_id: UUID | None = None,
         vertical_id: UUID | None = None,
         created_by: UUID | None = None,
+        currency=None,
+        date_from=None,
+        date_to=None,
+        priority: str | None = None,
         search: str | None = None,
     ):
-        if role == UserRole.MERCHANDISER:
-            # Include: requests the user created in-app OR submitted via the
-            # public form using their registered email (legacy records where
-            # created_by was NULL before the email-lookup fix).
-            user_email_sq = select(User.email).where(User.id == user_id).scalar_subquery()
-            stmt = stmt.where(
-                or_(
-                    DepositRequest.created_by == user_id,
-                    and_(
-                        DepositRequest.created_by.is_(None),
-                        DepositRequest.submitter_email == user_email_sq,
-                    ),
-                )
-            )
+        # Merchandiser own-requests scoping REMOVED (11 Sep 2026, executive
+        # request): every merchandiser now sees ALL requests. Write access is
+        # unchanged — the service layer still rejects edits / status changes /
+        # tranche actions on requests a merchandiser did not create. "Mine
+        # only" viewing is the opt-in Merchandiser chip in the filter bar
+        # (the created_by param below).
         if status is not None:
             if isinstance(status, list):
                 stmt = stmt.where(DepositRequest.current_status.in_(status))
@@ -70,6 +67,38 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
             stmt = stmt.where(DepositRequest.vertical_id == vertical_id)
         if created_by:
             stmt = stmt.where(DepositRequest.created_by == created_by)
+        # Dynamic filter module (4 Sep 2026): currency + request-date range.
+        if currency:
+            stmt = stmt.where(DepositRequest.currency == currency)
+        if date_from:
+            from datetime import datetime, time, timezone
+            stmt = stmt.where(
+                DepositRequest.created_at
+                >= datetime.combine(date_from, time.min, tzinfo=timezone.utc)
+            )
+        if date_to:
+            from datetime import datetime, time, timedelta, timezone
+            stmt = stmt.where(
+                DepositRequest.created_at
+                < datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc)
+            )
+        # Priority filter (5 Sep 2026): 'high' → requests with at least one
+        # UNPAID high-priority tranche (matches the queue badge); 'normal' →
+        # requests without one. Opt-in via the dynamic filter bar.
+        if priority in ("high", "normal"):
+            from app.models.enums import TrancheStatus
+            from app.models.tranche import PaymentTranche
+
+            high_exists = (
+                select(PaymentTranche.id)
+                .where(
+                    PaymentTranche.deposit_request_id == DepositRequest.id,
+                    PaymentTranche.status == TrancheStatus.UNPAID,
+                    PaymentTranche.priority == "high",
+                )
+                .exists()
+            )
+            stmt = stmt.where(high_exists if priority == "high" else ~high_exists)
         if search and search.strip():
             # Relations are selectinload'ed (separate SELECTs), so name search
             # needs explicit joins here. Inner joins are safe — supplier_id and
@@ -95,6 +124,10 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         customer_id: UUID | None = None,
         vertical_id: UUID | None = None,
         created_by: UUID | None = None,
+        currency=None,
+        date_from=None,
+        date_to=None,
+        priority: str | None = None,
         search: str | None = None,
         sort: str | None = None,
         limit: int = 50,
@@ -104,7 +137,8 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
             self._base_query(), role, user_id,
             status=status, supplier_id=supplier_id,
             customer_id=customer_id, vertical_id=vertical_id, created_by=created_by,
-            search=search,
+            currency=currency, date_from=date_from, date_to=date_to,
+            priority=priority, search=search,
         )
         # created_at tiebreak keeps amount sorts stable across pages.
         _SORTS = {
@@ -126,6 +160,10 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         customer_id: UUID | None = None,
         vertical_id: UUID | None = None,
         created_by: UUID | None = None,
+        currency=None,
+        date_from=None,
+        date_to=None,
+        priority: str | None = None,
         search: str | None = None,
     ) -> int:
         stmt = self._apply_filters(
@@ -133,7 +171,8 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
             role, user_id,
             status=status, supplier_id=supplier_id,
             customer_id=customer_id, vertical_id=vertical_id, created_by=created_by,
-            search=search,
+            currency=currency, date_from=date_from, date_to=date_to,
+            priority=priority, search=search,
         )
         result = await self._session.execute(stmt)
         return result.scalar_one()
@@ -154,8 +193,8 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         return result.scalar_one_or_none()
 
     async def get_with_core_relations(self, id: UUID) -> DepositRequest | None:
-        """Fetch with only the 4 relations DepositRequestResponse serializes
-        (supplier, customer, vertical, creator) — 5 round trips instead of 10.
+        """Fetch with only the relations DepositRequestResponse serializes
+        (supplier, customer, vertical, creator, tranches).
         Use for mutation responses; use get_with_relations for detail views."""
         result = await self._session.execute(
             select(DepositRequest)
@@ -168,6 +207,7 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
                 selectinload(DepositRequest.customer),
                 selectinload(DepositRequest.vertical),
                 selectinload(DepositRequest.creator),
+                selectinload(DepositRequest.tranches),
             )
         )
         return result.scalar_one_or_none()
@@ -188,11 +228,12 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
     async def get_pending_payment_queue(
         self, created_by: UUID | None = None, limit: int = 500
     ) -> list[DepositRequest]:
-        """Pending requests sorted oldest first — for Accounts dashboard."""
+        """Pending requests sorted latest first (19 Aug 2026 — matches every
+        other request table; was oldest-first 'process in order')."""
         stmt = (
             self._base_query()
             .where(DepositRequest.current_status == RequestStatus.PENDING_PAYMENT)
-            .order_by(DepositRequest.created_at.asc())
+            .order_by(DepositRequest.created_at.desc())
             .limit(limit)
         )
         if created_by is not None:
@@ -201,22 +242,36 @@ class DepositRequestRepository(BaseRepository[DepositRequest]):
         return list(result.scalars().all())
 
     async def generate_request_number(self) -> str:
-        """Generate next sequential request number: ADT-YYYY-NNNNN."""
+        """Generate next sequential request number: Dep-YYYY-0001.
+
+        The sequence restarts every calendar year. Historical ADT-YYYY-NNNNN
+        numbers remain valid and untouched — they simply never match the new
+        prefix, so both formats coexist.
+        """
         from datetime import datetime, timezone
         from sqlalchemy import text
 
         year = datetime.now(timezone.utc).year
-        prefix = f"ADT-{year}-"
+        prefix = f"Dep-{year}-"
         # Serialise concurrent submits for the rest of this transaction —
         # otherwise two requests read the same MAX and the second INSERT
-        # violates the request_number UNIQUE constraint.
-        await self._session.execute(text("SELECT pg_advisory_xact_lock(874512)"))
-        # Use MAX to avoid collisions when gaps exist in the sequence (e.g. seeded data).
+        # violates the request_number UNIQUE constraint. (Advisory locks are
+        # PostgreSQL-only; the unit-test SQLite database serialises writes on
+        # its own.)
+        if self._session.bind is not None and self._session.bind.dialect.name == "postgresql":
+            await self._session.execute(text("SELECT pg_advisory_xact_lock(874512)"))
+        # Highest existing number for the year — avoids collisions when gaps
+        # exist (e.g. seeded data). Length-first ordering keeps the comparison
+        # numeric once the padded sequence grows past 4 digits.
         result = await self._session.execute(
-            select(func.max(DepositRequest.request_number)).where(
-                DepositRequest.request_number.like(f"{prefix}%")
+            select(DepositRequest.request_number)
+            .where(DepositRequest.request_number.like(f"{prefix}%"))
+            .order_by(
+                func.length(DepositRequest.request_number).desc(),
+                DepositRequest.request_number.desc(),
             )
+            .limit(1)
         )
         max_num = result.scalar_one_or_none()
         last_seq = int(max_num.split("-")[-1]) if max_num else 0
-        return f"{prefix}{last_seq + 1:05d}"
+        return f"{prefix}{last_seq + 1:04d}"

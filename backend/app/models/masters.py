@@ -17,6 +17,12 @@ class Vertical(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Projections module (4 Sep 2026, migration 0034): a vertical belongs to
+    # at most ONE user; a user may hold many verticals. Drives ONLY the
+    # projection form's vertical list — nothing else reads it.
+    assigned_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
 
     deposit_requests: Mapped[list["DepositRequest"]] = relationship(back_populates="vertical")
 
@@ -46,9 +52,6 @@ class Supplier(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "users"
 
-    supabase_uid: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), unique=True, nullable=True
-    )
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
     role: Mapped[UserRole] = mapped_column(pg_enum(UserRole, "user_role"), nullable=False)
@@ -103,6 +106,19 @@ class PaymentTermsMaster(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "payment_terms_master"
 
     label: Mapped[str] = mapped_column(String(500), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sort_order: Mapped[int] = mapped_column(nullable=False, default=0)
+
+
+class BankMaster(UUIDPrimaryKeyMixin, Base):
+    """Bank name master (Aug 2026, migration 0026). Stores bank NAMES only —
+    deliberately not per-currency rows: the tranche form composes the option
+    as '{name} ({currency})' from the request's currency at render time, and
+    that composed string is what payment_tranches.bank stores."""
+
+    __tablename__ = "banks_master"
+
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sort_order: Mapped[int] = mapped_column(nullable=False, default=0)
 

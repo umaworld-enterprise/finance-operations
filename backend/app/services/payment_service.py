@@ -94,6 +94,41 @@ class PaymentService:
         if not payment:
             raise ConflictError("Payment details must be entered before processing.")
 
+        # Completeness gate — the mandatory Payment Details fields must be
+        # recorded before the request can be processed. Partial rows created by
+        # set_ship_date / attach_tt_copy are legitimate, but they cannot be
+        # processed until Accounts completes them. (Payment Reference Number
+        # became optional in the Aug 2026 batch, item 3.2.)
+        missing = [
+            label
+            for field, label in (
+                ("payment_date", "Payment Date"),
+                ("bank", "Bank"),
+                ("payment_status", "Payment Status"),
+            )
+            if getattr(payment, field) in (None, "")
+        ]
+        if missing:
+            raise ConflictError(
+                "Payment details are incomplete — fill in "
+                f"{', '.join(missing)} before processing."
+            )
+
+        # A tranche may only become PAID through its TT copy upload, so
+        # request-level processing must never bulk-pay tranches (it used to).
+        # Refuse while any tranche is still unpaid.
+        from app.repositories.tranche_repo import TrancheRepository
+
+        unpaid_count = await TrancheRepository(self._session).count_unpaid_for_request(
+            request_id
+        )
+        if unpaid_count:
+            raise ConflictError(
+                f"This request still has {unpaid_count} unpaid tranche(s). "
+                "Upload each tranche's TT copy to mark it paid — request-level "
+                "processing cannot mark tranches paid."
+            )
+
         # Capture BEFORE update() mutates the instance in place — otherwise
         # the history and audit rows record old_status == new_status.
         old_status = request.current_status

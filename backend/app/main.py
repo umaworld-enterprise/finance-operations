@@ -102,7 +102,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     from app.core.database import AsyncSessionFactory
     from app.analytics.snapshot_job import refresh_all_snapshots
-    from app.services.notification_service import send_fallback_notifications
+    from app.services.notification_service import (
+        send_fallback_notifications,
+        send_projection_reminders,
+        send_release_reminders,
+    )
 
     scheduler_owner = _acquire_scheduler_lock()
     if scheduler_owner:
@@ -120,6 +124,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             minutes=30,
             args=[AsyncSessionFactory],
             id="payment_notification_fallback",
+            replace_existing=True,
+        )
+        # Daily release reminders (19 Aug 2026): merchandisers with
+        # 'Yet to be Released' tranches due within 5 days (or overdue) get a
+        # countdown reminder each morning — 03:30 UTC ≈ 09:00 IST.
+        _scheduler.add_job(
+            send_release_reminders,
+            "cron",
+            hour=3,
+            minute=30,
+            id="tranche_release_reminders",
+            replace_existing=True,
+        )
+        # Projections (4 Sep 2026): daily 04:00 UTC ≈ 09:30 IST — fill
+        # reminders from the 25th, one-time blocked notice after the deadline.
+        _scheduler.add_job(
+            send_projection_reminders,
+            "cron",
+            hour=4,
+            minute=0,
+            args=[AsyncSessionFactory],
+            id="projection_reminders",
             replace_existing=True,
         )
         _scheduler.start()
@@ -200,7 +226,15 @@ def create_app() -> FastAPI:
         )
 
     @app.exception_handler(IntegrityError)
-    async def integrity_error_handler(_: Request, exc: IntegrityError) -> JSONResponse:
+    async def integrity_error_handler(request: Request, exc: IntegrityError) -> JSONResponse:
+        # Log the underlying constraint violation — without this the real
+        # cause (FK / unique / check constraint name) is unrecoverable.
+        logger.error(
+            "Integrity error",
+            path=request.url.path,
+            method=request.method,
+            error=str(exc.orig) if exc.orig is not None else str(exc),
+        )
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={"error_code": "CONFLICT", "message": "A record with these details already exists."},
@@ -280,16 +314,29 @@ def create_app() -> FastAPI:
     from app.api.v1.masters.customers import router as customers_router
     from app.api.v1.masters.verticals import router as verticals_router
     from app.api.v1.masters.payment_terms import router as payment_terms_router
+    from app.api.v1.masters.banks import router as banks_router
     from app.api.v1.masters.users import router as users_router
     from app.api.v1.ai import router as ai_router
     from app.api.v1.public_form import router as public_form_router
     from app.api.v1.notifications import router as notifications_router
+    from app.api.v1.tranches import audit_router as request_audit_router
+    from app.api.v1.tranches import router as tranches_router
+    from app.api.v1.adjustments import router as adjustments_router
+    from app.api.v1.file_remarks import router as file_remarks_router
+    from app.api.v1.bank import router as bank_router
+    from app.api.v1.projections import router as projections_router
 
     prefix = "/api/v1"
     for r in [
         auth_router,
         requests_router,
         payment_router,
+        tranches_router,
+        request_audit_router,
+        adjustments_router,
+        file_remarks_router,
+        bank_router,
+        projections_router,
         analytics_router,
         reports_router,
         admin_router,
@@ -297,6 +344,7 @@ def create_app() -> FastAPI:
         customers_router,
         verticals_router,
         payment_terms_router,
+        banks_router,
         users_router,
         ai_router,
         public_form_router,

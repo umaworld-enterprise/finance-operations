@@ -1,6 +1,6 @@
 import axios, { AxiosError, type AxiosInstance } from "axios";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase";
+import { getToken } from "@/lib/auth-token";
 import type { ApiError } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
@@ -15,30 +15,17 @@ export class ApiHttpError extends Error {
   }
 }
 
-// Module-level singleton — constructing a client per request wastes work.
-let _supabase: ReturnType<typeof createClient> | null = null;
-function getSupabase() {
-  if (!_supabase) _supabase = createClient();
-  return _supabase;
-}
-
 function createApiClient(): AxiosInstance {
   const client = axios.create({
     baseURL: API_URL,
     headers: { "Content-Type": "application/json" },
   });
 
-  // Attach Supabase JWT on every request
-  client.interceptors.request.use(async (config) => {
-    try {
-      const { data } = await getSupabase().auth.getSession();
-      const token = data.session?.access_token;
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch (err) {
-      // Supabase client init failure — continue request without auth token
-      console.warn("[api] Failed to attach auth token:", err);
+  // Attach the app-issued JWT on every request
+  client.interceptors.request.use((config) => {
+    const token = getToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   });

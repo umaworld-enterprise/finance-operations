@@ -1,19 +1,25 @@
 """Deposit request endpoints."""
 
 import asyncio
+from datetime import date
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request, UploadFile, status
+from pydantic import BaseModel
 
 from app.analytics.snapshot_job import seed_snapshot_for_request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.database import get_db_session
 from app.core.dependencies import CurrentUser, get_current_user
 from app.core.exceptions import AppError, AuthorizationError, NotFoundError
-from app.models.enums import UserRole
-from app.models.enums import RequestStatus
+from app.models.deposit_request import DepositRequest
+from app.models.enums import CurrencyCode, RequestStatus, UserRole
+from app.models.masters import User as UserModel
 from app.repositories.deposit_request_repo import DepositRequestRepository
 from app.schemas.deposit_request import (
     ActivityItemResponse,
@@ -21,10 +27,18 @@ from app.schemas.deposit_request import (
     DepositRequestDetailResponse,
     DepositRequestResponse,
     DepositRequestUpdate,
+    HomDecisionRequest,
     StatusChangeRequest,
 )
 from app.schemas.common import MessageResponse, PaginatedResponse
+from app.schemas.tranche import TranchePaymentDetailsUpdate
 from app.services.deposit_request_service import DepositRequestService
+from app.services.notification_service import (
+    notify_hom_decision,
+    notify_request_created,
+    notify_request_rejected_by_accounts,
+    notify_status_change,
+)
 
 router = APIRouter(prefix="/requests", tags=["deposit-requests"])
 
@@ -46,6 +60,12 @@ async def list_requests(
     customer_id: UUID | None = None,
     vertical_id: UUID | None = None,
     created_by: UUID | None = None,
+    # Dynamic filter module (4 Sep 2026): currency + request-date range.
+    currency: CurrencyCode | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    # Priority filter (5 Sep 2026): high = any unpaid high-priority tranche.
+    priority: str | None = Query(None, pattern="^(normal|high)$"),
     search: str | None = Query(None, max_length=100),
     sort: str | None = Query(None, pattern="^(newest|oldest|amount_desc|amount_asc)$"),
     page: int = Query(1, ge=1),
@@ -57,19 +77,29 @@ async def list_requests(
         current_user.role, current_user.id,
         status=status_filter, supplier_id=supplier_id,
         customer_id=customer_id, vertical_id=vertical_id,
-        created_by=created_by, search=search, sort=sort, limit=page_size, offset=offset,
+        created_by=created_by, currency=currency,
+        date_from=date_from, date_to=date_to, priority=priority,
+        search=search, sort=sort, limit=page_size, offset=offset,
     )
     total = await repo.count_for_role(
         current_user.role, current_user.id,
         status=status_filter, supplier_id=supplier_id,
         customer_id=customer_id, vertical_id=vertical_id,
-        created_by=created_by, search=search,
+        created_by=created_by, currency=currency,
+        date_from=date_from, date_to=date_to, priority=priority,
+        search=search,
     )
+    responses = [DepositRequestResponse.model_validate(r) for r in items]
+    # Who acted last — so hold/cancel/reject rows carry the person's name
+    # (UAT Aug 2026, item 6).
+    actors = await DepositRequestService(db).get_last_status_actors([r.id for r in items])
+    for resp in responses:
+        resp.last_status_change_by = actors.get(resp.id)
     return PaginatedResponse(
         total=total,
         page=page,
         page_size=page_size,
-        items=[DepositRequestResponse.model_validate(r) for r in items],
+        items=responses,
     )
 
 
@@ -81,6 +111,17 @@ async def create_request(
     db: DB,
     background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
+    # Projections gate (4 Sep 2026): a merchandiser whose assigned verticals
+    # are missing the CURRENT month's projections cannot raise new requests —
+    # only the Super Admin's on-behalf entry unblocks them.
+    if current_user.role == UserRole.MERCHANDISER:
+        from app.core.exceptions import BusinessRuleError
+        from app.services.projection_service import ProjectionService
+
+        blocked, message = await ProjectionService(db).is_blocked(current_user.id)
+        if blocked:
+            raise BusinessRuleError(message or "Projections missing — contact the Super Admin.")
+
     svc = DepositRequestService(db)
     req = await svc.create(
         data,
@@ -91,6 +132,8 @@ async def create_request(
     # Analytics snapshot is computed after the response — it adds ~2 DB round
     # trips and is fully recalculable, so it must not block the submit.
     background_tasks.add_task(seed_snapshot_for_request, req.id)
+    # Accounts (or HoM for flagged suppliers) learn about the new request.
+    background_tasks.add_task(notify_request_created, req.id)
     return DepositRequestResponse.model_validate(req)
 
 
@@ -106,9 +149,22 @@ async def pending_payment_queue(
     if current_user.role not in _ALLOWED:
         raise AuthorizationError("Access to the payment queue is not permitted for your role.")
     svc = DepositRequestService(db)
-    created_by_filter = current_user.id if current_user.role == UserRole.MERCHANDISER else None
-    requests = await svc.get_pending_payment_queue(created_by=created_by_filter)
+    # Merchandisers see the FULL queue since 11 Sep 2026 (executive request:
+    # all requests visible to all merchandisers) — actions stay owner-only.
+    requests = await svc.get_pending_payment_queue()
     return [DepositRequestResponse.model_validate(r) for r in requests]
+
+
+@router.get("/queue-kpis")
+async def queue_kpis(current_user: User, db: DB) -> dict:
+    """Financial-year-to-date KPI counts for the Accounts payment queue
+    (UAT Aug 2026, items 5/17/19): pending / awaiting HoM / on hold /
+    processed / rejected / cancelled / total, counted by created date
+    within the current April–March financial year."""
+    _ALLOWED = {UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN}
+    if current_user.role not in _ALLOWED:
+        raise AuthorizationError("Access to the payment queue KPIs is not permitted for your role.")
+    return await DepositRequestService(db).get_queue_kpis()
 
 
 @router.get("/my-field-visibility")
@@ -134,6 +190,56 @@ async def my_activity(
     return await svc.get_my_activity(current_user.id, limit=limit)
 
 
+@router.get("/pending-release")
+async def pending_release(
+    current_user: User,
+    db: DB,
+) -> list[dict]:
+    """'Yet to be Released' tranches (2 onwards, unpaid, unreleased) on live
+    pending-payment requests (19 Aug 2026). Drives the merchandiser
+    'Tranche Payments to be Released' tile and the Accounts Workspace
+    'Yet to be Released by Merchandiser' tile + tab. Every role sees all
+    rows — merchandisers included (11 Sep 2026: full rights on every
+    request for every merchandiser)."""
+    from app.models.enums import TrancheStatus
+    from app.models.masters import Supplier
+    from app.models.tranche import PaymentTranche, tranche_label
+
+    Creator = aliased(UserModel)
+    stmt = (
+        select(PaymentTranche, DepositRequest, Supplier.name, Creator.full_name)
+        .join(DepositRequest, DepositRequest.id == PaymentTranche.deposit_request_id)
+        .join(Supplier, Supplier.id == DepositRequest.supplier_id)
+        .outerjoin(Creator, Creator.id == DepositRequest.created_by)
+        .where(
+            PaymentTranche.status == TrancheStatus.UNPAID,
+            PaymentTranche.released_at.is_(None),
+            PaymentTranche.tranche_number > 1,
+            DepositRequest.is_deleted == False,  # noqa: E712
+            DepositRequest.current_status == RequestStatus.PENDING_PAYMENT,
+        )
+        .order_by(PaymentTranche.tentative_payment_date.asc().nulls_last())
+    )
+    rows = (await db.execute(stmt)).all()
+    return [
+        {
+            "request_id": str(req.id),
+            "request_number": req.request_number,
+            "sunshine_invoice_number": req.sunshine_invoice_number,
+            "supplier_name": supplier_name,
+            "merchandiser_name": creator_name,
+            "currency": req.currency.value if req.currency else None,
+            "tranche_id": str(t.id),
+            "tranche_label": tranche_label(t.tranche_number),
+            "amount": float(t.amount),
+            "tentative_payment_date": (
+                t.tentative_payment_date.isoformat() if t.tentative_payment_date else None
+            ),
+        }
+        for t, req, supplier_name, creator_name in rows
+    ]
+
+
 @router.get("/hom-queue", response_model=list[DepositRequestResponse])
 async def hom_queue(
     current_user: User,
@@ -151,18 +257,43 @@ async def hom_queue(
     return [DepositRequestResponse.model_validate(r) for r in items]
 
 
+class InvoiceCheckResponse(BaseModel):
+    duplicate: bool
+    request_number: str | None = None
+
+
+@router.get("/check-invoice", response_model=InvoiceCheckResponse)
+async def check_invoice_number(
+    current_user: User,
+    db: DB,
+    field: str = Query(pattern="^(sunshine_invoice_number|supplier_invoice_number)$"),
+    value: str = Query(min_length=1, max_length=200),
+) -> InvoiceCheckResponse:
+    """Pre-submit duplicate check for the request form — is this invoice
+    number already used by a live (non-cancelled/rejected) request?
+    Creation/update re-validate server-side regardless."""
+    conflict = await DepositRequestService(db).find_invoice_conflict(field, value)
+    return InvoiceCheckResponse(
+        duplicate=conflict is not None,
+        request_number=conflict.request_number if conflict else None,
+    )
+
+
 @router.get("/{request_id}", response_model=DepositRequestDetailResponse)
 async def get_request(
     request_id: UUID,
     current_user: User,
     db: DB,
 ) -> DepositRequestDetailResponse:
-    from app.models.enums import UserRole
     svc = DepositRequestService(db)
+    # Merchandisers may open ANY request since 11 Sep 2026 (executive
+    # request) — the service layer still rejects writes on ones they
+    # did not create.
     request = await svc.get_detail(request_id, current_user.id, current_user.role)
-    if current_user.role == UserRole.MERCHANDISER and request.created_by != current_user.id:
-        raise NotFoundError(f"Deposit request {request_id} not found.")
-    return DepositRequestDetailResponse.model_validate(request)
+    response = DepositRequestDetailResponse.model_validate(request)
+    actors = await svc.get_last_status_actors([request.id])
+    response.last_status_change_by = actors.get(request.id)
+    return response
 
 
 @router.patch("/{request_id}", response_model=DepositRequestResponse)
@@ -174,13 +305,23 @@ async def update_request(
     db: DB,
     background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
-    # Client rule (2026-07-11): invoice numbers can be UPDATED only by a Super
-    # Admin (setting them at creation via the forms is unaffected). Every change
-    # is audited per-field with its old and new value by the service layer.
-    if current_user.role != UserRole.SUPER_ADMIN and (
+    # Invoice-number updates: Super Admin, or Accounts Team from the payment
+    # queue (11 Aug 2026 — when a file is changed in whole, Accounts action
+    # the approved Invoice Change themselves; both the sunshine and the
+    # proforma number are editable). Setting them at creation via the forms
+    # is unaffected. Every change is audited per-field with its old and new
+    # value by the service layer; duplicate validation applies regardless.
+    # Merchandiser added 2 Sep 2026: the owner edits the full form (invoice
+    # numbers included) while pending and untouched — the service enforces
+    # ownership and the accounts-untouched gate.
+    _INVOICE_EDIT_ROLES = {UserRole.SUPER_ADMIN, UserRole.ACCOUNTS_TEAM, UserRole.MERCHANDISER}
+    if current_user.role not in _INVOICE_EDIT_ROLES and (
         data.sunshine_invoice_number is not None or data.supplier_invoice_number is not None
     ):
-        raise AuthorizationError("Invoice numbers can only be updated by a Super Admin.")
+        raise AuthorizationError(
+            "Invoice numbers can only be updated by a Super Admin, the Accounts "
+            "Team, or the request's merchandiser."
+        )
     svc = DepositRequestService(db)
     req = await svc.update(
         request_id, data, current_user.id, current_user.role,
@@ -191,6 +332,203 @@ async def update_request(
     # snapshot so edits are reflected without waiting for the bulk job.
     background_tasks.add_task(seed_snapshot_for_request, req.id)
     return DepositRequestResponse.model_validate(req)
+
+
+@router.post("/bulk-pay")
+async def bulk_pay(
+    current_user: User,
+    request: Request,
+    db: DB,
+    background_tasks: BackgroundTasks,
+    file: UploadFile,
+    request_ids: list[UUID] = Form(...),
+    payment_date: date = Form(...),
+    bank: str = Form(...),
+    payment_reference_number: str | None = Form(None),
+    accounts_remarks: str | None = Form(None),
+    secondary_currency: str | None = Form(None),
+    secondary_amount: Decimal | None = Form(None),
+) -> dict:
+    """Bulk payment (9 Sep 2026 client request): Accounts select multiple
+    requests of the SAME supplier and pay each one's NEXT payable tranche in
+    a single action — one shared TT copy (uploaded once to Drive, attached to
+    every tranche) plus the same payment details, then Mark Paid per tranche.
+
+    Atomic: any failure rolls the whole batch back. Wrong-supplier safety:
+    mixing suppliers is refused.
+    """
+    from app.core.exceptions import BusinessRuleError, ValidationError
+    from app.integrations.google_drive.drive_service import (
+        ALLOWED_MIME_TYPES,
+        upload_tt_copy_to_drive,
+        validate_tt_copy,
+    )
+    from app.models.enums import TrancheStatus
+    from app.services.notification_service import (
+        email_tt_copy_uploaded,
+        notify_tranche_event,
+    )
+    from app.services.tranche_service import TrancheService
+
+    if not request_ids:
+        raise ValidationError("Select at least one request.")
+    if len(request_ids) > 25:
+        raise ValidationError("Bulk payment is limited to 25 requests at a time.")
+    if len(set(request_ids)) != len(request_ids):
+        raise ValidationError("Duplicate requests in the selection.")
+
+    content = await file.read()
+    error = validate_tt_copy(file.content_type, len(content))
+    if error:
+        raise ValidationError(error)
+
+    repo = DepositRequestRepository(db)
+    svc = TrancheService(db)
+    ip = _ip(request)
+    ua = request.headers.get("user-agent")
+
+    # Load + wrong-supplier guard.
+    requests_loaded: list[DepositRequest] = []
+    for rid in request_ids:
+        req = await repo.get_for_validation(rid)
+        if not req:
+            raise NotFoundError(f"Request {rid} not found.")
+        requests_loaded.append(req)
+    supplier_ids = {r.supplier_id for r in requests_loaded}
+    if len(supplier_ids) > 1:
+        raise BusinessRuleError(
+            "Bulk payment covers ONE supplier at a time — the selection mixes "
+            "different suppliers. Deselect the odd ones out."
+        )
+
+    # Resolve each request's NEXT payable tranche (lowest-numbered UNPAID,
+    # released or tranche 1) before writing anything.
+    targets: list[tuple[DepositRequest, object]] = []
+    for req in requests_loaded:
+        tranches = await svc.list_for_request(req.id)
+        payable = sorted(
+            (
+                t for t in tranches
+                if t.status == TrancheStatus.UNPAID
+                and (t.released_at is not None or t.tranche_number == 1)
+            ),
+            key=lambda t: t.tranche_number,
+        )
+        if not payable:
+            raise BusinessRuleError(
+                f"{req.request_number} has no payable tranche (nothing unpaid, "
+                "or the next tranche is still awaiting the merchandiser's release)."
+            )
+        targets.append((req, payable[0]))
+
+    # One Drive upload shared by every tranche.
+    from datetime import date as date_cls
+
+    from app.models.masters import Supplier
+
+    supplier = await db.get(Supplier, next(iter(supplier_ids)))
+    ext = ALLOWED_MIME_TYPES[file.content_type]
+    filename = (
+        f"TT_BULK_{supplier.supplier_code if supplier else 'SUP'}_"
+        f"{date_cls.today().strftime('%Y%m%d')}{ext}"
+    )
+    file_id, link = await asyncio.to_thread(
+        upload_tt_copy_to_drive, content, filename, file.content_type
+    )
+
+    details = TranchePaymentDetailsUpdate(
+        payment_date=payment_date,
+        bank=bank.strip(),
+        payment_reference_number=(payment_reference_number or "").strip() or None,
+        accounts_remarks=(accounts_remarks or "").strip() or None,
+        secondary_currency=(secondary_currency or "").strip() or None,
+        secondary_amount=secondary_amount,
+    )
+
+    paid: list[dict] = []
+    for req, tranche in targets:
+        await svc.attach_tt_copy(
+            req.id, tranche.id,
+            tt_copy_url=link, tt_copy_file_id=file_id, tt_copy_filename=filename,
+            user_id=current_user.id, role=current_user.role,
+            ip_address=ip, user_agent=ua,
+        )
+        await svc.update_payment_details(
+            req.id, tranche.id, details, current_user.id, current_user.role,
+            ip_address=ip, user_agent=ua,
+        )
+        await svc.pay_tranche(
+            req.id, tranche.id, current_user.id, current_user.role,
+            ip_address=ip, user_agent=ua,
+        )
+        paid.append({
+            "request_id": str(req.id),
+            "request_number": req.request_number,
+            "tranche_label": tranche.label,
+            "amount": float(tranche.amount),
+        })
+        background_tasks.add_task(seed_snapshot_for_request, req.id)
+        background_tasks.add_task(notify_tranche_event, req.id, tranche.id, "paid")
+        # Executive TT email per request — same shared attachment.
+        background_tasks.add_task(
+            email_tt_copy_uploaded, req.id, tranche.id, content,
+            file.content_type or "application/octet-stream", filename,
+        )
+
+    return {"supplier": supplier.name if supplier else None, "paid": paid}
+
+
+@router.get("/{request_id}/hom-history")
+async def hom_supplier_history(
+    request_id: UUID,
+    current_user: User,
+    db: DB,
+    limit: int = Query(15, ge=1, le=50),
+) -> list[dict]:
+    """Retrospective HoM decisions (9 Sep 2026 client request): while
+    processing a request, the Head of Merchandiser sees the past HoM
+    approve/reject remarks on EARLIER requests of the SAME supplier —
+    status-history rows leaving pending_hom_approval, newest first."""
+    from sqlalchemy import select as sa_select
+
+    from app.models.workflow import StatusHistory
+
+    repo = DepositRequestRepository(db)
+    req = await repo.get_for_validation(request_id)
+    if not req:
+        raise NotFoundError(f"Request {request_id} not found.")
+
+    rows = (
+        await db.execute(
+            sa_select(StatusHistory, DepositRequest, UserModel.full_name)
+            .join(DepositRequest, DepositRequest.id == StatusHistory.deposit_request_id)
+            .outerjoin(UserModel, UserModel.id == StatusHistory.changed_by)
+            .where(
+                DepositRequest.supplier_id == req.supplier_id,
+                DepositRequest.id != req.id,
+                DepositRequest.is_deleted == False,  # noqa: E712
+                StatusHistory.old_status == RequestStatus.PENDING_HOM_APPROVAL,
+            )
+            .order_by(StatusHistory.changed_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    return [
+        {
+            "request_id": str(r.id),
+            "request_number": r.request_number,
+            "sunshine_invoice_number": r.sunshine_invoice_number,
+            "decision": (
+                "approved"
+                if h.new_status == RequestStatus.PENDING_PAYMENT
+                else "rejected"
+            ),
+            "remarks": h.remarks,
+            "decided_by": name,
+            "decided_at": h.changed_at.isoformat(),
+        }
+        for h, r, name in rows
+    ]
 
 
 @router.delete("/{request_id}", response_model=MessageResponse)
@@ -216,6 +554,7 @@ async def hold_request(
     current_user: User,
     request: Request,
     db: DB,
+    background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
     from app.models.enums import RequestStatus, UserRole
     svc = DepositRequestService(db)
@@ -229,6 +568,9 @@ async def hold_request(
         ip_address=_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
+    background_tasks.add_task(
+        notify_status_change, request_id, target.value, current_user.role.value, body.remarks
+    )
     return DepositRequestResponse.model_validate(req)
 
 
@@ -239,6 +581,7 @@ async def resume_request(
     current_user: User,
     request: Request,
     db: DB,
+    background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
     svc = DepositRequestService(db)
     req = await svc.transition_status(
@@ -250,6 +593,10 @@ async def resume_request(
         ip_address=_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
+    background_tasks.add_task(
+        notify_status_change, request_id,
+        RequestStatus.PENDING_PAYMENT.value, current_user.role.value, body.remarks,
+    )
     return DepositRequestResponse.model_validate(req)
 
 
@@ -260,6 +607,7 @@ async def cancel_request(
     current_user: User,
     request: Request,
     db: DB,
+    background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
     from app.models.enums import UserRole
     svc = DepositRequestService(db)
@@ -273,6 +621,37 @@ async def cancel_request(
         ip_address=_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
+    background_tasks.add_task(
+        notify_status_change, request_id, target.value, current_user.role.value, body.remarks
+    )
+    return DepositRequestResponse.model_validate(req)
+
+
+@router.post("/{request_id}/reject", response_model=DepositRequestResponse)
+async def reject_request(
+    request_id: UUID,
+    body: HomDecisionRequest,
+    current_user: User,
+    request: Request,
+    db: DB,
+    background_tasks: BackgroundTasks,
+) -> DepositRequestResponse:
+    """Accounts reject the whole request — terminal (UAT Aug 2026, items
+    12/17/18). The reason is mandatory (HomDecisionRequest enforces it);
+    the raising merchandiser AND Head of Merchandiser are notified. The
+    invoice numbers become reusable and the merchandiser can no longer
+    edit anything on the request."""
+    _ALLOWED = {UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN}
+    if current_user.role not in _ALLOWED:
+        raise AuthorizationError("Only Accounts Team or Super Admin can reject requests.")
+    svc = DepositRequestService(db)
+    req = await svc.transition_status(
+        request_id, RequestStatus.REJECTED_BY_ACCOUNTS,
+        current_user.id, current_user.role, body.remarks,
+        ip_address=_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    background_tasks.add_task(notify_request_rejected_by_accounts, request_id, body.remarks)
     return DepositRequestResponse.model_validate(req)
 
 
@@ -283,6 +662,7 @@ async def reopen_request(
     current_user: User,
     request: Request,
     db: DB,
+    background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
     svc = DepositRequestService(db)
     req = await svc.transition_status(
@@ -293,6 +673,10 @@ async def reopen_request(
         body.remarks,
         ip_address=_ip(request),
         user_agent=request.headers.get("user-agent"),
+    )
+    background_tasks.add_task(
+        notify_status_change, request_id,
+        RequestStatus.REOPENED.value, current_user.role.value, body.remarks,
     )
     return DepositRequestResponse.model_validate(req)
 
@@ -313,12 +697,14 @@ async def update_remarks(
 @router.post("/{request_id}/hom-approve", response_model=DepositRequestResponse)
 async def hom_approve(
     request_id: UUID,
-    body: StatusChangeRequest,
+    body: HomDecisionRequest,
     current_user: User,
     request: Request,
     db: DB,
+    background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
-    """HoM approves a pending request — moves it to pending_payment for Accounts."""
+    """HoM approves a pending request — moves it to pending_payment for Accounts.
+    The reason is mandatory; the raising merchandiser is notified."""
     _ALLOWED = {UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN}
     if current_user.role not in _ALLOWED:
         raise AuthorizationError("Only Head of Merchandiser or Super Admin can approve.")
@@ -329,18 +715,24 @@ async def hom_approve(
         ip_address=_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
+    background_tasks.add_task(notify_hom_decision, request_id, "approved", body.remarks)
+    # The request just entered the payment queue — Accounts learn about it the
+    # same way they do for directly-created requests.
+    background_tasks.add_task(notify_request_created, request_id)
     return DepositRequestResponse.model_validate(req)
 
 
 @router.post("/{request_id}/hom-reject", response_model=DepositRequestResponse)
 async def hom_reject(
     request_id: UUID,
-    body: StatusChangeRequest,
+    body: HomDecisionRequest,
     current_user: User,
     request: Request,
     db: DB,
+    background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
-    """HoM rejects a pending request — moves it to rejected_by_hom (terminal)."""
+    """HoM rejects a pending request — moves it to rejected_by_hom (terminal).
+    The reason is mandatory; the raising merchandiser is notified."""
     _ALLOWED = {UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN}
     if current_user.role not in _ALLOWED:
         raise AuthorizationError("Only Head of Merchandiser or Super Admin can reject.")
@@ -351,4 +743,5 @@ async def hom_reject(
         ip_address=_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
+    background_tasks.add_task(notify_hom_decision, request_id, "rejected", body.remarks)
     return DepositRequestResponse.model_validate(req)

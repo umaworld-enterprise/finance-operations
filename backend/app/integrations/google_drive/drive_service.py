@@ -35,11 +35,18 @@ ALLOWED_MIME_TYPES = {
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
-def build_tt_copy_filename(request_number: str, mime_type: str, today: date | None = None) -> str:
-    """TT_{request_number}_{YYYYMMDD}{ext} — extension derived from mime type."""
+def build_tt_copy_filename(
+    request_number: str,
+    mime_type: str,
+    today: date | None = None,
+    tranche_number: int | None = None,
+) -> str:
+    """TT_{request_number}[_T{n}]_{YYYYMMDD}{ext} — extension derived from
+    mime type; the T{n} segment identifies the tranche the copy belongs to."""
     ext = ALLOWED_MIME_TYPES[mime_type]
     stamp = (today or date.today()).strftime("%Y%m%d")
-    return f"TT_{request_number}_{stamp}{ext}"
+    tranche_part = f"_T{tranche_number}" if tranche_number is not None else ""
+    return f"TT_{request_number}{tranche_part}_{stamp}{ext}"
 
 
 def validate_tt_copy(mime_type: str | None, size_bytes: int) -> str | None:
@@ -92,3 +99,43 @@ def upload_tt_copy_to_drive(content: bytes, filename: str, mime_type: str) -> tu
     link = created.get("webViewLink") or f"https://drive.google.com/file/d/{file_id}/view"
     logger.info("TT copy uploaded to Drive", file_id=file_id, filename=filename)
     return file_id, link
+
+
+def delete_tt_copy_from_drive(file_id: str) -> bool:
+    """Best-effort Drive cleanup when a TT copy is replaced or deleted
+    (4 Sep 2026). Failures are logged and swallowed — the app's record is the
+    source of truth; an orphaned Drive file is harmless.
+
+    Synchronous (blocking network I/O) — run in a thread from async code."""
+    try:
+        if not settings.google_service_account_json or not file_id:
+            return False
+        creds_dict = json.loads(settings.google_service_account_json)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        drive = build("drive", "v3", credentials=creds)
+        drive.files().delete(fileId=file_id, supportsAllDrives=True).execute()
+        logger.info("TT copy deleted from Drive", file_id=file_id)
+        return True
+    except Exception as exc:
+        logger.error("TT copy Drive deletion failed", file_id=file_id, error=str(exc))
+        return False
+
+
+def download_tt_copy_from_drive(file_id: str) -> bytes | None:
+    """Fetch a TT copy back from Drive so it can travel as an email
+    attachment (19 Aug 2026 executive emails). Returns None on any failure —
+    callers fall back to the view link.
+
+    Synchronous (blocking network I/O) — run in a thread from async code.
+    """
+    try:
+        if not settings.google_service_account_json:
+            return None
+        creds_dict = json.loads(settings.google_service_account_json)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        drive = build("drive", "v3", credentials=creds)
+        content = drive.files().get_media(fileId=file_id, supportsAllDrives=True).execute()
+        return content if isinstance(content, bytes) else bytes(content)
+    except Exception as exc:
+        logger.error("TT copy download failed", file_id=file_id, error=str(exc))
+        return None

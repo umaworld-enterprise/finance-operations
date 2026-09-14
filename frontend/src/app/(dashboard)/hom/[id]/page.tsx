@@ -10,59 +10,35 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { useRequest, useHomApprove, useHomReject, useFieldVisibility } from "@/hooks/useRequests";
+import { useRequest, useHomApprove, useHomReject, useHomSupplierHistory, useFieldVisibility, usePayment } from "@/hooks/useRequests";
+import { DecisionDialog } from "@/components/hom/DecisionDialog";
+import { SupplierDefaultHistory } from "@/components/forms/SupplierDefaultHistory";
+import { TrancheList } from "@/components/tranches/TrancheList";
+import { StatusHistoryCard } from "@/components/tranches/StatusHistoryCard";
+import { RequestAuditTrail } from "@/components/tranches/RequestAuditTrail";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { ArrowLeft, Lock, FileQuestion, Check, X } from "lucide-react";
 import Link from "next/link";
 
-function RejectDialog({
-  open,
-  onClose,
-  onConfirm,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onConfirm: (remarks: string) => void;
-}) {
-  const [remarks, setRemarks] = useState("");
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-card rounded-xl border border-border shadow-lg p-6 w-full max-w-md space-y-4">
-        <h3 className="font-semibold text-foreground">Reject Request</h3>
-        <textarea
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-          rows={3}
-          placeholder="Reason for rejection (optional)"
-          value={remarks}
-          onChange={(e) => setRemarks(e.target.value)}
-        />
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button variant="destructive" size="sm" onClick={() => { onConfirm(remarks); onClose(); }}>
-            Confirm Reject
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function HomRequestDetail() {
   const { id } = useParams<{ id: string }>();
   const { data: req, isLoading, isFetching } = useRequest(id);
+  const { data: payment } = usePayment(id);
   const { data: fv = {} } = useFieldVisibility();
   const homApprove = useHomApprove();
   const homReject = useHomReject();
+  // Retrospective HoM decisions on this supplier's earlier files (9 Sep 2026).
+  const { data: homHistory = [] } = useHomSupplierHistory(id);
+  const [approveOpen, setApproveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
 
   const canApprove = req?.current_status === "pending_hom_approval";
   const canReject  = req?.current_status === "pending_hom_approval";
   const actionBusy = homApprove.isPending || homReject.isPending || isFetching;
 
-  const handleApprove = async () => {
+  const handleApprove = async (remarks: string) => {
     try {
-      await homApprove.mutateAsync({ id });
+      await homApprove.mutateAsync({ id, remarks });
       toast.success("Request approved — moved to payment queue.");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to approve.");
@@ -167,11 +143,13 @@ export default function HomRequestDetail() {
               {fv.total_supplier_invoice_amount !== false && field("Total Invoice Amount", formatCurrency(req.total_supplier_invoice_amount, req.currency ?? undefined))}
               {fv.exchange_rate !== false && req.exchange_rate != null && field("Exchange Rate", req.exchange_rate)}
               {req.sunshine_invoice_number && field("Sunshine Invoice #", req.sunshine_invoice_number)}
-              {req.supplier_invoice_number && field("Supplier Invoice #", req.supplier_invoice_number)}
-              {req.estimated_etd && field("Estimated ETD", formatDate(req.estimated_etd))}
+              {req.supplier_invoice_number && field("Supplier Proforma Invoice #", req.supplier_invoice_number)}
+              {req.estimated_etd && field("ETD", formatDate(req.estimated_etd))}
               {req.payment_terms && field("Payment Terms", req.payment_terms)}
               {field("Submitted", formatDate(req.created_at))}
               {fv.creator_info !== false && field("Submitted By", req.creator ? `${req.creator.full_name} (${req.creator.email})` : req.submitter_email ?? null)}
+              {payment?.ship_date && field("Ship Date", formatDate(payment.ship_date))}
+              {fv.accounts_timestamp !== false && payment && field("Payment Last Updated", formatDate(payment.updated_at))}
             </dl>
             {req.remarks && (
               <div className="mt-4 pt-4 border-t border-border">
@@ -191,40 +169,102 @@ export default function HomRequestDetail() {
                 {fv.grace_etd !== false && field("Grace ETD", formatDate(snap.grace_etd))}
                 {fv.etd_grace_overdue_days !== false && field("ETD Grace Overdue Days", snap.etd_grace_overdue_days != null ? `${snap.etd_grace_overdue_days}d` : null)}
                 {fv.actual_etd_overdue_days !== false && field("Actual ETD Overdue Days", snap.actual_etd_overdue_days != null ? `${snap.actual_etd_overdue_days}d` : null)}
+                {fv.cost_of_fund !== false && field("Cost of Fund", snap.cost_of_fund_amount != null ? formatCurrency(Number(snap.cost_of_fund_amount), req.currency ?? undefined) : null)}
                 {fv.default_status !== false && field("Risk Status", snap.default_status)}
               </dl>
             </CardContent>
           </Card>
         )}
 
-        {/* Status history */}
-        {fv.status_history !== false && req.status_history && req.status_history.length > 0 && (
+        {/* Advance Payment Tranches — the same particulars Accounts see,
+            read-only (UAT Aug 2026, item 3). */}
+        {(req.tranches?.length ?? 0) > 0 && (
           <Card>
             <CardContent className="p-5 md:p-6">
-              <h2 className="text-sm font-semibold text-foreground mb-4">Status History</h2>
-              <ol className="space-y-3">
-                {req.status_history.map((h) => (
-                  <li key={h.id} className="flex flex-col sm:flex-row gap-1 sm:gap-3 text-sm">
-                    <span className="text-muted-foreground shrink-0 sm:w-32 text-xs pt-0.5">
-                      {formatDate(h.changed_at)}
-                    </span>
-                    <span className="flex-1">
-                      {h.old_status ? (
-                        <>
-                          <StatusBadge status={h.old_status} />
-                          <span className="mx-1.5 text-muted-foreground">→</span>
-                        </>
-                      ) : null}
-                      <StatusBadge status={h.new_status} showFull />
-                      {h.remarks && (
-                        <p className="text-xs text-muted-foreground mt-0.5">{h.remarks}</p>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ol>
+              <h2 className="text-sm font-semibold text-foreground mb-1">Advance Payment Tranches</h2>
+              <p className="text-xs text-muted-foreground mb-4">
+                Amounts, tentative dates and payment progress — exactly what the Accounts team works from.
+              </p>
+              <TrancheList
+                requestId={id}
+                tranches={req.tranches ?? []}
+                currency={req.currency}
+                mode="readonly"
+              />
             </CardContent>
           </Card>
+        )}
+
+        {/* Retrospective HoM remarks (9 Sep 2026): past approve/reject
+            decisions on this supplier's earlier files, visible while
+            processing the new one. */}
+        {homHistory.length > 0 && (
+          <Card>
+            <CardContent className="p-5 md:p-6 space-y-3">
+              <div>
+                <h2 className="font-semibold text-foreground text-sm">
+                  Previous HoM Decisions — {req.supplier.name}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Your earlier approve / reject remarks on this supplier&apos;s files.
+                </p>
+              </div>
+              <div className="space-y-2">
+                {homHistory.map((h) => (
+                  <div
+                    key={`${h.request_id}-${h.decided_at}`}
+                    className="flex items-start justify-between gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2"
+                  >
+                    <div className="min-w-0 space-y-0.5">
+                      <p className="text-sm flex items-center gap-2 flex-wrap">
+                        <Link
+                          href={`/hom/${h.request_id}`}
+                          className="font-mono text-xs font-semibold text-foreground hover:underline underline-offset-2"
+                        >
+                          {h.request_number}
+                        </Link>
+                        {h.sunshine_invoice_number && (
+                          <span className="text-xs text-muted-foreground font-mono">
+                            {h.sunshine_invoice_number}
+                          </span>
+                        )}
+                        <span
+                          className={`inline-flex items-center text-xs font-medium border px-2 py-0.5 rounded-full ${
+                            h.decision === "approved"
+                              ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                              : "text-red-700 bg-red-50 border-red-200"
+                          }`}
+                        >
+                          {h.decision === "approved" ? "Approved" : "Rejected"}
+                        </span>
+                      </p>
+                      {h.remarks && (
+                        <p className="text-xs text-muted-foreground italic">&ldquo;{h.remarks}&rdquo;</p>
+                      )}
+                    </div>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+                      {h.decided_by ? `${h.decided_by} · ` : ""}{formatDate(h.decided_at)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Supplier default track record — decisive context for approval */}
+        <SupplierDefaultHistory
+          supplierId={req.supplier.id}
+          supplierName={req.supplier.name}
+          currentRequest={{ id: req.id, deposit_amount: Number(req.deposit_amount), currency: req.currency }}
+          linkBase="/hom"
+        />
+
+        <RequestAuditTrail requestId={id} />
+
+        {/* Status history — includes tranche rejections (19 Aug 2026) */}
+        {fv.status_history !== false && (
+          <StatusHistoryCard history={req.status_history} tranches={req.tranches} />
         )}
 
         {/* HOM actions */}
@@ -240,7 +280,7 @@ export default function HomRequestDetail() {
               <div className="flex flex-col sm:flex-row gap-3">
                 {canApprove && (
                   <Button
-                    onClick={handleApprove}
+                    onClick={() => setApproveOpen(true)}
                     disabled={actionBusy}
                     className="w-full sm:w-auto gap-1.5"
                   >
@@ -263,8 +303,24 @@ export default function HomRequestDetail() {
         )}
       </main>
 
-      <RejectDialog
+      <DecisionDialog
+        open={approveOpen}
+        title="Approve Request"
+        description="Approving moves this request to the accounts payment queue. A reason is mandatory."
+        placeholder="Reason for approval"
+        confirmLabel="Confirm Approve"
+        busy={actionBusy}
+        onClose={() => setApproveOpen(false)}
+        onConfirm={handleApprove}
+      />
+      <DecisionDialog
         open={rejectOpen}
+        title="Reject Request"
+        description="Rejecting is final for this request. A reason is mandatory — the merchandiser will be notified."
+        placeholder="Reason for rejection"
+        confirmLabel="Confirm Reject"
+        destructive
+        busy={actionBusy}
         onClose={() => setRejectOpen(false)}
         onConfirm={handleReject}
       />

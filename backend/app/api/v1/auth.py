@@ -1,15 +1,23 @@
-"""Auth endpoints — profile and login recording."""
+"""Auth endpoints — Google sign-in, profile and login recording."""
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db_session
 from app.core.dependencies import CurrentUser, get_current_user
 from app.core.rate_limit import limiter
-from app.schemas.auth import CurrentUserResponse, PreferencesUpdate, ProfileUpdate
+from app.core.security import create_access_token, exchange_google_auth_code
+from app.repositories.user_repo import UserRepository
+from app.schemas.auth import (
+    CurrentUserResponse,
+    GoogleLoginRequest,
+    LoginResponse,
+    PreferencesUpdate,
+    ProfileUpdate,
+)
 from app.services.user_service import UserService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -19,6 +27,47 @@ settings = get_settings()
 def _ip(req: Request) -> str | None:
     forwarded = req.headers.get("x-forwarded-for")
     return forwarded.split(",")[0].strip() if forwarded else (req.client.host if req.client else None)
+
+
+@router.post("/google/login", response_model=LoginResponse)
+@limiter.limit(settings.rate_limit_public_default)
+async def google_login(
+    request: Request,
+    data: GoogleLoginRequest,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> LoginResponse:
+    """Exchange a Google sign-in auth code for an app-issued JWT.
+
+    Access stays invite-only: the Google identity must match a pre-registered
+    active user row, exactly like the previous Supabase flow.
+    """
+    claims = await exchange_google_auth_code(data.code)  # AuthenticationError → 401
+
+    repo = UserRepository(db)
+    user = await repo.get_by_email(claims["email"])
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User not registered in the system. Contact your administrator.",
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been deactivated.",
+        )
+
+    svc = UserService(db)
+    await svc.record_login(
+        user.id,
+        ip_address=_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+
+    return LoginResponse(
+        access_token=create_access_token(user_id=user.id, email=user.email),
+        expires_in=settings.access_token_expire_minutes * 60,
+        user=CurrentUserResponse.model_validate(user),
+    )
 
 
 @router.get("/me", response_model=CurrentUserResponse)

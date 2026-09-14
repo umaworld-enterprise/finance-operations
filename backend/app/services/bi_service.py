@@ -37,7 +37,7 @@ request submission through payment to shipment, covering payment status, overdue
 supplier risk, cost of fund, and breakdown analytics by merchandiser, vertical, and customer.
 
 Roles: super_admin (full access) · finance_admin (supplier risk + analytics) ·
-accounts_team (payment queue) · merchandiser (their own requests only)
+accounts_team (payment queue) · merchandiser (all requests, full rights)
 
 The tracker supports multi-currency deposits: USD, CNY, EUR, GBP, AED, INR.
 
@@ -68,7 +68,7 @@ deposit_requests (alias: dr)
   currency text (USD/EUR/CNY/GBP/AED/INR/OTHER),
   deposit_amount numeric, deposit_percentage numeric,
   total_supplier_invoice_amount numeric,
-  estimated_shipment_date date, estimated_etd date,
+  estimated_etd date,
   current_status text (see lifecycle above),
   submission_source text (in_app / google_form),
   is_locked bool, is_deleted bool, created_at timestamptz, updated_at timestamptz
@@ -124,7 +124,6 @@ The following are off-limits. Do not reference them in any query under any circu
 - system_config (table) — contains API keys and internal configuration
 - ip_address (column)  — personally identifiable network data
 - user_agent (column)  — client fingerprinting data
-- supabase_uid (column) — internal auth identifier
 If a user asks for any of this data, respond with GENERAL:I'm sorry, that information is restricted and cannot be accessed through this assistant.
 """
 
@@ -162,7 +161,7 @@ _BLOCKED = re.compile(
 # This runs AFTER AI generation, so it catches prompt-injection / jailbreak attempts too.
 # Secure by default: adding a new sensitive column here is all that's needed to protect it.
 _RESTRICTED = re.compile(
-    r"\b(audit_logs|system_config|ip_address|user_agent|supabase_uid|ai_api_key)\b",
+    r"\b(audit_logs|system_config|ip_address|user_agent|ai_api_key)\b",
     re.IGNORECASE,
 )
 

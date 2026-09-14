@@ -26,10 +26,12 @@ import dynamic from "next/dynamic";
 const OverdueChart       = dynamic(() => import("@/components/charts/OverdueChart").then(m => ({ default: m.OverdueChart })), { ssr: false });
 const CostOfFundChart    = dynamic(() => import("@/components/charts/CostOfFundChart").then(m => ({ default: m.CostOfFundChart })), { ssr: false });
 const MonthlyTrendChart  = dynamic(() => import("@/components/charts/MonthlyTrendChart").then(m => ({ default: m.MonthlyTrendChart })), { ssr: false });
-import { useAnalyticsSummary, useAnalyticsSnapshots } from "@/hooks/useAnalytics";
+import { useAnalyticsSummary, useAnalyticsSnapshots, useWeeklyDeposits } from "@/hooks/useAnalytics";
 import { useRequests } from "@/hooks/useRequests";
-import { useVerticals, useCustomers, useUsers } from "@/hooks/useMasters";
-import { formatCurrency, formatDate, cn } from "@/lib/utils";
+// useMerchandiserOptions (4 Sep 2026): analytics is open to every role now —
+// the staff dropdown must not depend on the Super-Admin-only users master.
+import { useVerticals, useCustomers, useMerchandiserOptions } from "@/hooks/useMasters";
+import { currencyDisplayLabel, formatCurrency, formatDate, cn } from "@/lib/utils";
 import { analyticsService, type AnalyticsFilters } from "@/services/analyticsService";
 import type { MonthlyTrendPoint } from "@/components/charts/MonthlyTrendChart";
 import { api } from "@/lib/api";
@@ -83,6 +85,19 @@ function EmptyTable({ cols }: { cols: number }) {
   );
 }
 
+// A failed query must never masquerade as "No data yet" (4 Sep 2026 — the
+// By Merchandiser / By Vertical 500s were invisible for exactly that reason).
+function ErrorTable({ cols, error }: { cols: number; error: unknown }) {
+  return (
+    <TableRow>
+      <TableCell colSpan={cols} className="text-center py-12 text-sm text-destructive">
+        Failed to load this table{error instanceof Error ? ` — ${error.message}` : ""}. Try
+        refreshing; if it persists, contact the administrator.
+      </TableCell>
+    </TableRow>
+  );
+}
+
 // ── Data hooks ────────────────────────────────────────────────────────────────
 
 const ANALYTICS_STALE = 5 * 60_000;
@@ -109,7 +124,9 @@ function buildQs(params: Record<string, string | number | undefined | null>) {
 
 // Delay-bucket dropdown options shared across the 4 cross-filter tabs.
 const DELAY_BUCKET_OPTIONS = [
-  { label: "G-15 Days",    etd_min: 1,   etd_max: 15  },
+  // Bucket bounds are days from the ORIGINAL Est ETD (Formula Reference,
+  // 2 Sep 2026) — G-15 covers 11–15 days after ETD (just past the grace).
+  { label: "G-15 Days",    etd_min: 10,  etd_max: 15  },
   { label: "15-30 Days",   etd_min: 15,  etd_max: 30  },
   { label: "30-45 Days",   etd_min: 30,  etd_max: 45  },
   { label: "45-60 Days",   etd_min: 45,  etd_max: 60  },
@@ -238,6 +255,27 @@ function useByCustomer(enabled: boolean, filters: TabFilters) {
   });
 }
 
+interface OutstandingRow {
+  group: string;
+  tranche_count: number;
+  request_count: number;
+  outstanding: Record<string, number>;
+}
+
+function useOutstandingTracker(enabled: boolean, groupBy: string, dateFrom?: string, dateTo?: string) {
+  return useQuery<OutstandingRow[]>({
+    queryKey: ["analytics-outstanding", groupBy, dateFrom, dateTo],
+    queryFn: async () => {
+      const r = await api.get(`/analytics/outstanding${buildQs({ group_by: groupBy, date_from: dateFrom, date_to: dateTo })}`);
+      return r.data;
+    },
+    enabled,
+    staleTime: ANALYTICS_STALE,
+    gcTime: ANALYTICS_GC,
+    placeholderData: keepPreviousData,
+  });
+}
+
 function useMonthlyTrends(year: number) {
   return useQuery<MonthlyTrendPoint[]>({
     queryKey: ["analytics-monthly-trends", year],
@@ -258,6 +296,10 @@ const ALL_TABS = [
   { key: "by_merchandiser", label: "By Merchandiser", permKey: "by_merchandiser" },
   { key: "by_vertical",     label: "By Vertical",     permKey: "by_vertical" },
   { key: "by_customer",     label: "By Customer",     permKey: "by_customer" },
+  { key: "outstanding_tracker", label: "Outstanding", permKey: "outstanding_tracker" },
+  // Weekly Deposit Tracker (Aug 2026, item 4.1) — same permission section as
+  // Outstanding: identical data domain, different cut.
+  { key: "weekly_tracker",  label: "Weekly Tracker",  permKey: "outstanding_tracker" },
 ] as const;
 
 type TabKey = typeof ALL_TABS[number]["key"];
@@ -396,7 +438,7 @@ function TabFilterBar({
 }) {
   const { data: verticals = [] } = useVerticals();
   const { data: customers = [] } = useCustomers();
-  const { data: users = [] } = useUsers();
+  const { data: users = [] } = useMerchandiserOptions();
   const hasFilter = staffId || verticalId || customerId || bucketVal;
   return (
     <div className="flex flex-wrap items-end gap-2 mb-3">
@@ -486,8 +528,9 @@ function DelayBucketsTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: str
                 : data.length === 0 ? <EmptyTable cols={9} />
                 : data.map((row: any) => {
                   const minPart = row.bucket_min !== null && row.bucket_min !== undefined ? `&min=${row.bucket_min}` : "";
+                  const maxPart = row.bucket_max !== null && row.bucket_max !== undefined ? `&max=${row.bucket_max}` : "";
                   const xf = (staffId ? `&staff_id=${staffId}` : "") + (verticalId ? `&vertical_id=${verticalId}` : "") + (customerId ? `&customer_id=${customerId}` : "");
-                  const drillUrl = `/analytics/drill?section=delay_buckets&label=${encodeURIComponent(row.delay_range)}${minPart}&max=${row.bucket_max}${xf}`;
+                  const drillUrl = `/analytics/drill?section=delay_buckets&label=${encodeURIComponent(row.delay_range)}${minPart}${maxPart}${xf}`;
                   return (
                   <TableRow key={row.delay_range} className="hover:bg-muted/40 cursor-pointer">
                     <TableCell className="font-medium text-sm">
@@ -520,7 +563,7 @@ function ByMerchandiserTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: s
   const [bucketVal, setBucketVal] = useState("");
   const { etd_min: etdMin, etd_max: etdMax } = decodeBucket(bucketVal);
   const filters: TabFilters = { dateFrom, dateTo, verticalId: verticalId || undefined, customerId: customerId || undefined, etdMin, etdMax };
-  const { data = [], isLoading } = useByMerchandiser(true, filters);
+  const { data = [], isLoading, isError, error } = useByMerchandiser(true, filters);
   return (
     <div className="space-y-3">
       <TabFilterBar
@@ -541,12 +584,16 @@ function ByMerchandiserTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: s
                 <TableHead className="text-right hidden md:table-cell">Overdue EUR</TableHead>
                 <TableHead className="text-right">Contribution</TableHead>
                 <TableHead className="text-right hidden lg:table-cell">Avg Delay</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">Notional Gain</TableHead>
+                {/* Cost of Fund per currency (4 Sep 2026 sheet). */}
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (USD)</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (CNY)</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (EUR)</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? <TableSkeleton rows={8} cols={8} />
-                : data.length === 0 ? <EmptyTable cols={8} />
+              {isLoading ? <TableSkeleton rows={8} cols={10} />
+                : isError ? <ErrorTable cols={10} error={error} />
+                : data.length === 0 ? <EmptyTable cols={10} />
                 : data.map((row: any) => (
                   <TableRow key={row.merchandiser} className="hover:bg-muted/40 cursor-pointer">
                     <TableCell className="font-medium">
@@ -561,7 +608,9 @@ function ByMerchandiserTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: s
                     <TableCell className="text-right tabular-nums hidden md:table-cell">{fmtCurrency(row.overdue_eur, "EUR")}</TableCell>
                     <TableCell className="text-right tabular-nums">{row.contribution_pct}%</TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{row.avg_delay_days}d</TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_gain, "USD")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_usd ?? row.notional_gain, "USD")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_cny ?? 0, "CNY")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_eur ?? 0, "EUR")}</TableCell>
                   </TableRow>
                 ))}
             </TableBody>
@@ -578,7 +627,7 @@ function ByVerticalTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
   const [bucketVal, setBucketVal] = useState("");
   const { etd_min: etdMin, etd_max: etdMax } = decodeBucket(bucketVal);
   const filters: TabFilters = { dateFrom, dateTo, staffId: staffId || undefined, customerId: customerId || undefined, etdMin, etdMax };
-  const { data = [], isLoading } = useByVertical(true, filters);
+  const { data = [], isLoading, isError, error } = useByVertical(true, filters);
   return (
     <div className="space-y-3">
       <TabFilterBar
@@ -599,12 +648,16 @@ function ByVerticalTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
                 <TableHead className="text-right hidden md:table-cell">Overdue EUR</TableHead>
                 <TableHead className="text-right">Contribution</TableHead>
                 <TableHead className="text-right hidden lg:table-cell">Avg Delay</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">Notional Gain</TableHead>
+                {/* Cost of Fund per currency (4 Sep 2026 sheet). */}
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (USD)</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (CNY)</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (EUR)</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? <TableSkeleton rows={8} cols={8} />
-                : data.length === 0 ? <EmptyTable cols={8} />
+              {isLoading ? <TableSkeleton rows={8} cols={10} />
+                : isError ? <ErrorTable cols={10} error={error} />
+                : data.length === 0 ? <EmptyTable cols={10} />
                 : data.map((row: any) => (
                   <TableRow key={row.category} className="hover:bg-muted/40 cursor-pointer">
                     <TableCell className="font-medium">
@@ -619,7 +672,9 @@ function ByVerticalTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
                     <TableCell className="text-right tabular-nums hidden md:table-cell">{fmtCurrency(row.overdue_eur, "EUR")}</TableCell>
                     <TableCell className="text-right tabular-nums">{row.contribution_pct}%</TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{row.avg_delay_days}d</TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_gain, "USD")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_usd ?? row.notional_gain, "USD")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_cny ?? 0, "CNY")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_eur ?? 0, "EUR")}</TableCell>
                   </TableRow>
                 ))}
             </TableBody>
@@ -636,7 +691,7 @@ function ByCustomerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
   const [bucketVal, setBucketVal] = useState("");
   const { etd_min: etdMin, etd_max: etdMax } = decodeBucket(bucketVal);
   const filters: TabFilters = { dateFrom, dateTo, staffId: staffId || undefined, verticalId: verticalId || undefined, etdMin, etdMax };
-  const { data = [], isLoading } = useByCustomer(true, filters);
+  const { data = [], isLoading, isError, error } = useByCustomer(true, filters);
   return (
     <div className="space-y-3">
       <TabFilterBar
@@ -659,11 +714,16 @@ function ByCustomerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
                 <TableHead className="text-right hidden lg:table-cell">Avg Delay</TableHead>
                 <TableHead className="text-right hidden lg:table-cell">Max Delay</TableHead>
                 <TableHead className="text-right hidden lg:table-cell">ETD Pending</TableHead>
+                {/* Cost of Fund per currency (4 Sep 2026 sheet). */}
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (USD)</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (CNY)</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (EUR)</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? <TableSkeleton rows={8} cols={9} />
-                : data.length === 0 ? <EmptyTable cols={9} />
+              {isLoading ? <TableSkeleton rows={8} cols={12} />
+                : isError ? <ErrorTable cols={12} error={error} />
+                : data.length === 0 ? <EmptyTable cols={12} />
                 : data.map((row: any) => (
                   <TableRow key={row.customer} className="hover:bg-muted/40 cursor-pointer">
                     <TableCell className="font-medium">
@@ -680,6 +740,9 @@ function ByCustomerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
                     <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{row.avg_delay_days}d</TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{row.max_delay_days}d</TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{row.etd_pending}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_usd ?? row.notional_gain, "USD")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_cny ?? 0, "CNY")}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_eur ?? 0, "EUR")}</TableCell>
                   </TableRow>
                 ))}
             </TableBody>
@@ -690,13 +753,199 @@ function ByCustomerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
   );
 }
 
+// ── Outstanding Deposit Tracker ───────────────────────────────────────────────
+// A payment requested by a merchandiser stays outstanding until it is paid —
+// calculated at tranche level, so only unpaid requested tranche value counts.
+
+const OUTSTANDING_GROUPS = [
+  { key: "week",         label: "Weekly (request date)" },
+  { key: "merchandiser", label: "Merchandiser" },
+  { key: "customer",     label: "Customer" },
+  { key: "vertical",     label: "Vertical" },
+] as const;
+
+function OutstandingTrackerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: string }) {
+  const [groupBy, setGroupBy] = useState<string>("week");
+  const { data = [], isLoading } = useOutstandingTracker(true, groupBy, dateFrom, dateTo);
+
+  // Currency columns are driven by the data — USD/CNY/EUR first, then any
+  // other currency present, so nothing is artificially hidden.
+  const currencies = useMemo(() => {
+    const preferred = ["USD", "CNY", "EUR"];
+    const present = new Set<string>();
+    data.forEach((row) => Object.keys(row.outstanding).forEach((c) => present.add(c)));
+    return [
+      ...preferred.filter((c) => present.has(c)),
+      ...[...present].filter((c) => !preferred.includes(c)).sort(),
+    ];
+  }, [data]);
+  const cols = 3 + Math.max(currencies.length, 1);
+
+  const groupHeading = OUTSTANDING_GROUPS.find((g) => g.key === groupBy)?.label ?? "Group";
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">Group by:</span>
+        <select
+          value={groupBy}
+          onChange={(e) => setGroupBy(e.target.value)}
+          className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          {OUTSTANDING_GROUPS.map((g) => (
+            <option key={g.key} value={g.key}>{g.label}</option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground">
+          Unpaid requested tranche value only — paid tranches are excluded, so partial
+          payments are reflected. Weekly ranges run Monday–Sunday on the request-created date.
+        </p>
+      </div>
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{groupHeading}</TableHead>
+                <TableHead className="text-right">Requests</TableHead>
+                <TableHead className="text-right">Unpaid Tranches</TableHead>
+                {currencies.length === 0 ? (
+                  <TableHead className="text-right">Outstanding</TableHead>
+                ) : (
+                  currencies.map((c) => (
+                    <TableHead key={c} className="text-right">Outstanding {currencyDisplayLabel(c)}</TableHead>
+                  ))
+                )}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? <TableSkeleton rows={8} cols={cols} />
+                : data.length === 0 ? <EmptyTable cols={cols} />
+                : data.map((row) => (
+                  <TableRow key={row.group}>
+                    <TableCell className="font-medium text-sm whitespace-nowrap">{row.group}</TableCell>
+                    <TableCell className="text-right tabular-nums">{row.request_count}</TableCell>
+                    <TableCell className="text-right tabular-nums">{row.tranche_count}</TableCell>
+                    {currencies.length === 0 ? (
+                      <TableCell className="text-right tabular-nums">—</TableCell>
+                    ) : (
+                      currencies.map((c) => (
+                        <TableCell key={c} className="text-right tabular-nums">
+                          {row.outstanding[c] != null ? fmtCurrency(row.outstanding[c], c) : "—"}
+                        </TableCell>
+                      ))
+                    )}
+                  </TableRow>
+                ))}
+            </TableBody>
+          </Table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function WeeklyTrackerTab() {
+  const { data: groups = [], isLoading } = useWeeklyDeposits();
+  const { user } = useAuth();
+  // Request numbers link to the viewer's own detail page (19 Aug 2026,
+  // app-wide hyperlinks).
+  const requestHref = (id: string) =>
+    user?.role === "merchandiser"
+      ? `/merchandiser/${id}`
+      : user?.role === "head_of_merchandiser"
+        ? `/hom/${id}`
+        : `/accounts/${id}`;
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Requested, unpaid deposits sorted by ETD, bucketed into the
+        ETD&apos;s Monday–Sunday week. Requests without an ETD collect at the bottom.
+      </p>
+      {isLoading ? (
+        <Card className="overflow-hidden">
+          <Table>
+            <TableBody><TableSkeleton rows={8} cols={7} /></TableBody>
+          </Table>
+        </Card>
+      ) : groups.length === 0 ? (
+        <Card className="p-8 text-center text-sm text-muted-foreground">
+          No unpaid deposits — the tracker is clear.
+        </Card>
+      ) : (
+        groups.map((g) => (
+          <Card key={g.week_start ?? "no-etd"} className="overflow-hidden">
+            <div className="px-5 py-3 border-b border-border flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-foreground">
+                {g.week_start ? `ETD week ${g.week}` : g.week}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {Object.entries(g.outstanding)
+                  .map(([cur, amt]) => fmtCurrency(amt, cur))
+                  .join(" · ")}
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Request #</TableHead>
+                    <TableHead>Invoice #</TableHead>
+                    <TableHead>Supplier</TableHead>
+                    <TableHead>Tranche</TableHead>
+                    <TableHead className="text-right">Unpaid Amount</TableHead>
+                    <TableHead>Tentative Payment</TableHead>
+                    <TableHead>ETD</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {g.rows.map((row, i) => (
+                    <TableRow key={`${row.request_id}-${row.tranche_label}-${i}`}>
+                      <TableCell className="font-mono text-xs font-semibold whitespace-nowrap">
+                        <Link
+                          href={requestHref(row.request_id)}
+                          className="hover:underline underline-offset-2"
+                        >
+                          {row.request_number}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {row.sunshine_invoice_number || "—"}
+                      </TableCell>
+                      <TableCell className="text-sm">{row.supplier_name}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                        {row.tranche_label}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-semibold">
+                        {fmtCurrency(row.amount, row.currency)}
+                      </TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">
+                        {row.tentative_payment_date ? formatDate(row.tentative_payment_date) : "—"}
+                      </TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">
+                        {row.estimated_etd ? formatDate(row.estimated_etd) : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+        ))
+      )}
+    </div>
+  );
+}
+
+
 // ── Overview tab (original analytics content) ─────────────────────────────────
 
 const GLOSSARY = [
   { term: "Grace ETD", def: "The estimated shipment date plus a configurable grace period (default 7 days). Requests past this date are considered overdue." },
   { term: "ETD Overdue (days)", def: "How many days past the Grace ETD the shipment is. Zero means on time." },
   { term: "Pmt→Ship (days)", def: "Days between the payment being processed and the actual ship date. Lower is better." },
-  { term: "Pmt→Request (days)", def: "Days between the deposit request being submitted and the payment being processed." },
+  { term: "Pmt→Request (days)", def: "Days between the advance payment request being submitted and the payment being processed." },
   { term: "Cost of Fund", def: "The financial cost of the shipment delay, calculated as deposit amount × annual rate × (delay days ÷ 365), where delay days run from the Grace ETD to the actual shipment date (or today while unshipped). Zero if shipped within grace. The rate is configurable by admins." },
   { term: "Default Status", def: "A risk classification: 'critical' = significantly overdue, 'delayed' = moderately overdue, 'on_time' = within grace period." },
 ];
@@ -719,7 +968,7 @@ function OverviewTab({ filters, draftFilters, setDraft, applyFilters, clearFilte
   const { data: monthlyTrends = [], isLoading: trendsLoading } = useMonthlyTrends(trendYear);
   const { data: verticals = [] } = useVerticals();
   const { data: customers = [] } = useCustomers();
-  const { data: users = [] } = useUsers();
+  const { data: users = [] } = useMerchandiserOptions();
   const { data: allRequests = [] } = useRequests();
   const { data: summary, isLoading: summaryLoading } = useAnalyticsSummary(filters);
   const { data: snapshots = [], isLoading: snapshotsLoading } = useAnalyticsSnapshots(filters);
@@ -1107,14 +1356,42 @@ export default function AnalyticsPage() {
       <TopNav title="Analytics" />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-4">
 
-        <div className="flex justify-end">
-          <Button onClick={handleRecalculate} disabled={recalculating} variant="outline" size="sm">
+        {/* Global date filter + Recalculate on their own row — the picker
+            used to sit inside the tab strip and covered the last tabs
+            (Aug 2026 client bug report). */}
+        <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">Period:</span>
+            <input
+              type="date"
+              value={draftFrom}
+              onChange={(e) => setDraftFrom(e.target.value)}
+              className="h-8 rounded border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <span className="text-xs text-muted-foreground">to</span>
+            <input
+              type="date"
+              value={draftTo}
+              min={draftFrom || undefined}
+              onChange={(e) => setDraftTo(e.target.value)}
+              className="h-8 rounded border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <Button size="sm" onClick={applyGlobalDates} className="h-8 text-xs px-2.5">
+              Apply
+            </Button>
+            {(globalFrom || globalTo) && (
+              <Button size="sm" variant="ghost" onClick={clearGlobalDates} className="h-8 w-8 p-0 text-muted-foreground">
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+          <Button onClick={handleRecalculate} disabled={recalculating} variant="outline" size="sm" className="h-8">
             <RefreshCw className={cn("h-4 w-4 mr-2", recalculating && "animate-spin")} />
             Recalculate
           </Button>
         </div>
 
-        {/* Tab strip + global date filter */}
+        {/* Tab strip — full width, never overlapped */}
         {permsLoading ? (
           <div className="flex items-end gap-0.5 border-b border-border overflow-x-auto pb-0">
             {ALL_TABS.map((tab) => (
@@ -1128,48 +1405,20 @@ export default function AnalyticsPage() {
           </div>
         ) : (
           <div className="flex items-end gap-0.5 border-b border-border overflow-x-auto">
-            <div className="flex gap-0.5 flex-1 min-w-0">
-              {visibleTabs.map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                  className={cn(
-                    "px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors border-b-2",
-                    activeTab === tab.key
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            {/* Global date filter */}
-            <div className="flex items-center gap-1.5 shrink-0 pb-1 pr-1 pl-2">
-              <span className="text-xs text-muted-foreground hidden sm:block whitespace-nowrap">Period:</span>
-              <input
-                type="date"
-                value={draftFrom}
-                onChange={(e) => setDraftFrom(e.target.value)}
-                className="h-7 rounded border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-              <span className="text-xs text-muted-foreground">–</span>
-              <input
-                type="date"
-                value={draftTo}
-                min={draftFrom || undefined}
-                onChange={(e) => setDraftTo(e.target.value)}
-                className="h-7 rounded border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-              <Button size="sm" onClick={applyGlobalDates} className="h-7 text-xs px-2.5">
-                Apply
-              </Button>
-              {(globalFrom || globalTo) && (
-                <Button size="sm" variant="ghost" onClick={clearGlobalDates} className="h-7 w-7 p-0 text-muted-foreground">
-                  <X className="h-3 w-3" />
-                </Button>
-              )}
-            </div>
+            {visibleTabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={cn(
+                  "px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors border-b-2",
+                  activeTab === tab.key
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         )}
 
@@ -1190,6 +1439,8 @@ export default function AnalyticsPage() {
         {activeTab === "by_merchandiser" && <ByMerchandiserTab dateFrom={globalFrom} dateTo={globalTo} />}
         {activeTab === "by_vertical" && <ByVerticalTab dateFrom={globalFrom} dateTo={globalTo} />}
         {activeTab === "by_customer" && <ByCustomerTab dateFrom={globalFrom} dateTo={globalTo} />}
+        {activeTab === "outstanding_tracker" && <OutstandingTrackerTab dateFrom={globalFrom} dateTo={globalTo} />}
+        {activeTab === "weekly_tracker" && <WeeklyTrackerTab />}
 
         {/* Fallback: user landed on a tab they can't access */}
         {activeTab !== "overview" && !isSuperAdmin && !permsLoading && permissions &&

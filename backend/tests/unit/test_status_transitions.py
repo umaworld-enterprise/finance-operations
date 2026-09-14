@@ -73,10 +73,34 @@ def test_super_admin_can_do_any_allowed_transition():
     )
 
 
-def test_invalid_transition_raises():
+def test_merchandiser_can_reopen_processed_request():
+    """19 Aug 2026: adding a tranche to a completed file reopens it — the
+    transition is fired by TrancheService.add_tranche."""
+    assert_transition_allowed(
+        RequestStatus.PAYMENT_PROCESSED,
+        RequestStatus.PENDING_PAYMENT,
+        UserRole.MERCHANDISER,
+    )
+    assert_transition_allowed(
+        RequestStatus.PAYMENT_PROCESSED,
+        RequestStatus.PENDING_PAYMENT,
+        UserRole.SUPER_ADMIN,
+    )
+
+
+def test_accounts_cannot_reopen_processed_request():
     with pytest.raises(InvalidStatusTransitionError):
         assert_transition_allowed(
             RequestStatus.PAYMENT_PROCESSED,
+            RequestStatus.PENDING_PAYMENT,
+            UserRole.ACCOUNTS_TEAM,
+        )
+
+
+def test_invalid_transition_raises():
+    with pytest.raises(InvalidStatusTransitionError):
+        assert_transition_allowed(
+            RequestStatus.REJECTED_BY_HOM,
             RequestStatus.PENDING_PAYMENT,
             UserRole.SUPER_ADMIN,
         )

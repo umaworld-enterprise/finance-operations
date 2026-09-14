@@ -13,7 +13,7 @@ import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from "@/components/ui/table";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatDateTime } from "@/lib/utils";
 import { ArrowLeft, Filter, X, Download, Monitor, Globe } from "lucide-react";
 import Link from "next/link";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
@@ -119,7 +119,7 @@ function AuditDetailDialog({
 
         <div className="space-y-4 mt-2">
           {/* Timestamp */}
-          <Row label="Timestamp" value={new Date(log.changed_at).toLocaleString()} />
+          <Row label="Timestamp" value={formatDateTime(log.changed_at)} />
 
           {/* Entity */}
           <Row label="Entity" value={log.entity_name} />
@@ -203,6 +203,20 @@ export default function AuditLogsPage() {
   const totalPages = data ? Math.ceil(data.total / 50) : 1;
   const hasFilters = !!(entity || action || fromDate || toDate);
 
+  // Free-text filter over the loaded page (10 Aug 2026, app-wide table
+  // controls) — the entity/action/date filters above query the server; this
+  // narrows the visible 50 rows further.
+  const [search, setSearch] = useState("");
+  const term = search.trim().toLowerCase();
+  const visibleLogs = (data?.items ?? []).filter(
+    (log) =>
+      !term ||
+      [
+        log.entity_name, log.action, log.field_name, log.old_value,
+        log.new_value, log.changed_by_name, log.changed_by_email, log.ip_address,
+      ].some((v) => v?.toLowerCase().includes(term)),
+  );
+
   function clearFilters() {
     setEntity(""); setAction(""); setFromDate(""); setToDate(""); setPage(1);
   }
@@ -284,16 +298,22 @@ export default function AuditLogsPage() {
             <CardDescription>
               {data?.total ?? "—"} {hasFilters ? "filtered" : "total"} entries · most recent first · click any row for full details
             </CardDescription>
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search this page — entity, field, value, user or IP…"
+              className="mt-2 sm:max-w-md h-9"
+            />
           </CardHeader>
 
           {/* Mobile card view */}
           <div className="md:hidden divide-y divide-border">
             {isLoading ? (
               <div className="p-4 text-sm text-muted-foreground text-center">Loading…</div>
-            ) : (data?.items ?? []).length === 0 ? (
+            ) : visibleLogs.length === 0 ? (
               <div className="p-4 text-sm text-muted-foreground text-center">No entries found.</div>
             ) : (
-              (data?.items ?? []).map(log => (
+              visibleLogs.map(log => (
                 <button
                   key={log.id}
                   type="button"
@@ -343,14 +363,14 @@ export default function AuditLogsPage() {
               <TableBody>
                 {isLoading ? (
                   <TableSkeleton rows={10} cols={8} />
-                ) : (data?.items ?? []).length === 0 ? (
+                ) : visibleLogs.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center text-muted-foreground py-10">
                       No entries found{hasFilters ? " for the current filters" : ""}.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  (data?.items ?? []).map(log => (
+                  visibleLogs.map(log => (
                     <TableRow
                       key={log.id}
                       onClick={() => setSelectedLog(log)}

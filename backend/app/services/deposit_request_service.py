@@ -3,9 +3,10 @@
 from decimal import Decimal
 from uuid import UUID
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AuthorizationError, NotFoundError
+from app.core.exceptions import AuthorizationError, BusinessRuleError, NotFoundError
 from app.domain.rules.lock_rules import assert_record_not_locked
 from app.domain.rules.status_transitions import assert_transition_allowed
 from app.domain.rules.supplier_validation import (
@@ -21,11 +22,31 @@ from app.models.enums import (
     SubmissionSource,
     UserRole,
 )
+from app.models.tranche import PaymentTranche
 from app.models.workflow import AccountsAction, MerchandiserAction, StatusHistory
 from app.repositories.deposit_request_repo import DepositRequestRepository
 from app.repositories.supplier_repo import SupplierRepository
 from app.schemas.deposit_request import ActivityItemResponse, DepositRequestCreate, DepositRequestUpdate
 from app.services.audit_service import AuditService
+
+
+# Requests in these statuses no longer block invoice-number reuse — a
+# cancelled/rejected request's number may legitimately be re-raised.
+_DUPLICATE_EXEMPT_STATUSES = {
+    RequestStatus.CANCELLED_BY_MERCHANDISER,
+    RequestStatus.CANCELLED_BY_ACCOUNTS,
+    RequestStatus.REJECTED_BY_HOM,
+    RequestStatus.REJECTED_BY_ACCOUNTS,
+}
+
+# Terminal statuses on which a merchandiser may no longer edit the request
+# at all (UAT change note Aug 2026, item 18).
+_MERCHANDISER_EDIT_BLOCKED_STATUSES = _DUPLICATE_EXEMPT_STATUSES
+
+_INVOICE_FIELDS = {
+    "sunshine_invoice_number": "Sunshine Invoice No.",
+    "supplier_invoice_number": "Supplier Proforma Invoice No.",
+}
 
 
 class DepositRequestService:
@@ -34,6 +55,51 @@ class DepositRequestService:
         self._repo = DepositRequestRepository(session)
         self._supplier_repo = SupplierRepository(session)
         self._audit = AuditService(session)
+
+    # ── Duplicate invoice validation (Aug 2026 batch, item 1.3) ───────────────
+
+    async def find_invoice_conflict(
+        self, field: str, value: str | None, exclude_request_id: UUID | None = None
+    ) -> DepositRequest | None:
+        """Live request already using this invoice number (case-insensitive,
+        trimmed), or None. Enforced at the service layer, not a DB unique
+        index — legacy data already contains at least one duplicate pair."""
+        if field not in _INVOICE_FIELDS:
+            raise ValueError(f"Not a duplicate-checked field: {field}")
+        if not value or not value.strip():
+            return None
+        column = getattr(DepositRequest, field)
+        stmt = (
+            select(DepositRequest)
+            .where(
+                func.lower(func.trim(column)) == value.strip().lower(),
+                DepositRequest.is_deleted.is_(False),
+                DepositRequest.current_status.notin_(_DUPLICATE_EXEMPT_STATUSES),
+            )
+            .order_by(DepositRequest.created_at)
+            .limit(1)
+        )
+        if exclude_request_id is not None:
+            stmt = stmt.where(DepositRequest.id != exclude_request_id)
+        return (await self._session.execute(stmt)).scalars().first()
+
+    async def _assert_invoice_numbers_unique(
+        self,
+        sunshine_invoice_number: str | None,
+        supplier_invoice_number: str | None,
+        exclude_request_id: UUID | None = None,
+    ) -> None:
+        for field, value in (
+            ("sunshine_invoice_number", sunshine_invoice_number),
+            ("supplier_invoice_number", supplier_invoice_number),
+        ):
+            conflict = await self.find_invoice_conflict(field, value, exclude_request_id)
+            if conflict:
+                raise BusinessRuleError(
+                    f"{_INVOICE_FIELDS[field]} '{value.strip()}' is already used by "
+                    f"request {conflict.request_number}. Duplicate deposit requests "
+                    "are not allowed."
+                )
 
     async def create(
         self,
@@ -62,11 +128,17 @@ class DepositRequestService:
             else RequestStatus.PENDING_PAYMENT
         )
 
+        # 1b. No duplicate deposit requests against the same invoice numbers
+        await self._assert_invoice_numbers_unique(
+            data.sunshine_invoice_number, data.supplier_invoice_number
+        )
+
         # 2. Generate request number
         request_number = await self._repo.generate_request_number()
 
-        # 3. Persist — exclude the override flag field (not a DB column)
-        create_data = data.model_dump(exclude={"override_flagged_supplier"})
+        # 3. Persist — exclude fields that are not DB columns on the request
+        create_data = data.model_dump(exclude={"override_flagged_supplier", "tranches"})
+        self._apply_derived_percentage(data, create_data)
         request = await self._repo.create(
             request_number=request_number,
             submission_source=source,
@@ -74,6 +146,7 @@ class DepositRequestService:
             current_status=initial_status,
             **create_data,
         )
+        self._add_tranches(request, data)
 
         # 4. Write initial status history
         self._session.add(
@@ -123,16 +196,23 @@ class DepositRequestService:
             else RequestStatus.PENDING_PAYMENT
         )
 
+        await self._assert_invoice_numbers_unique(
+            data.sunshine_invoice_number, data.supplier_invoice_number
+        )
+
         request_number = await self._repo.generate_request_number()
 
+        create_data = data.model_dump(exclude={"override_flagged_supplier", "tranches"})
+        self._apply_derived_percentage(data, create_data)
         request = await self._repo.create(
             request_number=request_number,
             submission_source=SubmissionSource.PUBLIC_FORM,
             created_by=created_by,
             submitter_email=submitter_email,
             current_status=initial_status,
-            **data.model_dump(exclude={"override_flagged_supplier"}),
+            **create_data,
         )
+        self._add_tranches(request, data)
 
         self._session.add(
             StatusHistory(
@@ -145,6 +225,57 @@ class DepositRequestService:
         loaded = await self._repo.get_with_core_relations(request.id)
         return loaded  # type: ignore[return-value]
 
+    @staticmethod
+    def _apply_derived_percentage(data: DepositRequestCreate, create_data: dict) -> None:
+        """When tranches drive the deposit amount, the request-level deposit
+        percentage is system-calculated (sum of tranches / invoice total)."""
+        if data.tranches and data.total_supplier_invoice_amount:
+            create_data["deposit_percentage"] = round(
+                Decimal(str(create_data["deposit_amount"]))
+                / Decimal(str(data.total_supplier_invoice_amount))
+                * 100,
+                2,
+            )
+
+    def _add_tranches(self, request: DepositRequest, data: DepositRequestCreate) -> None:
+        """Create the request's Advance Payment Tranches.
+
+        Submissions without explicit tranches (public form, legacy API
+        callers) get a single compatibility tranche covering the full deposit
+        amount, flagged is_legacy since it carries no tentative payment date.
+        """
+        from datetime import datetime, timezone
+
+        if data.tranches:
+            for i, t in enumerate(data.tranches, start=1):
+                self._session.add(
+                    PaymentTranche(
+                        deposit_request_id=request.id,
+                        tranche_number=i,
+                        amount=t.amount,
+                        tentative_payment_date=t.tentative_payment_date,
+                        # Priority of Tranche Payment (5 Sep 2026) — badge only.
+                        priority=t.priority,
+                        # Release gate (19 Aug 2026): tranche 1 is payable
+                        # immediately; tranche 2 onwards stays "Yet to be
+                        # Released" until the merchandiser releases it.
+                        released_at=(datetime.now(timezone.utc) if i == 1 else None),
+                        released_by=(request.created_by if i == 1 else None),
+                    )
+                )
+        else:
+            self._session.add(
+                PaymentTranche(
+                    deposit_request_id=request.id,
+                    tranche_number=1,
+                    amount=request.deposit_amount,
+                    tentative_payment_date=None,
+                    is_legacy=True,
+                    released_at=datetime.now(timezone.utc),
+                    released_by=request.created_by,
+                )
+            )
+
     async def update_remarks(
         self,
         request_id: UUID,
@@ -152,10 +283,19 @@ class DepositRequestService:
         role: UserRole,
         remarks: str | None,
     ) -> DepositRequest:
-        """Merchandiser adds/updates remarks on their own request. Super Admin can do any."""
+        """Any merchandiser adds/updates remarks on any request (ownership
+        guard removed 11 Sep 2026, executive request). Super Admin can do any."""
         request = await self._get_scalar_or_404(request_id)
-        if role == UserRole.MERCHANDISER and request.created_by != user_id:
-            raise AuthorizationError("You can only add remarks to your own requests.")
+        # Rejected/cancelled requests are closed to the merchandiser entirely
+        # (UAT Aug 2026, item 18) — remarks included.
+        if (
+            role == UserRole.MERCHANDISER
+            and request.current_status in _MERCHANDISER_EDIT_BLOCKED_STATUSES
+        ):
+            raise BusinessRuleError(
+                "This request can no longer be edited "
+                f"(current status: {request.current_status.value})."
+            )
         await self._repo.update(request, remarks=remarks)
         loaded = await self._repo.get_with_core_relations(request_id)
         return loaded  # type: ignore[return-value]
@@ -170,12 +310,87 @@ class DepositRequestService:
         user_agent: str | None = None,
     ) -> DepositRequest:
         request = await self._get_scalar_or_404(request_id)
-        assert_record_not_locked(request.is_locked, role)
 
-        if role == UserRole.MERCHANDISER and request.created_by != user_id:
-            raise AuthorizationError("You can only edit your own requests.")
+        # Invoice-number corrections by Accounts / Super Admin bypass the
+        # completion lock AND terminal-status freezes (9 Sep 2026 client
+        # decision): a wrong Sunshine / proforma number must be fixable on
+        # closed requests too — every change is audited old → new, and the
+        # cross-request uniqueness check below still applies.
+        _changed_fields = set(data.model_dump(exclude_unset=True))
+        invoice_numbers_only = _changed_fields and _changed_fields <= {
+            "sunshine_invoice_number",
+            "supplier_invoice_number",
+        }
+        if not (
+            invoice_numbers_only
+            and role in {UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN}
+        ):
+            assert_record_not_locked(request.is_locked, role)
+
+        # Ownership guard removed 11 Sep 2026 (executive request): every
+        # merchandiser has full rights on every request.
+        # Once a request is rejected or cancelled, the merchandiser can no
+        # longer change anything on it (UAT Aug 2026, item 18).
+        if (
+            role == UserRole.MERCHANDISER
+            and request.current_status in _MERCHANDISER_EDIT_BLOCKED_STATUSES
+        ):
+            raise BusinessRuleError(
+                "This request can no longer be edited "
+                f"(current status: {request.current_status.value})."
+            )
+        # Merchandiser form editing (2 Sep 2026; any merchandiser since
+        # 11 Sep 2026): the form fields can be edited while the request is
+        # still pending (HoM approval or the
+        # payment queue) AND Accounts have not acted on it in any way — no
+        # request-wide write and no tranche paid / TT'd / detailed. Super
+        # admin keeps the pre-existing broader rights.
+        if role == UserRole.MERCHANDISER:
+            from app.models.enums import TrancheStatus
+            from app.services.tranche_service import (
+                _MERCHANDISER_EDITABLE_STATUSES,
+                TrancheService,
+            )
+
+            if request.current_status not in _MERCHANDISER_EDITABLE_STATUSES:
+                raise BusinessRuleError(
+                    "The form can only be edited while the request is still "
+                    f"pending (current status: {request.current_status.value})."
+                )
+            svc_t = TrancheService(self._session)
+            reason = await svc_t.accounts_touched_reason(request_id)
+            if reason is None:
+                live = [
+                    t
+                    for t in await svc_t.list_for_request(request_id)
+                    if t.status != TrancheStatus.REJECTED
+                ]
+                if any(
+                    t.status == TrancheStatus.PAID
+                    or t.tt_copy_url
+                    or t.payment_date
+                    or t.bank
+                    or t.payment_reference_number
+                    or t.accounts_remarks
+                    for t in live
+                ):
+                    reason = "the Accounts team has started processing a tranche"
+            if reason:
+                raise BusinessRuleError(
+                    f"The form can no longer be edited — {reason}."
+                )
 
         changes = data.model_dump(exclude_unset=True)
+
+        # Invoice numbers must stay unique across live requests when edited
+        # (super-admin invoice editor, generic PATCH).
+        if "sunshine_invoice_number" in changes or "supplier_invoice_number" in changes:
+            await self._assert_invoice_numbers_unique(
+                changes.get("sunshine_invoice_number"),
+                changes.get("supplier_invoice_number"),
+                exclude_request_id=request.id,
+            )
+
         for field, new_val in changes.items():
             old_val = getattr(request, field, None)
             await self._audit.record_update(
@@ -200,12 +415,56 @@ class DepositRequestService:
     ) -> DepositRequest:
         request = await self._get_scalar_or_404(request_id)
 
-        # Merchandiser can only act on own records
-        if role == UserRole.MERCHANDISER and request.created_by != user_id:
-            raise AuthorizationError("You can only change status of your own requests.")
+        # Ownership guard removed 11 Sep 2026 (executive request): every
+        # merchandiser may hold / resume / cancel any request.
 
         assert_transition_allowed(request.current_status, target, role)
         assert_record_not_locked(request.is_locked, role)
+
+        # Tranche-derived guards (19 Aug 2026):
+        # 1. Once ANY tranche is paid, whole-request Hold/Reject would record
+        #    wrong information (money already left) — act per tranche instead.
+        # 2. A file carrying a rejected tranche plus unpaid tranche(s) cannot
+        #    be closed by the merchandiser in one click — the unpaid
+        #    tranche(s) must be deleted explicitly first, so nothing is
+        #    closed silently.
+        _GUARDED = {
+            RequestStatus.HOLD_BY_ACCOUNTS,
+            RequestStatus.REJECTED_BY_ACCOUNTS,
+            RequestStatus.CANCELLED_BY_MERCHANDISER,
+        }
+        if target in _GUARDED:
+            from app.models.enums import TrancheStatus
+            from app.models.tranche import PaymentTranche
+
+            result = await self._session.execute(
+                select(PaymentTranche).where(
+                    PaymentTranche.deposit_request_id == request.id
+                )
+            )
+            tranches = list(result.scalars().all())
+            has_paid = any(t.status == TrancheStatus.PAID for t in tranches)
+            has_unpaid = any(t.status == TrancheStatus.UNPAID for t in tranches)
+            has_rejected = any(t.status == TrancheStatus.REJECTED for t in tranches)
+            if (
+                target in (RequestStatus.HOLD_BY_ACCOUNTS, RequestStatus.REJECTED_BY_ACCOUNTS)
+                and has_paid
+            ):
+                raise BusinessRuleError(
+                    "A tranche on this request has already been paid — the whole "
+                    "request can no longer be placed on hold or rejected. Act on "
+                    "the remaining tranches individually instead."
+                )
+            if (
+                target == RequestStatus.CANCELLED_BY_MERCHANDISER
+                and has_rejected
+                and has_unpaid
+            ):
+                raise BusinessRuleError(
+                    "This request has a rejected tranche and unpaid tranche(s). "
+                    "Delete the unpaid tranche(s) first — then the file can be "
+                    "closed."
+                )
 
         old_status = request.current_status
         request = await self._repo.update(request, current_status=target)
@@ -237,6 +496,7 @@ class DepositRequestService:
                 RequestStatus.HOLD_BY_ACCOUNTS: AccountsActionType.HOLD,
                 RequestStatus.CANCELLED_BY_ACCOUNTS: AccountsActionType.CANCEL,
                 RequestStatus.REOPENED: AccountsActionType.REOPEN,
+                RequestStatus.REJECTED_BY_ACCOUNTS: AccountsActionType.REJECT,
             }
             if target in action_map_acc:
                 self._session.add(
@@ -295,6 +555,87 @@ class DepositRequestService:
 
     async def get_pending_payment_queue(self, created_by: UUID | None = None) -> list[DepositRequest]:
         return await self._repo.get_pending_payment_queue(created_by=created_by)
+
+    async def get_last_status_actors(self, request_ids: list[UUID]) -> dict[UUID, str]:
+        """Full name of the user who made each request's most recent status
+        change — lets the queue say WHO held/cancelled/rejected, not just
+        which side (UAT Aug 2026, item 6). One batch query."""
+        if not request_ids:
+            return {}
+        from sqlalchemy import and_
+        from sqlalchemy import func as sa_func
+
+        from app.models.masters import User as UserModel
+        from app.models.workflow import StatusHistory
+
+        latest = (
+            select(
+                StatusHistory.deposit_request_id,
+                sa_func.max(StatusHistory.changed_at).label("last_at"),
+            )
+            .where(StatusHistory.deposit_request_id.in_(request_ids))
+            .group_by(StatusHistory.deposit_request_id)
+            .subquery()
+        )
+        stmt = (
+            select(StatusHistory.deposit_request_id, UserModel.full_name)
+            .join(
+                latest,
+                and_(
+                    StatusHistory.deposit_request_id == latest.c.deposit_request_id,
+                    StatusHistory.changed_at == latest.c.last_at,
+                ),
+            )
+            .join(UserModel, StatusHistory.changed_by == UserModel.id)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {request_id: full_name for request_id, full_name in rows}
+
+    async def get_queue_kpis(self) -> dict:
+        """Financial-year-to-date counts for the payment-queue KPI cards
+        (UAT Aug 2026, items 5/17/19). Every bucket counts requests CREATED
+        between 1 April (India FY) and now, grouped by current status."""
+        from datetime import datetime, timezone
+
+        from sqlalchemy import func as sa_func
+
+        now = datetime.now(timezone.utc)
+        fy_start_year = now.year if now.month >= 4 else now.year - 1
+        fy_start = datetime(fy_start_year, 4, 1, tzinfo=timezone.utc)
+
+        stmt = (
+            select(DepositRequest.current_status, sa_func.count())
+            .where(
+                DepositRequest.is_deleted.is_(False),
+                DepositRequest.created_at >= fy_start,
+            )
+            .group_by(DepositRequest.current_status)
+        )
+        counts: dict[RequestStatus, int] = {
+            status: n for status, n in (await self._session.execute(stmt)).all()
+        }
+
+        def bucket(*statuses: RequestStatus) -> int:
+            return sum(counts.get(s, 0) for s in statuses)
+
+        return {
+            "fy_start": fy_start.date().isoformat(),
+            "fy_label": f"FY {fy_start_year}–{(fy_start_year + 1) % 100:02d}",
+            "pending_payment": bucket(RequestStatus.PENDING_PAYMENT),
+            "awaiting_hom": bucket(RequestStatus.PENDING_HOM_APPROVAL),
+            "on_hold": bucket(
+                RequestStatus.HOLD_BY_MERCHANDISER, RequestStatus.HOLD_BY_ACCOUNTS
+            ),
+            "processed": bucket(RequestStatus.PAYMENT_PROCESSED),
+            "rejected": bucket(
+                RequestStatus.REJECTED_BY_ACCOUNTS, RequestStatus.REJECTED_BY_HOM
+            ),
+            "cancelled": bucket(
+                RequestStatus.CANCELLED_BY_MERCHANDISER,
+                RequestStatus.CANCELLED_BY_ACCOUNTS,
+            ),
+            "total": sum(counts.values()),
+        }
 
     async def get_my_activity(self, user_id: UUID, limit: int = 50) -> list[ActivityItemResponse]:
         from sqlalchemy import desc, select

@@ -16,10 +16,25 @@ export type RequestStatus =
   | "cancelled_by_accounts"
   | "reopened"
   | "pending_hom_approval"
-  | "rejected_by_hom";
+  | "rejected_by_hom"
+  | "rejected_by_accounts";
 
 export type CurrencyCode =
   | "USD" | "EUR" | "GBP" | "AED" | "INR" | "CNY" | "JPY" | "SGD" | "OTHER";
+
+// FY-to-date (April–March) payment-queue KPI counts
+// (UAT Aug 2026, items 5/17/19).
+export interface QueueKpis {
+  fy_start: string;
+  fy_label: string;
+  pending_payment: number;
+  awaiting_hom: number;
+  on_hold: number;
+  processed: number;
+  rejected: number;
+  cancelled: number;
+  total: number;
+}
 
 export type SubmissionSource = "google_form" | "google_sheet_sync" | "in_app";
 
@@ -37,6 +52,9 @@ export interface Vertical {
   name: string;
   is_active: boolean;
   created_at: string;
+  /** Projections module (4 Sep 2026): the single user this vertical is
+   * assigned to, if any. */
+  assigned_user_id?: string | null;
 }
 
 export interface Customer {
@@ -67,6 +85,79 @@ export interface DefaultedSupplier {
   resolved_date: string | null;
 }
 
+// Whole live supplier exposure (UAT Aug 2026, item 2) — open requests split
+// by whether the graced ETD has already passed.
+export interface SupplierExposureRow {
+  request_id: string;
+  request_number: string;
+  sunshine_invoice_number: string | null;
+  deposit_amount: number;
+  currency: string | null;
+  current_status: RequestStatus;
+  grace_etd: string | null;
+  etd_grace_overdue_days: number | null;
+  /** Payment date beside every paid amount + request date (2 Sep 2026). */
+  payment_date: string | null;
+  request_date: string | null;
+}
+
+export interface SupplierExposure {
+  supplier_id: string;
+  graced_etd_passed: SupplierExposureRow[];
+  graced_etd_pending: SupplierExposureRow[];
+  totals_by_currency: Record<string, number>;
+}
+
+// ── Banking module (Aug 2026) — uploaded statements + AI-extracted rows ──────
+
+export type BankStatementStatus = "processing" | "extracted" | "failed";
+
+export interface BankTransaction {
+  id: string;
+  txn_date: string | null;
+  category: string | null;
+  reference: string | null;
+  detail: string | null;
+  debit: number | null;
+  credit: number | null;
+}
+
+export interface BankDailyBalance {
+  balance_date: string;
+  closing_balance: number;
+}
+
+export interface BankStatement {
+  id: string;
+  bank_name: string;
+  account_number: string | null;
+  account_title: string | null;
+  currency: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  beginning_balance: number | null;
+  ending_balance: number | null;
+  page_count: number;
+  original_filename: string;
+  status: BankStatementStatus;
+  extraction_note: string | null;
+  created_at: string;
+}
+
+export interface BankStatementDetail extends BankStatement {
+  transactions: BankTransaction[];
+  daily_balances: BankDailyBalance[];
+}
+
+// Bank master (Aug 2026) — names only; the tranche form composes the stored
+// value as "{name} ({currency})" from the request's currency.
+export interface Bank {
+  id: string;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+}
+
 export interface SupplierDefaultStatus {
   supplier_id?: string;
   is_defaulted: boolean;
@@ -91,6 +182,145 @@ export interface AppUser {
 
 export type FontSize = "default" | "large" | "xlarge";
 
+// ── Advance Payment Tranches ───────────────────────────────────────────────────
+
+export type TrancheStatus = "unpaid" | "paid" | "rejected";
+
+export interface PaymentTranche {
+  id: string;
+  deposit_request_id: string;
+  tranche_number: number;
+  label: string;
+  amount: number;
+  tentative_payment_date: string | null;
+  /** amount / total supplier proforma invoice amount — system-calculated, read-only. */
+  percentage_of_invoice: number | null;
+  status: TrancheStatus;
+  paid_at: string | null;
+  paid_by: string | null;
+  tt_copy_url: string | null;
+  tt_copy_file_id: string | null;
+  tt_copy_filename: string | null;
+  /** Per-tranche payment details — payment date, bank and accounts remarks
+   * are required before the tranche can be marked paid; reference number is
+   * optional. */
+  payment_date: string | null;
+  bank: string | null;
+  payment_reference_number: string | null;
+  accounts_remarks: string | null;
+  /** Optional secondary currency + amount (4 Sep 2026) — Accounts-entered
+   * alongside the payment details; informational only. */
+  secondary_currency: string | null;
+  secondary_amount: number | null;
+  /** Priority of Tranche Payment (5 Sep 2026) — badge-only in the queues. */
+  priority: "normal" | "high";
+  /** Set when Accounts rejected the tranche (Aug 2026) — the tranche stays
+   * visible as a dead record and its amount stops counting. */
+  rejection_reason: string | null;
+  rejected_at: string | null;
+  /** Release gate (19 Aug 2026): NULL on an unpaid tranche 2+ means "Yet to
+   * be Released" — Accounts cannot pay it until the merchandiser releases. */
+  released_at: string | null;
+  is_legacy: boolean;
+  created_at: string;
+  updated_at: string;
+  adjusted_out_total: number | null;
+  available_paid_balance: number | null;
+  adjusted_in_total: number | null;
+  request_number: string | null;
+  request_currency: string | null;
+  supplier_invoice_number: string | null;
+  sunshine_invoice_number: string | null;
+}
+
+export type AdjustmentStatus = "completed" | "pending_approval" | "rejected";
+
+export interface InvoiceAdjustment {
+  id: string;
+  source_tranche_id: string;
+  destination_tranche_id: string;
+  amount: number;
+  reason: string | null;
+  status: AdjustmentStatus;
+  performed_by: string;
+  created_at: string;
+  performed_by_name: string | null;
+  source_request_id: string | null;
+  source_request_number: string | null;
+  source_tranche_label: string | null;
+  destination_request_id: string | null;
+  destination_request_number: string | null;
+  destination_tranche_label: string | null;
+  supplier_name: string | null;
+}
+
+// File Remarks module (CIO batch 2, Aug 2026; reworked 4 Aug) — tracked
+// merchandiser → Accounts communication on a payment-completed file;
+// bypasses Adjust Invoices for now.
+// "invoice_amount_change" is displayed as "File Change" (4 Sep 2026 rename);
+// "invoice_value_change" (4 Sep 2026) revises a file's AMOUNT — proposed by
+// the merchandiser, applied by Accounts after approval.
+export type FileRemarkCategory =
+  | "invoice_split"
+  | "invoice_amount_change"
+  | "invoice_value_change";
+// "resolved" is legacy (pre-decision rows); new decisions are
+// approved/rejected (UAT Aug 2026, item 14).
+export type FileRemarkStatus = "open" | "approved" | "rejected" | "resolved";
+
+export interface SplitTarget {
+  file_number: string;
+  amount: number;
+}
+
+export interface FileRemark {
+  id: string;
+  deposit_request_id: string;
+  category: FileRemarkCategory;
+  old_file_number: string | null;
+  old_amount: number | null;
+  new_file_number: string | null;
+  new_amount: number | null;
+  /** Invoice Value Change: the merchandiser's proposed figure — the final
+   * revised amount lands in new_amount when Accounts apply it. */
+  proposed_amount: number | null;
+  split_targets: SplitTarget[] | null;
+  remark: string | null;
+  status: FileRemarkStatus;
+  created_by: string;
+  created_at: string;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  response_note: string | null;
+  request_number: string | null;
+  /** The parent file's current sunshine invoice number — preferred for the
+   * "From {parent}" display. */
+  sunshine_invoice_number: string | null;
+  supplier_name: string | null;
+  /** The request's currency — shown alongside every amount (19 Aug 2026). */
+  currency: string | null;
+  created_by_name: string | null;
+  resolved_by_name: string | null;
+}
+
+export interface SupplierTrancheOptions {
+  paid_sources: PaymentTranche[];
+  unpaid_destinations: PaymentTranche[];
+}
+
+export interface RequestAuditEntry {
+  id: string;
+  entity_name: string;
+  entity_id: string;
+  field_name: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  action: string;
+  changed_by_name: string | null;
+  changed_by_email: string | null;
+  changed_at: string;
+}
+
 // ── Deposit Request ────────────────────────────────────────────────────────────
 
 export interface DepositRequest {
@@ -106,7 +336,6 @@ export interface DepositRequest {
   deposit_amount: number;
   deposit_percentage: number | null;
   total_supplier_invoice_amount: number;
-  estimated_shipment_date: string | null;
   estimated_etd: string | null;
   payment_terms: string | null;
   remarks: string | null;
@@ -117,6 +346,25 @@ export interface DepositRequest {
   creator: AppUser | null;
   created_at: string;
   updated_at: string;
+  tranches: PaymentTranche[];
+  /** Who performed the most recent status change — names the holder /
+   * canceller / rejecter (UAT Aug 2026, item 6). */
+  last_status_change_by?: string | null;
+}
+
+/** One "Yet to be Released" tranche row (19 Aug 2026) — drives the
+ * merchandiser tile and the Accounts Workspace tile + tab. */
+export interface PendingReleaseRow {
+  request_id: string;
+  request_number: string;
+  sunshine_invoice_number: string | null;
+  supplier_name: string;
+  merchandiser_name: string | null;
+  currency: string | null;
+  tranche_id: string;
+  tranche_label: string;
+  amount: number;
+  tentative_payment_date: string | null;
 }
 
 export interface DepositRequestDetail extends DepositRequest {

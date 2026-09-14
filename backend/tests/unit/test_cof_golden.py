@@ -6,11 +6,12 @@ The sheet computes AF = deposit × 12% × ((ship or TODAY) − Est ETD) / 365,
 signed, with TODAY frozen at 2026-07-10 in the cached snapshot.
 
 Our engine must reproduce the sheet's AE (Actual ETD Overdue Days) column
-exactly, and the AF (Cost of Fund) column with ONE deliberate divergence
-confirmed by the client on 2026-07-10: rows shipped within the 10-day
-grace window are charged in the sheet but must be ZERO in our system
-(the charge only starts once grace is exceeded, then counts retroactively
-from Est ETD). Early shipments keep the sheet's negative notional gain.
+AND the AF (Cost of Fund) column exactly. The 10 Jul divergence (zero for
+rows shipped within grace) was REMOVED by the client's final formulas of
+2 Sep 2026: AF = IF(AND(paid, TODAY() > Grace ETD), deposit × 12%/365 × AE)
+— so shipped-within-grace rows carry their small charge and early shipments
+their negative notional gain, once TODAY has crossed the Grace ETD (true
+for every cached row at the frozen sheet date).
 """
 
 from datetime import date
@@ -30,10 +31,10 @@ GOLDEN_ROWS = [
     ("4742.4", date(2025, 12, 31), date(2025, 12, 16), date(2026, 2, 23), 54, "84.19"),
     ("6164.0", date(2026, 1, 16), date(2026, 1, 5), date(2026, 2, 25), 40, "81.06"),
     ("49059.0", date(2026, 1, 16), date(2026, 1, 5), date(2026, 2, 8), 23, "370.97"),
-    # shipped late but WITHIN the 10-day grace → 0 per client rule 2026-07-10
-    # (the sheet itself shows 27.70 / 13.85 here — deliberate divergence)
-    ("8424.0", date(2026, 1, 15), date(2025, 12, 12), date(2026, 1, 25), 10, "0.00"),
-    ("8424.0", date(2026, 1, 30), date(2025, 12, 12), date(2026, 2, 4), 5, "0.00"),
+    # shipped late but WITHIN the 10-day grace → the sheet's own values apply
+    # since the 2 Sep 2026 final formulas (the 10 Jul zero-divergence is gone)
+    ("8424.0", date(2026, 1, 15), date(2025, 12, 12), date(2026, 1, 25), 10, "27.70"),
+    ("8424.0", date(2026, 1, 30), date(2025, 12, 12), date(2026, 2, 4), 5, "13.85"),
     # shipped early (negative CoF = notional gain)
     ("5832.0", date(2026, 1, 15), date(2025, 12, 12), date(2025, 12, 23), -23, "-44.10"),
     ("10272.80", date(2026, 1, 31), date(2025, 12, 16), date(2025, 12, 23), -39, "-131.72"),

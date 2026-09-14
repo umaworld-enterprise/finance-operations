@@ -36,6 +36,12 @@ class RequestStatus(str, enum.Enum):
     REOPENED = "reopened"
     PENDING_HOM_APPROVAL = "pending_hom_approval"
     REJECTED_BY_HOM = "rejected_by_hom"
+    # Terminal rejection of the whole request by Accounts with a mandatory
+    # reason (UAT change note Aug 2026, items 12/17/18): locks all
+    # merchandiser editing, frees the invoice numbers for reuse, and
+    # notifies both the merchandiser and HoM. Distinct from tranche-level
+    # rejection, which keeps the request live for replacement tranches.
+    REJECTED_BY_ACCOUNTS = "rejected_by_accounts"
 
 
 class CurrencyCode(str, enum.Enum):
@@ -74,12 +80,36 @@ class AccountsActionType(str, enum.Enum):
     HOLD = "hold"
     CANCEL = "cancel"
     REOPEN = "reopen"
+    REJECT = "reject"
 
 
 class PaymentStatus(str, enum.Enum):
     PROCESSED = "processed"
     REJECTED = "rejected"
     HOLD = "hold"
+
+
+class TrancheStatus(str, enum.Enum):
+    UNPAID = "unpaid"
+    PAID = "paid"
+    # Rejected by Accounts with a mandatory reason (Aug 2026): kept visible
+    # for record-keeping but excluded from totals/ceilings — the merchandiser
+    # adds replacement tranches until the sum matches again.
+    REJECTED = "rejected"
+
+
+class AdjustmentStatus(str, enum.Enum):
+    """Invoice adjustment lifecycle.
+
+    Approval requirements for invoice adjustments are still an open business
+    decision — adjustments are created directly as COMPLETED today, but the
+    enum carries the approval states so a review workflow can be added
+    without a schema change.
+    """
+
+    COMPLETED = "completed"
+    PENDING_APPROVAL = "pending_approval"
+    REJECTED = "rejected"
 
 
 class AuditAction(str, enum.Enum):

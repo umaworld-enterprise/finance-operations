@@ -10,12 +10,16 @@ import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   BarChart3,
+  Boxes,
   BrainCircuit,
   ClipboardList,
   CreditCard,
   FileText,
+  Landmark,
   LayoutDashboard,
+  LineChart,
   LogOut,
+  MessageSquarePlus,
   ScrollText,
   Settings,
   ShieldAlert,
@@ -30,18 +34,31 @@ interface NavItem {
   icon: React.ElementType;
   roles: UserRole[];
   group: "main" | "admin";
+  /** Module sub-header the item renders under (main group only). */
+  module?: "advance-payment" | "banking";
 }
 
+// Order fixes the left-panel chronology for every role (UAT change note,
+// Aug 2026 item 16): the role's own dashboard first, then File Remarks,
+// Analytics, Reports, Settings. Adjust Invoices is hidden from the UI for
+// now (item 15) — the backend module stays intact pending further discussion.
 const NAV_ITEMS: NavItem[] = [
   { href: "/admin",         label: "Admin Overview", icon: LayoutDashboard, roles: ["super_admin"],                                                                      group: "main"  },
-  { href: "/accounts",      label: "Payment Queue",  icon: CreditCard,      roles: ["accounts_team", "super_admin"],                                                     group: "main"  },
-  { href: "/merchandiser",  label: "My Requests",    icon: ClipboardList,   roles: ["merchandiser"],                                                                     group: "main"  },
-  { href: "/hom",           label: "HoM Dashboard",  icon: UserCog,         roles: ["head_of_merchandiser", "super_admin"],                                              group: "main"  },
+  { href: "/accounts",      label: "Accounts Workspace", icon: CreditCard,  roles: ["accounts_team", "super_admin"],                                                     group: "main"  },
+  { href: "/merchandiser",  label: "Requests",       icon: ClipboardList,   roles: ["merchandiser"],                                                                     group: "main"  },
+  { href: "/hom",           label: "HoM Workspace",  icon: UserCog,         roles: ["head_of_merchandiser", "super_admin"],                                              group: "main"  },
   { href: "/finance",       label: "Supplier Risk",  icon: ShieldAlert,     roles: ["finance_admin", "super_admin"],                                                     group: "main"  },
+  // "File Remarks" renamed "Modify Request" (4 Sep 2026) — route unchanged.
+  { href: "/file-remarks",  label: "Modify Request", icon: MessageSquarePlus, roles: ["merchandiser", "accounts_team", "super_admin", "finance_admin"],                     group: "main"  },
   { href: "/analytics",     label: "Analytics",      icon: BarChart3,       roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
+  // Projections module (4 Sep 2026) — monthly per-vertical projections.
+  { href: "/projections",   label: "Projections",    icon: LineChart,       roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
   { href: "/reports",       label: "Reports",        icon: FileText,        roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
   { href: "/settings",      label: "Settings",       icon: Settings,        roles: ["super_admin", "finance_admin", "accounts_team", "merchandiser", "head_of_merchandiser"], group: "main" },
+  // Banking module (Aug 2026) — super admin and accounts team.
+  { href: "/bank",          label: "Bank Statements", icon: Landmark,       roles: ["super_admin", "accounts_team"],                                                     group: "main", module: "banking" },
   { href: "/admin/users",   label: "Users",          icon: Users,           roles: ["super_admin"],                                                                      group: "admin" },
+  { href: "/admin/masters", label: "Masters",        icon: Boxes,           roles: ["super_admin", "finance_admin"],                                                     group: "admin" },
   { href: "/admin/audit",   label: "Audit Logs",     icon: ScrollText,      roles: ["super_admin", "finance_admin"],                                                     group: "admin" },
   { href: "/admin/ai",      label: "AI Settings",    icon: BrainCircuit,    roles: ["super_admin"],                                                                      group: "admin" },
 ];
@@ -80,6 +97,8 @@ export function Sidebar() {
   );
 
   const mainItems  = visibleItems.filter((i) => i.group === "main");
+  const advanceItems = mainItems.filter((i) => (i.module ?? "advance-payment") === "advance-payment");
+  const bankingItems = mainItems.filter((i) => i.module === "banking");
   const adminItems = visibleItems.filter((i) => i.group === "admin");
 
   const bestMatch = visibleItems
@@ -157,7 +176,25 @@ export function Sidebar() {
               <p className="px-3 mb-2 text-[10px] font-semibold tracking-wide text-blue-200/40 uppercase">
                 Menu
               </p>
-              {renderItems(mainItems)}
+              {/* Module sub-headers (11/12 Aug 2026): items group by module —
+                  Advance Payment first, Banking below; future modules (e.g.
+                  Logistics) get their own block alongside. */}
+              {advanceItems.length > 0 && (
+                <>
+                  <p className="px-3 pb-1.5 text-[11px] font-bold tracking-wider text-blue-100/70 uppercase">
+                    Advance Payment
+                  </p>
+                  {renderItems(advanceItems)}
+                </>
+              )}
+              {bankingItems.length > 0 && (
+                <>
+                  <p className="px-3 pt-4 pb-1.5 text-[11px] font-bold tracking-wider text-blue-100/70 uppercase">
+                    Banking
+                  </p>
+                  {renderItems(bankingItems)}
+                </>
+              )}
             </div>
           )}
 
@@ -168,6 +205,22 @@ export function Sidebar() {
                 Admin
               </p>
               {renderItems(adminItems)}
+            </div>
+          )}
+
+          {/* Logout lives at the END of the menu (2 Sep 2026) — moved out of
+              the fixed footer so it scrolls with the navigation. */}
+          {user && (
+            <div className="mt-6 space-y-0.5">
+              <div className="border-t border-white/10 mb-4" />
+              <button
+                type="button"
+                onClick={signOut}
+                className="group flex w-full items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all text-blue-200/60 hover:bg-white/8 hover:text-white touch-manipulation"
+              >
+                <LogOut className="h-4 w-4 shrink-0 text-blue-200/50 group-hover:text-white transition-colors" />
+                Logout
+              </button>
             </div>
           )}
         </nav>
@@ -189,14 +242,6 @@ export function Sidebar() {
                   {user.role.replace(/_/g, " ")}
                 </p>
               </div>
-              <button
-                onClick={signOut}
-                aria-label="Sign out"
-                title="Sign out"
-                className="p-1.5 rounded-lg text-blue-200/50 hover:text-white hover:bg-white/10 transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-              </button>
             </div>
           </div>
         )}

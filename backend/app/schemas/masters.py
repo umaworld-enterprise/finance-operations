@@ -28,6 +28,24 @@ class PaymentTermResponse(OrmBase):
     sort_order: int
 
 
+# ── Bank master (Aug 2026) ────────────────────────────────────────────────────
+
+class BankCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    sort_order: int = 0
+
+class BankUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=200)
+    is_active: bool | None = None
+    sort_order: int | None = None
+
+class BankResponse(OrmBase):
+    id: UUID
+    name: str
+    is_active: bool
+    sort_order: int
+
+
 # ── Vertical ─────────────────────────────────────────────────────────────────
 
 class VerticalCreate(BaseModel):
@@ -42,6 +60,9 @@ class VerticalResponse(OrmBase):
     name: str
     is_active: bool
     created_at: datetime
+    # Projections module (4 Sep 2026): the single user this vertical is
+    # assigned to, if any.
+    assigned_user_id: UUID | None = None
 
 
 # ── Customer ─────────────────────────────────────────────────────────────────
@@ -117,6 +138,34 @@ class DefaultedSupplierResponse(OrmBase):
             is_active=obj.is_active,
             resolved_date=obj.resolved_date,
         )
+
+
+# ── Supplier exposure (UAT Aug 2026, item 2) ──────────────────────────────────
+
+class SupplierExposureRow(BaseModel):
+    request_id: UUID
+    request_number: str
+    sunshine_invoice_number: str | None = None
+    deposit_amount: Decimal
+    currency: str | None = None
+    current_status: str
+    grace_etd: date | None = None
+    etd_grace_overdue_days: int | None = None
+    # 2 Sep 2026: payment date beside every paid amount; request date on all.
+    payment_date: date | None = None
+    request_date: date | None = None
+
+
+class SupplierExposureResponse(BaseModel):
+    """The supplier's whole live exposure — every open request (not
+    cancelled/rejected, goods not yet shipped), split by whether its graced
+    ETD has already passed. Shown on the Supplier Default History panel so
+    HoM and Accounts decide with the full picture."""
+
+    supplier_id: UUID
+    graced_etd_passed: list[SupplierExposureRow] = []
+    graced_etd_pending: list[SupplierExposureRow] = []
+    totals_by_currency: dict[str, Decimal] = {}
 
 
 # ── Supplier Default Status (for form validation) ─────────────────────────────

@@ -29,18 +29,18 @@ const FIELD_META: { key: string; defaultLabel: string; group: string; core?: boo
   { key: "vertical_id",                    defaultLabel: "Vertical / Category",                      group: "Parties" },
   { key: "sunshine_invoice_number",        defaultLabel: "Sunshine Invoice No.",                     group: "Invoice" },
   { key: "supplier_invoice_number",        defaultLabel: "Supplier Invoice No.",                     group: "Invoice" },
-  { key: "currency",                       defaultLabel: "Currency of Advance Deposit",              group: "Financials" },
+  { key: "currency",                       defaultLabel: "Currency of Advance Payment",              group: "Financials" },
   { key: "total_supplier_invoice_amount",  defaultLabel: "Total Supplier Proforma Invoice Amount",   group: "Financials", core: true },
-  { key: "deposit_percentage",             defaultLabel: "Deposit Advance (%)",                      group: "Financials" },
-  { key: "deposit_amount",                 defaultLabel: "Deposit Amount",                           group: "Financials", core: true },
-  { key: "estimated_shipment_date",        defaultLabel: "Estimated Shipment Date",                  group: "Logistics" },
+  // deposit_percentage / deposit_amount were retired — the public form now
+  // collects Advance Payment Tranches (always shown, % system-calculated).
+  // The estimated-shipment-date field was removed entirely (14 Jul 2026 change note, C5).
   { key: "remarks",                        defaultLabel: "Remarks",                                  group: "Extras" },
 ];
 
 const DEFAULT_CONFIG: FormFields = Object.fromEntries(
   FIELD_META.map(({ key, defaultLabel }) => [
     key,
-    { visible: true, required: ["supplier_id","customer_id","vertical_id","currency","total_supplier_invoice_amount","deposit_percentage","deposit_amount","estimated_shipment_date"].includes(key), label: defaultLabel },
+    { visible: true, required: ["supplier_id","customer_id","vertical_id","currency","total_supplier_invoice_amount"].includes(key), label: defaultLabel },
   ])
 );
 
@@ -106,8 +106,14 @@ export default function FormConfigPage() {
 
   return (
     <RoleGuard allowedRoles={["super_admin"]}>
-      <TopNav title="Public Form Configuration" subtitle="Control which fields appear on the public deposit request form" />
+      <TopNav title="Public Form Configuration" subtitle="Control which fields appear on the public Supplier Advance Payment Request form" />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-5">
+
+        <div className="rounded-lg bg-amber-50 border border-amber-300 text-amber-800 p-3 text-sm">
+          <strong>Deprecated.</strong> The public (login-free) request form was retired in
+          August 2026 — this configuration no longer affects anything. The page is kept
+          for reference only and has been removed from the admin navigation.
+        </div>
 
         <Link
           href="/admin"

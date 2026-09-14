@@ -43,6 +43,28 @@ async def request_report(
     )
 
 
+@router.get("/bank-ledger")
+async def bank_ledger_report(
+    current_user: User,
+    db: DB,
+    fmt: str = Depends(_fmt),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+) -> Response:
+    """Bank Ledger extract (UAT Aug 2026, item 1): Supplier, Supplier
+    Proforma Invoice No., Sunshine Invoice No., Selected Customer, Currency,
+    Deposit Amount — the exact columns used on the bank ledger sheet."""
+    svc = ReportService(db)
+    data, content_type = await svc.bank_ledger_report(
+        current_user.role, current_user.id, fmt, date_from=date_from, date_to=date_to
+    )
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="bank-ledger.{_EXTENSIONS[fmt]}"'},
+    )
+
+
 @router.get("/payments")
 async def payment_report(
     current_user: User,

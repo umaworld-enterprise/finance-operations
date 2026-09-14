@@ -12,7 +12,13 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { useRequest, useRequestAction, useFieldVisibility, useUpdateRemarks, usePayment } from "@/hooks/useRequests";
+import { TrancheList } from "@/components/tranches/TrancheList";
+import { StatusHistoryCard } from "@/components/tranches/StatusHistoryCard";
+import { SupplierDefaultHistory } from "@/components/forms/SupplierDefaultHistory";
+import { EditRequestForm } from "@/components/forms/EditRequestForm";
+import { RequestAuditTrail } from "@/components/tranches/RequestAuditTrail";
+import { RequestAdjustments } from "@/components/tranches/RequestAdjustments";
+import { useRequest, useRequestAction, useFieldVisibility, useUpdateRemarks, usePayment, useTranchesModifiable, useUpdateRequest } from "@/hooks/useRequests";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { ArrowLeft, Lock, FileQuestion, ExternalLink } from "lucide-react";
@@ -22,12 +28,41 @@ export default function MerchandiserRequestDetail() {
   const { id } = useParams<{ id: string }>();
   const { data: req, isLoading } = useRequest(id);
   const { data: payment } = usePayment(id);
+  const { data: modifiable } = useTranchesModifiable(id);
   const { data: fv = {} } = useFieldVisibility();
   const { mutateAsync: performAction, isPending } = useRequestAction();
   const { mutateAsync: saveRemarks, isPending: savingRemarks } = useUpdateRemarks(id);
   const [remarks, setRemarks] = useState("");
   const [cancelConfirm, setCancelConfirm] = useState(false);
   const [merchandiserNote, setMerchandiserNote] = useState("");
+
+  // Editable invoice numbers (Aug 2026 follow-up, item 4) — while the request
+  // is still pending and untouched by Accounts. Duplicates rejected server-side.
+  const { mutateAsync: updateRequest, isPending: savingInvoices } = useUpdateRequest(id);
+  const [sunshineDraft, setSunshineDraft] = useState("");
+  const [supplierInvDraft, setSupplierInvDraft] = useState("");
+  useEffect(() => {
+    setSunshineDraft(req?.sunshine_invoice_number ?? "");
+    setSupplierInvDraft(req?.supplier_invoice_number ?? "");
+  }, [req?.sunshine_invoice_number, req?.supplier_invoice_number]);
+
+  const invoiceChanges: { sunshine_invoice_number?: string; supplier_invoice_number?: string } = {};
+  if (sunshineDraft.trim() && sunshineDraft.trim() !== (req?.sunshine_invoice_number ?? "")) {
+    invoiceChanges.sunshine_invoice_number = sunshineDraft.trim();
+  }
+  if (supplierInvDraft.trim() && supplierInvDraft.trim() !== (req?.supplier_invoice_number ?? "")) {
+    invoiceChanges.supplier_invoice_number = supplierInvDraft.trim();
+  }
+
+  const doSaveInvoiceNumbers = async () => {
+    if (Object.keys(invoiceChanges).length === 0) return;
+    try {
+      await updateRequest(invoiceChanges);
+      toast.success("Invoice numbers updated — the change is recorded in the audit log.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to update invoice numbers.");
+    }
+  };
 
   const snap = req?.analytics_snapshot;
 
@@ -36,6 +71,18 @@ export default function MerchandiserRequestDetail() {
   useEffect(() => {
     if (req?.remarks !== undefined) setMerchandiserNote(req.remarks ?? "");
   }, [req?.id, req?.remarks]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // All requests are visible to every merchandiser WITH FULL RIGHTS
+  // (11 Sep 2026, executive request) — the page behaves the same whether
+  // or not the viewer raised the request.
+
+  // Terminal statuses: the request is closed to the merchandiser entirely
+  // (UAT Aug 2026, item 18) — no edits, not even remarks.
+  const requestClosed =
+    req?.current_status === "rejected_by_accounts" ||
+    req?.current_status === "rejected_by_hom" ||
+    req?.current_status === "cancelled_by_merchandiser" ||
+    req?.current_status === "cancelled_by_accounts";
 
   const canHold =
     req?.current_status === "pending_payment" && !req.is_locked;
@@ -110,7 +157,7 @@ export default function MerchandiserRequestDetail() {
             description="This request may have been deleted or you don't have access to it."
             action={
               <Button asChild variant="outline">
-                <Link href="/merchandiser">Back to my requests</Link>
+                <Link href="/merchandiser">Back to requests</Link>
               </Button>
             }
           />
@@ -134,7 +181,7 @@ export default function MerchandiserRequestDetail() {
           href="/merchandiser"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
         >
-          <ArrowLeft className="h-4 w-4" /> Back to my requests
+          <ArrowLeft className="h-4 w-4" /> Back to requests
         </Link>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -160,9 +207,8 @@ export default function MerchandiserRequestDetail() {
               {fv.total_supplier_invoice_amount !== false && field("Total Invoice Amount", formatCurrency(req.total_supplier_invoice_amount, req.currency))}
               {fv.exchange_rate !== false && req.exchange_rate != null && field("Exchange Rate", req.exchange_rate)}
               {field("Sunshine Invoice #", req.sunshine_invoice_number)}
-              {field("Supplier Invoice #", req.supplier_invoice_number)}
-              {field("Est. Shipment Date", formatDate(req.estimated_shipment_date))}
-              {field("Estimated ETD", req.estimated_etd ? formatDate(req.estimated_etd) : null)}
+              {field("Supplier Proforma Invoice #", req.supplier_invoice_number)}
+              {field("ETD", req.estimated_etd ? formatDate(req.estimated_etd) : null)}
               {req.payment_terms && field("Payment Terms", req.payment_terms)}
               {field("Submission Source", req.submission_source)}
               {field("Created", formatDate(req.created_at))}
@@ -184,6 +230,100 @@ export default function MerchandiserRequestDetail() {
           </CardContent>
         </Card>
 
+        {/* Invoice numbers — editable while pending and untouched by Accounts
+            (Aug 2026 follow-up, item 4). */}
+        {modifiable?.modifiable && (
+          <Card>
+            <CardContent className="p-5 md:p-6 space-y-3">
+              <div>
+                <h2 className="font-semibold text-foreground text-sm">Invoice Numbers</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Editable while the request is pending and the Accounts team has not
+                  started processing. A number already used by another live request
+                  is rejected.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="edit-sunshine-invoice">Sunshine Invoice #</Label>
+                  <input
+                    id="edit-sunshine-invoice"
+                    type="text"
+                    value={sunshineDraft}
+                    onChange={(e) => setSunshineDraft(e.target.value)}
+                    className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-supplier-invoice">Supplier Proforma Invoice #</Label>
+                  <input
+                    id="edit-supplier-invoice"
+                    type="text"
+                    value={supplierInvDraft}
+                    onChange={(e) => setSupplierInvDraft(e.target.value)}
+                    className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              </div>
+              <Button
+                size="sm"
+                onClick={doSaveInvoiceNumbers}
+                disabled={savingInvoices || Object.keys(invoiceChanges).length === 0}
+              >
+                {savingInvoices ? "Saving…" : "Save Invoice Numbers"}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Advance Payment Tranches — unpaid tranches stay editable by the
+            request owner; paid tranches are locked. */}
+        {/* Merchandiser form editing (2 Sep 2026): owner edits the form
+            fields while pending and untouched by Accounts — same gate the
+            backend enforces. */}
+        {(modifiable?.modifiable ?? false) &&
+          !(req.tranches ?? []).some(
+            (t) =>
+              t.status === "paid" ||
+              !!t.tt_copy_url ||
+              !!t.payment_date ||
+              !!t.bank ||
+              !!t.payment_reference_number,
+          ) && <EditRequestForm request={req} />}
+
+        <Card>
+          <CardContent className="p-5 md:p-6">
+            <h2 className="text-sm font-semibold text-foreground mb-1">Advance Payment Tranches</h2>
+            <p className="text-xs text-muted-foreground mb-4">
+              You can edit, add or delete tranches while the request is pending —
+              including after some tranches are paid. Tranches already paid, or
+              already in processing by the Accounts team, stay locked. The Accounts
+              team is notified of every change.
+            </p>
+            <TrancheList
+              requestId={id}
+              tranches={req.tranches ?? []}
+              currency={req.currency}
+              mode={
+                // A completed file stays interactive for the merchandiser:
+                // adding a tranche REOPENS it (19 Aug 2026) — the lock only
+                // freezes the existing (paid) tranches, handled per-row.
+                (req.is_locked && req.current_status !== "payment_processed") ||
+                ["cancelled_by_merchandiser", "cancelled_by_accounts", "rejected_by_hom"].includes(
+                  req.current_status,
+                )
+                  ? "readonly"
+                  : "merchandiser"
+              }
+              canModify={modifiable?.modifiable ?? false}
+              modifyBlockedReason={modifiable?.reason ?? null}
+              canAdd={modifiable?.can_add ?? false}
+            />
+          </CardContent>
+        </Card>
+
+        <RequestAdjustments requestId={id} currency={req.currency} linkBase="/merchandiser" />
+
         {snap && (fv.grace_etd !== false || fv.etd_grace_overdue_days !== false || fv.actual_etd_overdue_days !== false || fv.default_status !== false) && (
           <Card>
             <CardContent className="p-5 md:p-6">
@@ -198,42 +338,28 @@ export default function MerchandiserRequestDetail() {
           </Card>
         )}
 
-        {fv.status_history !== false && req.status_history && req.status_history.length > 0 && (
-          <Card>
-            <CardContent className="p-5 md:p-6">
-              <h2 className="text-sm font-semibold text-foreground mb-4">Status History</h2>
-              <ol className="space-y-3">
-                {req.status_history.map((h) => (
-                  <li key={h.id} className="flex flex-col sm:flex-row gap-1 sm:gap-3 text-sm">
-                    <span className="text-muted-foreground shrink-0 sm:w-32 text-xs pt-0.5">
-                      {formatDate(h.changed_at)}
-                    </span>
-                    <span className="flex-1">
-                      {h.old_status ? (
-                        <>
-                          <StatusBadge status={h.old_status} />
-                          <span className="mx-1.5 text-muted-foreground">→</span>
-                        </>
-                      ) : null}
-                      <StatusBadge status={h.new_status} showFull />
-                      {h.remarks && (
-                        <p className="text-xs text-muted-foreground mt-0.5">{h.remarks}</p>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            </CardContent>
-          </Card>
+        {/* Supplier default track record */}
+        <SupplierDefaultHistory
+          supplierId={req.supplier.id}
+          supplierName={req.supplier.name}
+          currentRequest={{ id: req.id, deposit_amount: Number(req.deposit_amount), currency: req.currency }}
+        />
+
+        {fv.status_history !== false && (
+          <StatusHistoryCard history={req.status_history} tranches={req.tranches} />
         )}
 
-        {/* Merchandiser remarks — always visible, always editable */}
+        {/* Merchandiser remarks — editable until the request is rejected or
+            cancelled (terminal statuses close the request entirely,
+            UAT Aug 2026 item 18). */}
         <Card>
           <CardContent className="p-5 md:p-6 space-y-3">
             <div>
               <h2 className="text-sm font-semibold text-foreground">Remarks</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Leave a note for the accounts team — visible to all roles. You cannot edit the form fields once submitted.
+                {requestClosed
+                  ? "This request is closed — remarks can no longer be changed."
+                  : "Leave a note for the accounts team — visible to all roles. You cannot edit the form fields once submitted."}
               </p>
             </div>
             <Textarea
@@ -241,17 +367,22 @@ export default function MerchandiserRequestDetail() {
               onChange={(e) => setMerchandiserNote(e.target.value)}
               rows={3}
               placeholder="e.g. Please update the deposit % to 30 — confirmed with supplier."
+              disabled={requestClosed}
             />
-            <Button
-              size="sm"
-              onClick={doSaveRemarks}
-              disabled={savingRemarks}
-              className="w-full sm:w-auto"
-            >
-              {savingRemarks ? "Saving…" : "Save Remark"}
-            </Button>
+            {!requestClosed && (
+              <Button
+                size="sm"
+                onClick={doSaveRemarks}
+                disabled={savingRemarks}
+                className="w-full sm:w-auto"
+              >
+                {savingRemarks ? "Saving…" : "Save Remark"}
+              </Button>
+            )}
           </CardContent>
         </Card>
+
+        <RequestAuditTrail requestId={id} />
 
         {(canHold || canResume || canCancel) && (
           <Card>
@@ -292,7 +423,7 @@ export default function MerchandiserRequestDetail() {
         open={cancelConfirm}
         onOpenChange={setCancelConfirm}
         title="Cancel this request?"
-        description="This will cancel your advance deposit request. The Accounts team will be notified. This action may not be reversible."
+        description="This will cancel your Supplier Advance Payment Request. The Accounts team will be notified. This action may not be reversible."
         confirmLabel="Yes, cancel request"
         destructive
         onConfirm={() => doAction("cancel")}

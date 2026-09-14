@@ -3,15 +3,18 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import requestService, {
   type CreateRequestPayload,
-  type PaymentPayload,
   type UpdateRequestPayload,
 } from "@/services/requestService";
 import type { DepositRequest, RequestStatus } from "@/types";
 
-const STALE      = 5 * 60 * 1000;
-const STALE_PAGED = 2 * 60 * 1000;
+// Near-live tuning (19 Aug 2026): requests are the app's hot data — poll
+// every 10 s and treat anything older than 10 s as stale, so cross-user
+// changes appear without a manual refresh (executives saw stale queues and
+// risked double actions).
+const STALE      = 10 * 1000;
+const STALE_PAGED = 10 * 1000;
 const GC         = 30 * 60 * 1000;
-const POLL       = 30 * 1000;
+const POLL       = 10 * 1000;
 
 export const REQUESTS_KEY = ["requests"] as const;
 
@@ -21,6 +24,7 @@ export const REQUESTS_KEY = ["requests"] as const;
 function invalidateRequestLists(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, "paginated"] });
   qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, "pending-queue"] });
+  qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, "queue-kpis"] });
   qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, "hom-queue"] });
   qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, "my-activity"] });
   // The unpaginated list (useRequests) keys are ["requests", <params-object|undefined>]
@@ -47,13 +51,17 @@ async function optimisticStatusFlip(
   return { previous };
 }
 
+// Request lists auto-reload (UAT Aug 2026, item 4): a 30 s poll plus
+// refetch-on-focus so other users' actions (a payment processed, a hold)
+// appear without a manual page reload. keepPreviousData prevents flicker.
 export function useRequests(params?: Record<string, string>) {
   return useQuery({
     queryKey: [...REQUESTS_KEY, params],
     queryFn: () => requestService.list(params),
     staleTime: STALE,
     gcTime: GC,
-    refetchOnWindowFocus: false,
+    refetchInterval: POLL,
+    refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
   });
 }
@@ -68,7 +76,8 @@ export function useRequestsPaginated(
     queryFn: () => requestService.listPaginated(page, pageSize, params),
     staleTime: STALE_PAGED,
     gcTime: GC,
-    refetchOnWindowFocus: false,
+    refetchInterval: POLL,
+    refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
   });
 }
@@ -84,6 +93,18 @@ export function usePendingQueue() {
   });
 }
 
+// FY-to-date KPI counts for the payment queue (UAT Aug 2026, items 5/17/19).
+export function useQueueKpis() {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, "queue-kpis"],
+    queryFn: requestService.queueKpis,
+    staleTime: STALE,
+    gcTime: GC,
+    refetchInterval: POLL,
+    refetchOnWindowFocus: true,
+  });
+}
+
 export function useRequest(id: string) {
   return useQuery({
     queryKey: [...REQUESTS_KEY, id],
@@ -91,6 +112,10 @@ export function useRequest(id: string) {
     enabled: !!id,
     staleTime: 0,
     gcTime: GC,
+    // Detail pages stay live too — another user's tranche payment or hold
+    // shows up without a reload (UAT Aug 2026, item 4).
+    refetchInterval: POLL,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -163,18 +188,10 @@ export function usePayment(requestId: string) {
   });
 }
 
-// Accepts { requestId, data } so it can be called from PaymentForm without the requestId baked into the hook
-export function useSavePayment() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ requestId, data }: { requestId: string; data: PaymentPayload }) =>
-      requestService.savePayment(requestId, data),
-    onSuccess: (_, { requestId }) => {
-      qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId] });
-      qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId, "payment"] });
-    },
-  });
-}
+// useSavePayment / useProcessPayment were removed with the request-level
+// Payment Details form (Aug 2026 follow-up) — payment details are captured
+// per tranche, and the backend derives request-level payment_date/status
+// when the final tranche is paid.
 
 // Ship date has its own endpoint because it stays writable after the record is
 // locked (it stops Cost of Fund accrual). Invalidate the request too — the
@@ -191,31 +208,6 @@ export function useSaveShipDate() {
   });
 }
 
-// Accepts requestId as the mutation variable so the correct row is updated and cache invalidated
-export function useProcessPayment() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (requestId: string) => requestService.processPayment(requestId),
-    onMutate: async (requestId) => {
-      await qc.cancelQueries({ queryKey: [...REQUESTS_KEY, requestId] });
-      const previous = qc.getQueryData<DepositRequest>([...REQUESTS_KEY, requestId]);
-      qc.setQueryData<DepositRequest>([...REQUESTS_KEY, requestId], (old) =>
-        old ? { ...old, current_status: "payment_processed", is_locked: true } : old
-      );
-      return { previous };
-    },
-    onError: (_err, requestId, context) => {
-      if (context?.previous !== undefined) {
-        qc.setQueryData([...REQUESTS_KEY, requestId], context.previous);
-      }
-    },
-    onSettled: (_data, _err, requestId) => {
-      invalidateRequestLists(qc);
-      qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId] });
-      qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId, "payment"] });
-    },
-  });
-}
 
 export function useUpdateRemarks(id: string) {
   const qc = useQueryClient();
@@ -227,12 +219,219 @@ export function useUpdateRemarks(id: string) {
   });
 }
 
+// ── Advance Payment Tranches ──────────────────────────────────────────────────
+
+function invalidateRequestAndTranches(qc: QueryClient, requestId: string) {
+  invalidateRequestLists(qc);
+  qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId] });
+  qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId, "tranches"] });
+  qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId, "audit"] });
+  qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, requestId, "tranches-modifiable"] });
+}
+
+export function useTranches(requestId: string) {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, requestId, "tranches"],
+    queryFn: () => requestService.listTranches(requestId),
+    enabled: !!requestId,
+    staleTime: 0,
+    gcTime: GC,
+  });
+}
+
+export function useUpdateTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ trancheId, data }: { trancheId: string; data: { amount?: number; tentative_payment_date?: string; priority?: "normal" | "high" } }) =>
+      requestService.updateTranche(requestId, trancheId, data),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+// Merchandiser tranche management — allowed only while the request is pending
+// and untouched by Accounts (Aug 2026 batch, item 2.3). Server-enforced;
+// useTranchesModifiable mirrors the rule for the UI.
+
+export function useTranchesModifiable(requestId: string) {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, requestId, "tranches-modifiable"],
+    queryFn: () => requestService.tranchesModifiable(requestId),
+    enabled: !!requestId,
+    staleTime: 0,
+  });
+}
+
+export function useAddTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { amount: number; tentative_payment_date: string; priority?: "normal" | "high" }) =>
+      requestService.addTranche(requestId, data),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+export function useDeleteTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (trancheId: string) => requestService.deleteTranche(requestId, trancheId),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+// Accounts: per-tranche payment details + explicit mark-paid (Aug 2026,
+// item 3.1 — the TT upload no longer auto-pays; paying requires the TT copy
+// AND payment details, then an explicit click).
+
+export function useUpdateTranchePaymentDetails(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      trancheId,
+      data,
+    }: {
+      trancheId: string;
+      data: {
+        payment_date?: string;
+        bank?: string;
+        payment_reference_number?: string;
+        accounts_remarks?: string;
+        secondary_currency?: string;
+        secondary_amount?: number;
+      };
+    }) => requestService.updateTranchePaymentDetails(requestId, trancheId, data),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+// Release gate (19 Aug 2026): merchandiser releases a "Yet to be Released"
+// tranche so Accounts can pay it.
+export function useReleaseTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (trancheId: string) => requestService.releaseTranche(requestId, trancheId),
+    onSuccess: () => {
+      invalidateRequestAndTranches(qc, requestId);
+      qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, "pending-release"] });
+    },
+  });
+}
+
+export function usePendingRelease() {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, "pending-release"],
+    queryFn: requestService.getPendingRelease,
+    refetchInterval: POLL,
+    staleTime: STALE,
+  });
+}
+
+export function usePayTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (trancheId: string) => requestService.payTranche(requestId, trancheId),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+export function useRejectTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ trancheId, reason }: { trancheId: string; reason: string }) =>
+      requestService.rejectTranche(requestId, trancheId, reason),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+export function useUploadTrancheTtCopy(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ trancheId, file }: { trancheId: string; file: File }) =>
+      requestService.uploadTrancheTtCopy(requestId, trancheId, file),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+// Bulk payment (9 Sep 2026) — invalidate everything request-shaped after.
+export function useBulkPay() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: Parameters<typeof requestService.bulkPay>[0]) =>
+      requestService.bulkPay(payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...REQUESTS_KEY] }),
+  });
+}
+
+// Retrospective HoM decisions on the same supplier (9 Sep 2026).
+export function useHomSupplierHistory(requestId: string) {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, requestId, "hom-history"],
+    queryFn: () => requestService.homSupplierHistory(requestId),
+    staleTime: 60_000,
+  });
+}
+
+// Delete a tranche's TT copy (4 Sep 2026) — Accounts only.
+export function useDeleteTrancheTtCopy(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (trancheId: string) =>
+      requestService.deleteTrancheTtCopy(requestId, trancheId),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
+export function useRequestAuditTrail(requestId: string) {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, requestId, "audit"],
+    queryFn: () => requestService.auditTrail(requestId),
+    enabled: !!requestId,
+    staleTime: 0,
+    gcTime: GC,
+  });
+}
+
+export function useRequestAdjustments(requestId: string, enabled = true) {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, requestId, "adjustments"],
+    queryFn: () => requestService.adjustments(requestId),
+    enabled: !!requestId && enabled,
+    staleTime: STALE,
+    gcTime: GC,
+  });
+}
+
 export function useFieldVisibility() {
   return useQuery({
     queryKey: ["field-visibility"],
     queryFn: () => requestService.myFieldVisibility(),
     staleTime: 5 * 60 * 1000,
     gcTime: GC,
+  });
+}
+
+// Accounts reject the whole request — terminal (UAT Aug 2026, items 12/17/18).
+export function useRejectRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, remarks }: { id: string; remarks: string }) =>
+      requestService.rejectRequest(id, remarks),
+    onMutate: async ({ id }) => {
+      await qc.cancelQueries({ queryKey: [...REQUESTS_KEY, id] });
+      const previous = qc.getQueryData<DepositRequest>([...REQUESTS_KEY, id]);
+      qc.setQueryData<DepositRequest>([...REQUESTS_KEY, id], (old) =>
+        old ? { ...old, current_status: "rejected_by_accounts" } : old
+      );
+      return { previous, id };
+    },
+    onError: (_err, { id }, context) => {
+      if (context?.previous !== undefined) {
+        qc.setQueryData([...REQUESTS_KEY, id], context.previous);
+      }
+    },
+    onSettled: (_data, _err, { id }) => {
+      invalidateRequestLists(qc);
+      qc.invalidateQueries({ queryKey: [...REQUESTS_KEY, id] });
+    },
   });
 }
 
@@ -261,7 +460,7 @@ export function useHomQueue() {
 export function useHomApprove() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, remarks }: { id: string; remarks?: string }) =>
+    mutationFn: ({ id, remarks }: { id: string; remarks: string }) =>
       requestService.homApprove(id, remarks),
     onMutate: async ({ id }) => {
       await qc.cancelQueries({ queryKey: [...REQUESTS_KEY, id] });
@@ -286,7 +485,7 @@ export function useHomApprove() {
 export function useHomReject() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, remarks }: { id: string; remarks?: string }) =>
+    mutationFn: ({ id, remarks }: { id: string; remarks: string }) =>
       requestService.homReject(id, remarks),
     onMutate: async ({ id }) => {
       await qc.cancelQueries({ queryKey: [...REQUESTS_KEY, id] });

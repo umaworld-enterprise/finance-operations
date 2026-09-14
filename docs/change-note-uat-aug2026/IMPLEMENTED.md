@@ -1,0 +1,1789 @@
+# UAT Change Note — August 2026 (19 points)
+
+Received 8 Aug 2026 from the UAT team. Nineteen numbered points, implemented
+in eight phases. This file records what was actually built, phase by phase —
+same living-doc convention as `docs/change-note-aug2026/IMPLEMENTED.md`.
+
+## Decisions taken (with the client, 8 Aug)
+
+- **Points 12/17/18 — "rejected by accounts"**: a real request-level
+  `REJECTED_BY_ACCOUNTS` terminal status will be added (Phase 2), with a
+  Reject Request action for Accounts. Tranche-level rejection stays for
+  partial rework.
+- **Point 1 — Bank Ledger report column N**: Deposit Amount.
+- **Point 13 — 0–10 / >10 day split**: bucket by the earliest UNPAID
+  tranche's tentative payment date; requests with no tentative date go in
+  the > 10 days table.
+- **Point 5 — FY-to-date KPIs**: all KPIs count requests **created** between
+  1 April and today (financial year April–March).
+
+## Phase plan
+
+| Phase | Points | Summary |
+|---|---|---|
+| 1 | 9, 11, 15, 16 | Global UI sweeps: DD/MM/YYYY, arithmetic tranche numbers, hide Adjust Invoices, sidebar order |
+| 2 | 12, 17 (validation), 18 | Request-level Rejected-by-Accounts status + workflow (migration 0028) |
+| 3 | 5, 8, 13, 17 (KPI), 19 | Payment queue restructure: FY KPIs, new columns, 0–10/>10 split, Rejected & Cancelled tabs |
+| 4 | 6, 7, 10 | Hold/cancel correctness: holder name, grey/lock on merch hold, auto-navigate back to queue |
+| 5 | 2, 3 | HOM detail parity + supplier exposure (graced ETD passed / not yet passed) |
+| 6 | 14 | File Remarks: Accounts summary view with Approve/Reject |
+| 7 | 1 | Bank Ledger report |
+| 8 | 4 | Auto-refresh (polling) |
+
+---
+
+## Phase 1 — Global UI sweeps · IMPLEMENTED (8 Aug 2026)
+
+### Item 9 — DD/MM/YYYY across the entire PWA
+- `frontend/src/lib/utils.ts` — `formatDate()` now renders `DD/MM/YYYY`
+  (was `07 Aug 2026` style). Every list/detail/report page formats dates
+  through this one function, so the change applies app-wide.
+- New `formatDateTime()` helper (`DD/MM/YYYY, HH:MM`) for full timestamps;
+  the audit-log detail drawer (`admin/audit/page.tsx`) now uses it instead
+  of a locale-dependent `toLocaleString()`.
+- Deliberately unchanged: `reports/page.tsx` `isoDate()` (YYYY-MM-DD — an
+  API query-param value, not a display), number formatting via
+  `toLocaleString`, and the raw `date` objects written into Excel/CSV report
+  exports (spreadsheet apps render those in the viewer's locale). Backend
+  user-facing date strings (weekly tracker labels) were already DD/MM/YYYY.
+
+### Item 11 — Arithmetic tranche numbers (1, 2, 3) instead of Roman
+- `backend/app/models/tranche.py` — `tranche_label()` now returns
+  `"Deposit - Tranche 1"` etc. Single source: API responses, notifications,
+  audit wording and adjustment pickers all inherit the change.
+- `frontend/src/components/forms/NewRequestForm.tsx` — local `roman()`
+  helper deleted; the request form labels tranches `Deposit - Tranche 1/2/…`
+  and the fixed-deposit prefill notice says "Tranche 1".
+- Tests updated: `test_tranche_schemas.py` (label assertions),
+  `test_tranche_service.py`, `test_request_create_with_tranches.py`.
+- Stored data is unaffected — labels are always derived from
+  `tranche_number` at render time, never persisted.
+
+### Item 15 — Adjust Invoices hidden from UI
+- New flag `ADJUST_INVOICES_ENABLED = false` in
+  `frontend/src/lib/features.ts` — flip to `true` to restore everything.
+- Sidebar entry removed; the `/adjust-invoices` route now renders an
+  "unavailable" notice (deep links/bookmarks don't 404); the Invoice
+  Adjustments panels on the accounts and merchandiser request detail pages
+  are suppressed (and their query is not even fetched).
+- Backend module fully intact — endpoints, service, tests all still live.
+
+### Item 16 — Left-panel chronology
+- `frontend/src/components/layout/Sidebar.tsx` — nav order is now, for every
+  role: *own dashboard(s) → File Remarks → Analytics → Reports → Settings*.
+  Merchandiser sees exactly the requested order: My Requests, File Remarks,
+  Analytics, Reports, Settings.
+
+### Verification
+- `pytest tests/unit -q` — 239 passed.
+- `npx tsc --noEmit` — clean.
+- No migration needed (head stays 0027).
+
+---
+
+## Phase 2 — Rejected by Accounts (items 12, 17-validation, 18) · IMPLEMENTED (8 Aug 2026)
+
+### Migration 0028 (`0028_rejected_by_accounts.py`)
+- `ALTER TYPE request_status ADD VALUE IF NOT EXISTS 'rejected_by_accounts'`
+  and `ALTER TYPE accounts_action_type ADD VALUE IF NOT EXISTS 'reject'`
+  (outside the transaction — COMMIT first, pattern from 0013).
+- `enforce_status_transition()` rebuilt with two new transitions:
+  `pending_payment → rejected_by_accounts` and
+  `hold_by_accounts → rejected_by_accounts`. Downgrade restores the 0012
+  body (enum labels stay — Postgres can't drop them — but become unusable).
+- All three status-rule locations changed together: `enums.py`,
+  `status_transitions.py` (Accounts/Super only), and the trigger.
+
+### Backend
+- **API:** `POST /requests/{id}/reject` — Accounts/Super only, body reuses
+  `HomDecisionRequest` so the reason is mandatory (`min_length=1`). Audited
+  via `transition_status` (StatusHistory + `AccountsAction(reject)` row +
+  audit log), then notifies in the background.
+- **Item 17 (validation):** `rejected_by_accounts` added to
+  `_DUPLICATE_EXEMPT_STATUSES` — the rejected file's sunshine/proforma
+  invoice numbers immediately become reusable on a new request.
+- **Item 18 (edit lock):** merchandiser writes are blocked on all four
+  terminal statuses (`_MERCHANDISER_EDIT_BLOCKED_STATUSES` = the exempt
+  set): generic PATCH (`update`), remarks (`update_remarks`), and every
+  tranche operation (`rejected_by_accounts` joined `_TERMINAL_STATUSES`
+  in `tranche_service`, which also blocks accounts-side payment writes on
+  the closed request). `GET /tranches/modifiable` returns
+  `modifiable=false, can_add=false` automatically since the status is no
+  longer pending.
+- **Item 12 (notification):** `notify_request_rejected_by_accounts` —
+  bell + push with the reason to the raising merchandiser AND every active
+  HoM; per-audience deep links (`/merchandiser/{id}` vs `/hom/{id}`).
+  Type `request_rejected`; matrix updated.
+
+### Frontend
+- `types` — `"rejected_by_accounts"` added to `RequestStatus`; all
+  exhaustive `Record<RequestStatus, …>` maps extended (StatusBadge labels
+  "Rejected" / "Rejected by Accounts", strikethrough treatment, X icon,
+  red left-border on merchandiser lists).
+- Accounts detail page — destructive **Reject Request** button (visible on
+  `pending_payment` / `hold_by_accounts`, hidden for finance) opening the
+  shared mandatory-reason DecisionDialog; on success it toasts and routes
+  straight back to `/accounts` (early piece of item 10).
+- `useRejectRequest` mutation (optimistic status flip + list invalidation),
+  `requestService.rejectRequest`.
+- Merchandiser detail page — on any terminal status the Remarks card
+  becomes read-only ("This request is closed"), Save button hidden;
+  hold/cancel buttons already vanish by status; tranche editing is blocked
+  by the backend `modifiable` flags.
+
+### Tests (`test_request_rejection_by_accounts.py`, 6 new — 245 total)
+- Transition rules (Accounts/Super from pending & hold; merchandiser never;
+  terminal — nothing leads out).
+- Service flow writes StatusHistory with the reason + `AccountsAction(reject)`.
+- Invoice numbers freed for reuse after rejection (both fields).
+- Full merchandiser edit-lock (PATCH, remarks, add-tranche) after rejection.
+- Hold/resume/reopen impossible after rejection.
+- Notification fan-out: merchandiser + every HoM, reason in body,
+  per-audience URLs.
+
+### Verification
+- `pytest tests/unit -q` — 245 passed.
+- `npx tsc --noEmit` — clean.
+- `alembic heads` — single head `0028`. Deploy: run `alembic upgrade head`.
+
+---
+
+## Phase 3 — Payment queue restructure (items 5, 8, 13, 17-KPI, 19) · IMPLEMENTED (8 Aug 2026)
+
+### Item 5 — FY-to-date KPIs (April–March)
+- New endpoint `GET /requests/queue-kpis` (Accounts/Super) —
+  `DepositRequestService.get_queue_kpis()`: one grouped count query over
+  requests **created** since 1 April of the current FY, returning
+  `pending_payment / awaiting_hom / on_hold / processed / rejected /
+  cancelled / total` plus `fy_start` and a display `fy_label`
+  (e.g. "FY 2026–27").
+- Replaces the previous four all-time client-side count queries. Cards show
+  "FY 2026–27 to date" as subtext and refresh on the same poll/invalidation
+  cycle as the queue (`useQueueKpis`, invalidated by every request mutation).
+
+### Items 17 & 19 — Rejected and Cancelled heads
+- Two new KPI cards: **Rejected** (`rejected_by_accounts` +
+  `rejected_by_hom`) and **Cancelled** (`cancelled_by_merchandiser` +
+  `cancelled_by_accounts`) — six cards total.
+- Two new tabs on the queue ("Rejected", "Cancelled"), each a paginated,
+  searchable list with status badges. Pending only ever contains
+  `pending_payment` requests (it always did server-side — the queue query
+  filters on that status), so rejected/cancelled never mix into it.
+
+### Item 13 — Pending bifurcation by tentative payment date
+- The Pending tab now renders two tables: **"Tentative Payment in 0–10
+  Days"** and **"Tentative Payment in > 10 Days"**.
+- Bucketing key: the earliest `tentative_payment_date` among the request's
+  UNPAID tranches (client-side — the queue response already carries full
+  tranches). Requests with no tentative date fall in the > 10 days table,
+  per the decision recorded above.
+- A "Tentative Payment" column shows the bucketing date on each row.
+
+### Item 8 — New pending-table columns
+- **Vertical/Category** and **Merchandiser** columns added (desktop table
+  and mobile cards). No backend change — `DepositRequestResponse` already
+  serialises `vertical` and `creator`, and the queue eagerly loads both.
+
+### Refactor
+- `HoldTable` generalised to `StatusTable` (title/subtitle/empty-state
+  props) — serves the On Hold, Rejected and Cancelled tabs.
+
+### Tests (`test_queue_kpis.py`, 2 new — 247 total)
+- All six buckets count correctly by status within the FY window.
+- Requests created before 1 April are excluded from every bucket.
+
+### Verification
+- `pytest tests/unit -q` — 247 passed.
+- `npx tsc --noEmit` — clean.
+- No new migration (head stays 0028).
+
+---
+
+## Phase 4 — Hold/cancel correctness (items 6, 7, 10) · IMPLEMENTED (8 Aug 2026)
+
+### Item 6 — WHO held/cancelled, by name
+- Root cause: the badge's full labels were written from the merchandiser's
+  perspective — `"On Hold (by you)"` rendered for EVERY viewer, so Accounts
+  saw merchandiser holds attributed to themselves. Labels are now
+  viewer-neutral ("On Hold (by Merchandiser)" / "(by Accounts)").
+- The actual person: new `DepositRequestService.get_last_status_actors()`
+  (one batch query — latest status-history row per request joined to users)
+  populates `last_status_change_by` on `DepositRequestResponse`, filled by
+  the list endpoint (all queue tabs) and the detail endpoint.
+- UI: a **By** column on the On Hold / Rejected / Cancelled tabs, and
+  "by {name}" beside the status badge on the accounts detail header.
+
+### Item 7 — Merchandiser hold/cancel freezes Accounts completely
+- Backend (the real enforcement): new
+  `TrancheService._assert_not_held_by_merchandiser()` guard on every
+  accounts write — `update_payment_details`, `attach_tt_copy`,
+  `reject_tranche` and `pay_tranche` (whose status check now fires BEFORE
+  the readiness gate, so a held request fails with "held", not a
+  misleading missing-TT message). `attach_tt_copy` also gained the
+  terminal-status check it previously lacked. Merchandiser-cancelled
+  requests were already frozen via `_TERMINAL_STATUSES`.
+- Frontend: merchandiser-held/cancelled rows render greyed and
+  non-clickable ("Locked by merchandiser", no View button,
+  `pointer-events-none`) on the On Hold / Cancelled / All tabs. A
+  deep-linked detail page shows an information banner and renders the
+  tranche panel read-only; the Actions card is already empty for those
+  statuses. Routing was already correct: held/cancelled requests never
+  enter the HoM queue (pending_hom_approval only) or the pending queue
+  (pending_payment only) — they exist for notification purposes only,
+  and hold/cancel notifications were wired in the Aug 2026 batch.
+
+### Item 10 — Automatic return to the queue
+- Paying the FINAL tranche (request completes and locks) → toast + route
+  back to `/accounts` (new `onRequestCompleted` callback on `TrancheList`,
+  computed from "this was the last unpaid live tranche").
+- Cancel Request → back to `/accounts`. Reject Request already navigated
+  (Phase 2). Hold/Resume stay on the page (the record remains actionable).
+
+### Tests (`test_merchandiser_hold_freeze.py`, 5 new — 252 total)
+- Payment details, TT attach, tranche reject and tranche pay all refuse on
+  a merchandiser-held request (pay with the "held" message specifically).
+- TT attach refuses on cancelled requests (the previously missing guard).
+- `get_last_status_actors` names the holder and tracks the latest actor.
+
+### Verification
+- `pytest tests/unit -q` — 252 passed.
+- `npx tsc --noEmit` — clean.
+- No new migration (head stays 0028).
+
+---
+
+## Phase 5 — HOM parity + supplier exposure (items 2, 3) · IMPLEMENTED (8 Aug 2026)
+
+### Item 3 — HOM sees the same particulars as Accounts
+The HoM request view (`hom/[id]/page.tsx`) gained everything it lacked
+relative to the accounts view:
+- **Advance Payment Tranches** panel — read-only `TrancheList` (amounts,
+  tentative dates, per-tranche payment progress/TT links), the exact data
+  Accounts work from.
+- **Cost of Fund** added to the Analytics card (behind the same
+  `cost_of_fund` field-visibility key as accounts).
+- **Ship Date** and **Payment Last Updated** in the details grid (when a
+  payment row exists).
+- **Request Audit Trail** panel (endpoint already permitted HoM).
+All view-only — HoM decisions remain approve/reject.
+
+### Item 2 — Supplier Default History now shows the WHOLE exposure
+- New endpoint `GET /masters/suppliers/{id}/exposure` — every open request
+  for the supplier (not cancelled/rejected, **goods not yet shipped** — a
+  recorded ship date ends the exposure), joined to its analytics snapshot,
+  split into:
+  - **Graced ETD passed** — grace expired, goods not shipped (defaulting
+    behaviour, with overdue days), and
+  - **Graced ETD not yet passed** — open commitments inside the grace
+    window (the previously-missing half).
+  Plus per-currency deposit totals. Requests without a snapshot count as
+  pending (still exposure).
+- The `SupplierDefaultHistory` panel renders a "Live Exposure" section with
+  both tables and the total; the panel now appears whenever the supplier
+  has flags **or** live exposure (previously flags only). Because HoM
+  approval, the Accounts detail page and the merchandiser detail all mount
+  the same component, the payment queue view changed simultaneously —
+  exactly as the change note asked.
+
+### Tests (`test_supplier_exposure.py`, 2 new — 254 total)
+- Bucketing (passed vs pending vs no-snapshot), exclusions (cancelled,
+  rejected-by-accounts, shipped, other suppliers) and per-currency totals.
+- Clean supplier returns an empty exposure.
+
+### Verification
+- `pytest tests/unit -q` — 254 passed.
+- `npx tsc --noEmit` — clean.
+- No new migration (head stays 0028).
+
+---
+
+## Phase 6 — File Remarks: Accounts decide with Approve/Reject (item 14) · IMPLEMENTED (8 Aug 2026)
+
+### Migration 0029 (`0029_file_remark_decisions.py`)
+- Widens `ck_file_remarks_status` to
+  `('open', 'approved', 'rejected', 'resolved')`. Existing `resolved` rows
+  stay valid (shown as a legacy "Resolved"). A separate migration — NOT an
+  amendment of 0025 (7 Aug lesson). Downgrade maps decisions back to
+  `resolved` and restores the tight CHECK.
+
+### Backend
+- `FileRemarkStatus` gains `APPROVED` / `REJECTED`; model CHECK updated.
+- `FileRemarkService.resolve()` → **`decide(remark_id, decision, …)`**:
+  approve with an optional note, reject with a **mandatory reason**
+  (`ValidationError` otherwise); double decisions conflict; audit rows say
+  `approved`/`rejected` and land on both the remark and the request trail.
+- API: `POST /file-remarks/{id}/approve` and `/{id}/reject` (shared
+  `FileRemarkDecide` body) replace `/{id}/resolve`. The list endpoint's
+  status filter accepts all four values.
+- `notify_file_remark_resolved` → **`notify_file_remark_decided`** — the
+  raiser's bell + push says "approved and processed" or "rejected" and
+  carries the note/reason. Stored notification type value stays
+  `file_remark_resolved` for continuity; matrix updated.
+
+### Frontend (`file-remarks/page.tsx`)
+- **Accounts no longer see the merchandiser form** — their view is the
+  decision queue: the summary of each requested change (category, file
+  numbers, amounts, split rows, raiser) with two buttons per row:
+  **Processed / Approve** (optional note) and **Reject** (dialog blocks
+  until a reason is typed). The raise form remains for merchandisers (and
+  super admin, for support).
+- Status pills: Open (amber) / Approved (green) / Rejected (red) /
+  Resolved (legacy, green) in the shared history table.
+
+### Tests (`test_file_remarks.py` reworked, 11 in file — 255 total)
+- Approve flow (optional note), reject requires a reason, invalid decision
+  value refused, double-decision conflict, non-decider roles blocked.
+- Notification test covers both outcomes: raiser gets "approved and
+  processed" / "rejected" with the note and reason.
+
+### Verification
+- `pytest tests/unit -q` — 255 passed.
+- `npx tsc --noEmit` — clean.
+- `alembic heads` — single head `0029`. Deploy: run `alembic upgrade head`.
+
+---
+
+## Phase 7 — Bank Ledger report (item 1) · IMPLEMENTED (8 Aug 2026)
+
+- New endpoint `GET /reports/bank-ledger` +
+  `ReportService.bank_ledger_report()` — Excel/CSV/PDF with EXACTLY the
+  bank-ledger sheet columns (deposit tracker G–K + N, column N confirmed as
+  Deposit Amount): **Supplier, Supplier Proforma Invoice No., Sunshine
+  Invoice No., Selected Customer, Currency, Deposit Amount**.
+- Same date-range filters as the other reports (by created date);
+  merchandisers scoped to their own requests, other roles see all.
+- Reports page: new "Bank Ledger" report type card with its column list —
+  the generic download handler needed no changes.
+- Tests (`test_bank_ledger_report.py`, 2 new): exact header order + row
+  values from a seeded request; merchandiser scoping.
+
+## Phase 8 — Auto-reload (item 4) · IMPLEMENTED (8 Aug 2026)
+
+Polling, not websockets — fits the existing PWA/API architecture; the queue
+pages already polled, the rest of the app now follows:
+- **Global defaults** (`Providers.tsx`): `refetchOnWindowFocus: true` and
+  `refetchOnMount: true` (both previously disabled — the root cause of "no
+  autoreload in the entire app"); staleTime 5 min → 60 s.
+- **Request lists** (`useRequests`, `useRequestsPaginated` — merchandiser
+  My Requests, accounts Hold/Rejected/Cancelled/All tabs): 30 s poll +
+  refetch-on-focus (`keepPreviousData` prevents flicker).
+- **Request detail** (`useRequest`): 30 s poll — another user's tranche
+  payment or hold shows up while the page is open.
+- **File remarks list**: 30 s poll.
+- Already live before this phase: pending queue, queue KPIs, HoM queue,
+  my-activity, notifications (30 s each). Masters and analytics stay at
+  5 min staleness — they rarely change.
+
+### Verification
+- `pytest tests/unit -q` — 257 passed.
+- `npx tsc --noEmit` — clean.
+- No new migration (head stays 0029).
+
+---
+
+# Batch complete — all 19 UAT points implemented
+
+| Phase | Points | Migration |
+|---|---|---|
+| 1 | 9, 11, 15, 16 | — |
+| 2 | 12, 17-validation, 18 | **0028** (status enum + trigger) |
+| 3 | 5, 8, 13, 17-KPI, 19 | — |
+| 4 | 6, 7, 10 | — |
+| 5 | 2, 3 | — |
+| 6 | 14 | **0029** (file-remark decisions) |
+| 7 | 1 | — |
+| 8 | 4 | — |
+
+## Follow-up (10 Aug 2026) — one-click TT copy upload
+
+The tranche card's two-step upload (Choose File → "No file selected" →
+separate Upload TT Copy button) was replaced with a single always-enabled
+**Upload TT Copy** button: it opens the file picker directly and the upload
+starts the moment a document is chosen (same 10 MB / pdf-png-jpeg
+validation, button shows "Uploading…" while in flight). Applied to both
+upload sites in `TrancheList.tsx` — the unpaid-tranche flow and the
+legacy paid-without-TT flow. Frontend-only; `tsc` clean.
+
+## Follow-up (10 Aug 2026) — merchandiser dashboard buckets sum to Total
+
+Gap: the merchandiser cards (Total / Pending / Processed / Cancelled) and
+tabs never added up to the Total — **Rejected** had no card or tab, there
+was no On Hold card, and awaiting-HoM / reopened requests were counted in
+Total but appeared in no bucket at all. Fixed in `merchandiser/page.tsx`:
+
+- Every status now lives in exactly one bucket (single source:
+  `TAB_PARAMS`, reused verbatim for the card counts so cards and tabs
+  always agree): **Pending** (pending_payment + pending_hom_approval +
+  reopened), **On Hold** (both holds), **Processed**, **Rejected**
+  (rejected_by_hom + rejected_by_accounts), **Cancelled** (both cancels).
+- Six cards (Total + the five buckets, accounts-style grid) and six tabs,
+  each tab showing its count — the five bucket figures sum to Total.
+- Frontend-only; `tsc` clean.
+
+## Refinements (10 Aug 2026) — five follow-ups on delivered items
+
+1. **Item 5 (KPIs):** card subtext is now plain **"YTD"** (was
+   "FY 2026–27 to date"). The FY window itself is unchanged.
+2. **Item 3.x (tranche payment flow):** the **Save Details button is
+   gone** — the payment-details form is a draft held by `TrancheList`, and
+   **Mark Paid saves the filled details and pays in one action** (details
+   PATCH then pay, sequentially). Mark Paid enables once the TT copy is
+   uploaded and date + bank are filled; readiness item reworded to
+   "Payment details filled"; confirm-dialog and toast wording updated.
+3. **Item 14 (file remarks):** the New File Remark form is now visible to
+   **merchandisers only** — super admin also lost it (previously kept for
+   support); every decider role sees just Open Remarks + History.
+4. **Merchandiser buckets:** verified cards and tabs carry the identical
+   six buckets with counts (Total/All, Pending, On Hold, Processed,
+   Rejected, Cancelled) — delivered by the 10 Aug bucket fix above.
+5. **Merchandiser Pending card:** subtext removed entirely (was
+   "Awaiting accounts", then "Approval or payment awaited").
+
+Frontend-only; `tsc` clean; backend flow unchanged (the pay endpoint's
+server-side readiness gate still requires saved details + TT copy — Mark
+Paid now performs the save itself).
+
+## Follow-up (10 Aug 2026) — HOM field visibility + rejection notifications
+
+1. **HOM detail missing amounts (root cause found):**
+   `FIELD_VISIBILITY_DEFAULTS` had NO `head_of_merchandiser` role at all,
+   and `/requests/my-field-visibility` resolves unknown roles to False — so
+   HOM saw none of the gated fields (deposit amount, %, total invoice,
+   creator info, status history, the whole analytics card). Fixed:
+   - `head_of_merchandiser` added to every defaults row (mirrors
+     accounts_team — HOM approves what Accounts pay).
+   - `get_field_visibility` now merges the stored config OVER the defaults,
+     so configs saved before a role/field existed inherit defaults for the
+     missing keys instead of hiding everything.
+   - The admin Field Visibility matrix gained a "Head of Merchandiser"
+     column so admins can manage it.
+2. **Rejections notify HoM at BOTH levels:** request-level already did
+   (Phase 2); `notify_tranche_rejected` now fans out to every active HoM
+   as well as the raising merchandiser — reason included, per-audience
+   deep links (`/merchandiser/{id}` with the add-replacement prompt vs
+   `/hom/{id}`). Web + app parity verified by construction: both notifiers
+   use `_deliver_to_users`, which writes the bell row AND sends the
+   identical payload via Web Push to every subscription of each recipient
+   (dead subscriptions pruned). Matrix updated; test extended
+   (`test_tranche_rejected_notifies_merchandiser_and_hom`).
+
+257 backend tests green; `tsc` clean; no migration.
+
+## Follow-up (10 Aug 2026) — Supplier Default History panel rework
+
+All in `SupplierDefaultHistory.tsx` (shared by HoM, Accounts and
+Merchandiser detail views):
+1. The amber "Active flag: … — outstanding … (flagged …)" box is removed —
+   the flag details remain in the history table below.
+2. Active-flag wording replaced (rendered red): *Red flag: this supplier
+   has been listed under "Default Advance Payment List". Kindly review its
+   history before making any decision.*
+3. Live Exposure's "Every open file… Total: …" line replaced by a
+   currency-segregated KPI table (one column per currency):
+   - **Existing Exposure** (Overdue payments + Payments in process) — all
+     open files EXCLUDING the request currently being viewed;
+   - **Potential Exposure after approving this request** — Existing plus
+     this request's deposit (row shown only when a request context exists).
+   The three detail pages now pass the viewed request (id, deposit amount,
+   currency) into the panel for this computation.
+
+Frontend-only; `tsc` clean.
+
+## Follow-up (10 Aug 2026) — "Amount Payable" column
+
+New shared helper `amountPayable()` in `lib/utils.ts`: the sum of a
+request's UNPAID tranches (paid are out the door, rejected don't count;
+legacy rows without tranches fall back to the full deposit until
+processed). Rendered right before the Deposit column in:
+- Accounts queue: both pending buckets (0–10 / >10 days), the On Hold tab
+  (via `StatusTable`'s new `showPayable` prop) and All Requests — desktop
+  columns + mobile card "Payable:" line.
+- Merchandiser Request History (`RequestsTable`).
+Deliberately NOT shown on Rejected/Cancelled tabs (closed files) or the
+HoM queue (nothing paid yet — payable would always equal the Amount
+column). Frontend-only; `tsc` clean.
+
+## Follow-up (10 Aug 2026) — search, sort & pagination on every table
+
+New reusable kit: `useClientTable` hook (`hooks/useClientTable.ts` —
+case-insensitive substring search over declared fields, pluggable sort
+comparators, client pagination with page-clamping) + `TableControls`
+component (search box + sort dropdown; pairs with the existing
+`Pagination`). Applied to every table that lacked controls:
+- **File Remarks** — Open Remarks and Remark History (search by request #,
+  file numbers, category, raiser, status; sort newest/oldest/request #;
+  20/page).
+- **Supplier Risk (finance)** — defaulted-supplier table (search supplier/
+  reason/status; sort by flag date, supplier, outstanding; 20/page).
+- **Admin Users** — sort (name/role/recent login) + pagination added to the
+  existing search (25/page).
+- **Admin Banks** and **Admin Payment Terms** — search + sort + pagination
+  (20/page; payment-term row numbers stay absolute across pages).
+- **Accounts pending buckets** (0–10 / >10 days) — client pagination per
+  bucket (50/page, shown only when needed); the page-level search and sort
+  already applied before the split.
+
+Already covered (unchanged): merchandiser dashboard, HoM queue, accounts
+status tabs (server pagination + search + sort), audit log (server filters
++ pagination), notifications, analytics tables (ShipmentsTable, drill,
+supplier detail, NPA panel), admin overview. Contextual sub-tables inside
+detail panels (Supplier Default History, tranche list) intentionally keep
+no controls. Frontend-only; `tsc` clean.
+
+## Follow-up (10 Aug 2026) — file-remark parent reference + weekly label format
+
+1. **Old file input removed** from the Invoice amount change form — the old
+   file reference is now server-derived from the selected request (sunshine
+   invoice number → proforma number → request number fallback), exactly
+   like the old amount. `FileRemarkCreate` no longer accepts
+   `old_file_number` at all.
+2. **Splits show their parent**: the derived parent reference is recorded
+   for BOTH categories, so the history's Details cell for a split now reads
+   "From {parent} (amount)" above the "→ target (amount)" rows. Older rows
+   stored without a parent fall back to the request number in the UI.
+3. **Analytics weekly labels** (Outstanding tracker + weekly deposit
+   tracker): `10/08/2026 to 16/08/2026` → **`10-Aug-2026 to 16-Aug-2026`**
+   (`%d-%b-%Y`), removing day/month ambiguity.
+
+257 backend tests green (file-remark + tracker label tests updated);
+`tsc` clean; no migration.
+
+## Follow-up (10 Aug 2026) — refinements: flag table removed + remaining table controls
+
+1. **Supplier Default History card**: the flag-history table
+   (Flagged / Reason / Outstanding / Status) is removed — the card now
+   carries only the red-flag line and the Live Exposure section. Full flag
+   records remain on the Supplier Risk page.
+2. **Search/sort sweep completed** — remaining gaps closed:
+   - Analytical Snapshot (`ShipmentsTable`, accounts + HoM dashboards):
+     search (request #, invoice #, supplier, status) + sort (most delayed /
+     ETD / amount / supplier) on top of its pagination.
+   - Notifications: search box filtering the loaded page (feed stays
+     server-paginated).
+   - Merchandiser "All Updates" activity: search + sort + pagination
+     (25/page).
+   - Audit Logs: free-text search over the loaded page (entity, field,
+     values, user, IP) alongside the existing server filters + pagination.
+   Note: controls added in the previous sweep render ABOVE each table (and
+   once above the tabs on the queue pages) — a hard refresh/redeploy is
+   needed for the PWA to pick up the new bundle.
+
+257 backend tests green; `tsc` clean.
+
+## Follow-up (10 Aug 2026) — NPA table controls + split parent shows invoice no.
+
+1. **Non-Performing Assets** panel: both tables gained search + sort —
+   Overdue Suppliers (search supplier/reason; sort by max overdue, overdue
+   requests, supplier) and Merchandiser Performance (search name/email;
+   sort by overdue count, total requests, name). Pagination they had.
+2. **Split parent = sunshine invoice number**: `FileRemarkResponse` now
+   carries the parent request's CURRENT `sunshine_invoice_number`, and the
+   "From {parent}" line prefers it over the stored parent reference (which
+   itself falls back to the request number only for legacy rows or files
+   without an invoice number). Covers remarks created before the derived
+   parent existed and invoice numbers edited after the remark was raised.
+
+Backend tests green; `tsc` clean.
+
+## Follow-up (11 Aug 2026) — exposure KPIs count processed files only
+
+Live Exposure refinement: **Existing Exposure** now sums only
+`payment_processed` files (money actually paid out, goods not shipped) —
+pending/held files are commitments, not exposure, and no longer inflate the
+figure (they remain visible in the graced-ETD breakdown tables).
+**Potential Exposure** stays Existing + the viewed request's deposit. A
+currency column appears only when it has processed exposure or the viewed
+request would add that currency — e.g. a supplier with only a PENDING GBP
+file shows no GBP column at all unless the request being approved is GBP.
+Frontend-only; `tsc` clean.
+
+## Follow-up (11 Aug 2026) — bucket-scoped Amount Payable in the pending tables
+
+The two pending tables' Amount Payable column is now scoped to each
+table's own tentative-date window instead of the request's total unpaid:
+- **0–10 days table**: sums only the unpaid tranches whose tentative date
+  falls within the next 10 days (past-due dates included).
+- **> 10 days table**: sums only the unpaid tranches due after the window
+  (undated tranches included).
+So a request with one tranche due tomorrow and one due next month shows
+just tomorrow's amount in the 0–10 table. The On Hold / All / merchandiser
+tables keep the total-unpaid figure. Frontend-only; `tsc` clean.
+
+## Follow-up (11 Aug 2026) — Existing Exposure recalibrated
+
+Existing Exposure = **Overdue Payments** (processed, graced ETD passed,
+goods not shipped) + **Payments in Process** (processed and still inside
+the grace window, PLUS requests already HoM-approved and sitting in the
+payment queue — `pending_payment` — even before Accounts process them).
+Requests awaiting HoM approval, on hold or reopened remain excluded from
+the KPI (visible in the breakdown tables). Potential Exposure and the
+currency-column rule unchanged. Frontend-only; `tsc` clean.
+
+## Follow-up (11 Aug 2026) — pending queue back to a single table
+
+The "Tentative Payment in > 10 Days" table was removed on client request —
+the Pending tab is a single "Pending Payment" table again holding ALL
+pending requests (so later-dated files don't disappear), keeping the
+Tentative Payment column for the next due date. **Amount Payable keeps the
+standing 11 Aug rule**: the column (headed "Amount Payable (0–10 days)")
+sums only the unpaid tranches due within the next 10 days, past-due
+included — a request with nothing due soon shows 0. (An initial revert of
+this to total-unpaid was a mistake and was corrected the same day.)
+Frontend-only; `tsc` clean.
+
+## Follow-up (11 Aug 2026) — Invoice Change rename, From/To details, Accounts invoice editing
+
+1. Category label renamed **"Invoice amount changes" → "Invoice Change"**
+   (form dropdown, tables, notification/audit wording via the shared label
+   maps; stored category value unchanged).
+2. Remark history Details for an Invoice Change now reads explicitly
+   **From {old file} (amount)** / **To {new file} (amount)** on separate
+   lines (From falls back sunshine → stored parent → request number).
+3. Invoice-number editing extended to the **Accounts Team** from the
+   payment-queue request view (client-confirmed: BOTH sunshine and
+   proforma numbers, on any request — the "changed in whole" wording is
+   the business reason, not a system gate). Endpoint guard relaxed from
+   Super Admin-only to {super_admin, accounts_team}; per-field audit and
+   duplicate validation unchanged. The Invoice Numbers card on
+   `accounts/[id]` now shows for Accounts with updated helper text.
+
+257 backend tests green; `tsc` clean.
+
+## Follow-up (11 Aug 2026) — MAJOR: defaulter/overdue logic recalibrated
+
+`etd_grace_overdue_days` (the defaulter metric) now accrues ONLY when all
+three hold: **advance PAID** (payment_date set) + **graced ETD surpassed**
++ **shipment NOT made**. Changed in one place — `analytics/engine.compute()`
+— and inherited by everything that keys off `etd_grace_overdue_days > 0`:
+auto-flagging ("Auto-flagged: Nd past ETD grace"), NPA overdue suppliers,
+delay report, analytics drill/summary, supplier exposure overdue column.
+- Unpaid files never accrue overdue (no money out), even past grace.
+- Shipping clears the defaulter state (overdue → 0); the lateness history
+  stays visible via `actual_etd_overdue_days` (signed, ship-frozen) and
+  cost of fund, which are unchanged.
+- Exposure panel no longer renders "0d overdue" (shows — instead).
+- Deploy note: stored snapshots recompute on the periodic snapshot job and
+  on per-request reseeds — figures update as the job runs, not instantly.
+
+Tests: engine tests rewritten around the three-condition rule (paid+
+unshipped accrual, shipment clears, unpaid never accrues, delayed/critical
+thresholds) — 260 backend tests green; `tsc` clean.
+
+## Follow-up (11 Aug 2026) — "Advance Payment" module sub-header in the sidebar
+
+An **Advance Payment** sub-header now sits directly below "Menu", grouping
+all current items as the first module — future modules (e.g. Logistics)
+get their own sub-header alongside. Styling: slightly brighter/bolder than
+the "Menu" label so it reads as a module title. Frontend-only; `tsc` clean.
+
+## Banking module (12 Aug 2026) — bank statement upload + AI extraction + dashboard
+
+New standalone module (client decisions: AI vision extraction; **super
+admin only** for now; no ADT reconciliation in v1; dashboard scope at my
+discretion). Sample analysed: Citi "Asia Account Statement Report" — its
+PDFs have NO usable text layer (fonts without unicode maps), so extraction
+is vision-based.
+
+**Migration `0030_bank_statements.py`** (head **0030**):
+`bank_statements` (header/summary + status processing/extracted/failed +
+extraction_note; unique account+period), `bank_transactions` (date, type
+line as category, reference, detail, debit/credit; CASCADE),
+`bank_daily_balances` (per-day closing balance rows; CASCADE).
+
+**Backend:**
+- `AIClient.chat_vision()` added (OpenAI + Claude wrappers; Groq raises
+  with a switch-provider message). Reuses the admin-configured provider/
+  key/model from AI Settings.
+- `bank_statement_service`: PyMuPDF renders pages (150 dpi, ≤80 pages) →
+  one vision call per page → strict-JSON parse (`parse_page_json`) →
+  aggregate → **integrity check** (beginning − debits + credits vs the
+  statement's own ending balance; result stored in extraction_note, loud
+  MISMATCH wording when off) → persist. Duplicate account+period uploads
+  are refused at extraction time. Runs as a BackgroundTask with its own
+  session; failures flip the row to `failed` with the error.
+- API `/bank/statements` (super admin): POST upload (PDF ≤15 MB, answers
+  immediately in `processing`), GET list, GET detail (transactions +
+  daily balances), DELETE (re-upload path). Upload/delete audited.
+  `pymupdf` added to requirements.
+
+**Frontend:**
+- Sidebar: new **Banking** module sub-header (data-driven `module` field on
+  nav items) with "Bank Statements" (super admin), alongside Advance
+  Payment.
+- `/bank`: one-click PDF upload (TT-copy pattern), statements table
+  (status pill polls every 5 s while processing; search/sort/pagination),
+  delete-with-confirm, and a Month-over-Month table across extracted
+  statements (opening/closing/net per account).
+- `/bank/[id]` dashboard: integrity-check banner (green/amber),
+  six KPIs (Opening, Closing, Total Debits, Total Credits, Net Movement,
+  Transaction count), **Daily Closing Balance** line chart (recharts),
+  **Breakdown by Transaction Type** (Import/Export bills, check clearing,
+  charges, interest… with counts and debit/credit totals), and the full
+  transaction table with search/sort/pagination.
+
+**Tests** (`test_bank_statements.py`, 7 new — 267 total): JSON parsing,
+decimal/date safety, integrity outcomes, end-to-end extraction against a
+fake vision client (rows + balances persisted, header populated, integrity
+passed), mismatch flagged loudly, provider failure → `failed`, duplicate
+period refused.
+
+**Deploy:** `pip install -r requirements.txt` (pymupdf) +
+`alembic upgrade head` (0030). Extraction requires an OpenAI or Claude key
+in AI Settings — Groq is text-only.
+
+## Follow-up (12 Aug 2026) — Accounts' Analytics Snapshot missing fields
+
+The Analytics Snapshot card on the accounts request view silently dropped
+**Cost of Fund** and **Payment to Request Days** — the field-visibility
+DEFAULTS had both set to False for `accounts_team`. Flipped to True for
+accounts AND head_of_merchandiser (parity: HoM approves what Accounts pay).
+Note for existing environments: if an admin ever SAVED the Field Visibility
+matrix, the stored config overrides these defaults per field — toggle the
+two rows on in Admin → Field Visibility there. Backend-only; 267 tests
+green.
+
+## Follow-up (19 Aug 2026) — Banking module opened to Accounts team
+
+The Banking module (Bank Statements) is no longer super-admin only: the
+**accounts team gets full access** — upload, dashboards, and delete /
+re-upload — per the new requirement. Backend router now guards with
+`RequireAccounts` (super_admin + accounts_team) instead of
+`RequireSuperAdmin`; frontend sidebar entry and both bank pages'
+`RoleGuard`s include `accounts_team`. No migration; deploy backend and
+frontend together so the sidebar link and the API gate match.
+
+## Follow-up (19 Aug 2026) — Merchandiser can add tranches after a payment
+
+User report: after a tranche was paid, the merchandiser lost the Add Tranche
+button. Validated as intended behaviour of the old rule (item 2.3: ANY
+accounts write froze all merchandiser tranche changes), then relaxed per the
+new requirement (**add + edit/delete unpaid** chosen):
+
+- **Per-tranche locks replace the request-wide freeze.** A tranche Accounts
+  has started working on — PAID, TT copy uploaded, or payment details
+  recorded — is locked against merchandiser edit/delete
+  (`_assert_tranche_untouched_by_accounts`). Untouched unpaid siblings stay
+  editable/deletable, and ADDING tranches stays open, while the request is
+  still pending. The invoice-total ceiling still applies.
+- **Request-wide accounts writes still freeze everything**: a
+  payment_details row (ship-date / legacy paths) or a completed invoice
+  adjustment (`accounts_touched_reason`, now narrowed to those two). The
+  rejection deadlock-breaker (adds allowed while a REJECTED tranche exists)
+  is unchanged.
+- `/tranches/modifiable` now answers `modifiable: true` in the
+  paid-some-tranches case; the frontend derives per-row locks from the
+  tranche's own fields (`tt_copy_url` / `payment_date` / `bank` /
+  `payment_reference_number`) and shows "In processing by Accounts — locked"
+  on rows it can't touch.
+
+Tests: 268 passing — new `test_paid_tranche_no_longer_freezes_siblings`;
+`test_tt_copy_locks_only_that_tranche` and
+`test_tranche_payment_details_lock_only_that_tranche` rewritten from the old
+blanket-freeze assertions; the rejection-unlock test now freezes via a
+request-wide payment row. No migration.
+
+## Follow-up (19 Aug 2026) — Sunshine Invoice No. on Live Exposure overdue rows
+
+The Live Exposure "Graced ETD passed" (overdue) table now shows the
+**Sunshine Invoice #** column between Request # and Deposit. The exposure
+endpoint (`/masters/suppliers/{id}/exposure`) returns
+`sunshine_invoice_number` on every row; the frontend renders the column on
+the overdue table only. One shared component, so it applies to every role
+that sees the panel (HoM, Accounts, Merchandiser detail views). No
+migration; 268 tests green.
+
+## Follow-up (19 Aug 2026) — File Remarks: request links, split balance, locked Invoice Change amount
+
+Three changes on the File Remarks module:
+
+1. **Request # is a link** in Open Remarks and Remark History — merchandisers
+   land on their request view (`/merchandiser/{id}`), accounts / finance /
+   super admin on the payment-queue view (`/accounts/{id}`).
+2. **Balance after split** — the Details cell on split remarks shows
+   "Balance on {parent}: X" (old amount − split total), always, including
+   0.00 as explicit full-allocation confirmation. Same shared cell for all
+   roles. The New File Remark split form also shows "Balance left" live next
+   to the split total. Legacy rows without a stored old amount show no
+   balance line.
+3. **Invoice Change amount locked** — a whole-invoice change keeps the
+   value: the New file amount pre-fills from the selected file and is
+   read-only; the server now DERIVES new_amount (= the file's deposit
+   amount) and no longer accepts it from the client (schema field removed,
+   ceiling check moot). Only the new file number is typed.
+
+No migration; 268 tests green; deploy backend + frontend together (the
+create payload no longer carries new_amount).
+
+**Format update (same day):** split details now read
+`From Invoice {parent}: {amount} ({currency})` /
+`- to Invoice {file}: {amount} ({currency})` /
+`Balance in Invoice {parent}: {amount} ({currency})`. The remark response
+carries the request's `currency` for this (new field on
+FileRemarkResponse). Invoice Change rows keep their From/To layout.
+
+## Follow-up (19 Aug 2026) — Back button on the accounts request summary
+
+The accounts request summary now offers two ways back: a new **Back**
+button (browser history — returns to wherever the user came from, e.g. a
+File Remarks link) alongside the existing **Back to queue** fixed jump to
+the dashboard sheet. Frontend-only.
+
+## Follow-up (19 Aug 2026) — Adding a tranche REOPENS a completed file
+
+New requirement (after the single-tranche file on the screenshot closed on
+its first payment): the merchandiser can add tranches to a
+**payment-processed** file — doing so REOPENS it.
+
+- **New status transition** `payment_processed → pending_payment`
+  (merchandiser + super admin only), fired inside
+  `TrancheService.add_tranche`, not a standalone action. All three
+  status-rule locations updated: `status_transitions.py`, the Postgres
+  trigger (**migration 0031**), enums unchanged.
+- On reopen: request returns to the payment queue, unlocks, StatusHistory +
+  audit written, and the payment_details completion marker steps back
+  (payment_status cleared; the paid-so-far payment_date is kept for the
+  record). Paying the new final tranche completes and locks the file again,
+  re-deriving the marker.
+- Ceiling unchanged: total tranches ≤ invoice total. Paid tranches stay
+  immutable; the new unpaid tranche is a normal editable pending tranche.
+- `accounts_touched_reason` narrowed once more: a payment row counts as a
+  request-wide touch only when it shows real accounts activity (processed
+  status, ship date, legacy TT copy, bank/reference/remarks) — a bare row
+  holding only the paid-so-far date (what a reopened file keeps) does not
+  freeze the merchandiser.
+- Frontend: merchandiser detail keeps the tranche list interactive on
+  processed files; `/tranches/modifiable` answers `can_add: true` there;
+  the amber notice explains that adding reopens the file (the rejection
+  wording now only shows when a rejected tranche actually exists).
+
+Tests: 272 passing — reopen round-trip (pay → add → edit → pay →
+completes again), ceiling + role guards on reopen, transition-map cases
+(the old "processed → pending is invalid" test now asserts the opposite);
+`_add_payment_row` fixture carries a ship_date so request-wide freeze tests
+still exercise a genuine touch.
+
+## Follow-up (19 Aug 2026) — Reopen fixes: dynamic status on delete + add notification
+
+Two gaps found in UAT of the reopen feature:
+
+1. **Dynamic status** — deleting the tranche that reopened a completed file
+   left the request stuck in Pending Payment. `delete_tranche` now
+   re-derives: when a deletion leaves every live tranche paid, the request
+   flips straight back to payment_processed, re-locks, writes
+   StatusHistory + audit, and re-derives the payment_details marker — the
+   exact mirror of the reopen.
+2. **Add-tranche notification** — adds reused the generic "tranche updated"
+   notification, which only reached `accounts_team` role users (super
+   admins got nothing). New `notify_tranche_added` (bell + Web Push,
+   identical payloads) goes to all active accounts users AND super admins;
+   when the add reopened a completed file the title/body say "File
+   reopened — new tranche".
+
+Backend-only; 273 tests green (new delete-recompletes round-trip test).
+
+## Follow-up (19 Aug 2026) — Snapshot sorts + tranche rejections in Status History
+
+1. **Analytical Snapshot sorting** — the All-Shipments tables (HoM +
+   Accounts dashboards) gained two sort options: "Request date (new → old)"
+   (backed by a new `created_at` field on `/analytics/shipments`) and
+   "Request ID (new → old)" (request_number descending).
+2. **Tranche rejections in Status History** — a rejected tranche never
+   changes the REQUEST status (by design — replacements follow), which made
+   the Status History look stuck on "Pending Payment". The three detail
+   pages now share one `StatusHistoryCard` that merges request status
+   transitions with tranche-rejection events: a red "Rejected — Tranche N"
+   entry with the rejection date and reason, in chronological order.
+
+No migration; 273 tests green, tsc clean.
+
+## Follow-up (19 Aug 2026) — Label cleanups + latest-first queue
+
+1. **"Estimated ETD" → "ETD"** app-wide (ETD already means Estimated Time
+   of Departure): request form label, all three detail pages, payment
+   forecast table + hint, report column list, and the export header in
+   report_service. "Original ETD" / "Grace ETD" / "Actual ETD" wording is
+   untouched; backend field names stay `estimated_etd`.
+2. **"Dashboard" → "Workspace"**: sidebar "HoM Dashboard" → "HoM
+   Workspace", HoM page title likewise, onboarding button "Continue to
+   Workspace". No other role had "Dashboard" in a visible title.
+3. **Accounts Pending Payment queue now lists latest requests first** (was
+   deliberately oldest-first "process in order") — matches every other
+   request table's newest-first default; subtitle updated. Merchandiser and
+   HoM queues already defaulted to newest-first.
+
+## Follow-up (19 Aug 2026) — Queue columns, paid-tranche action gating, hyperlinks, cancel validation
+
+1. **Request Date column** added to the Payment Queue pending table (desktop
+   column after Request #, "Requested:" line on the mobile cards).
+2. **Hold/Reject hidden once any tranche is paid** — on the accounts request
+   view, "Place on Hold" and "Reject Request" disappear when a tranche is
+   PAID, and `transition_status` refuses hold_by_accounts /
+   rejected_by_accounts server-side on partially-paid requests ("act on the
+   remaining tranches individually").
+3. **Hyperlinked request numbers app-wide**: Payment Queue pending table +
+   mobile cards, On Hold/Rejected/Cancelled tabs, All Requests, the
+   merchandiser RequestsTable, and the analytics Weekly Tracker (role-aware
+   destination). HoM queue, Shipments snapshot and File Remarks already
+   linked. Merchandiser-frozen rows keep their non-clickable state.
+4. **Cancel validation (rejected + unpaid tranches)** — closing a file that
+   has a rejected tranche AND unpaid tranche(s) is refused until the
+   merchandiser deletes the unpaid tranche(s); nothing closes silently.
+   Server-side in `transition_status` (cancelled_by_merchandiser), surfaced
+   as the error toast on the cancel action.
+
+275 tests green (2 new guard tests), tsc clean; no migration.
+
+## Follow-up (19 Aug 2026) — "Accounts Workspace" rename + near-live refresh
+
+1. **"Payment Queue" → "Accounts Workspace"** in the sidebar and the page
+   header.
+2. **Near-live refresh** (executives saw stale data on other users' PWAs
+   and risked double actions): global React Query defaults now poll EVERY
+   query every 15 s while its page is visible (staleTime 10 s, was 60 s
+   with no global poll), and the workflow-critical hooks (request lists +
+   details + queues, notifications, file remarks) poll every 10 s (was
+   30 s). Focus/mount refetches stay on, so returning to the PWA catches up
+   immediately; hidden tabs still don't poll. True instant (sub-second)
+   sync would need a WebSocket/SSE push layer — flagged as a possible
+   future phase.
+
+Frontend-only; tsc clean.
+
+## Follow-up (19 Aug 2026) — Hyperlink sweep, every request-number render site
+
+Thorough pass over every place a request number renders. Newly linked:
+admin Recent Requests rows, the supplier drill-down request list,
+Adjust Invoices PENDING table (history was already linked), and the
+Supplier Default History live-exposure tables (new `linkBase` prop —
+"/accounts" on the accounts view, "/hom" on the HoM view; the merchandiser
+view stays unlinked since that role cannot open other people's requests).
+Already-linked (verified): analytics snapshots, drill-down (mobile +
+desktop), shipments snapshot, HoM queue, file remarks, weekly tracker,
+merchandiser tables/activity (whole row is the link), admin critical
+overdue list, notifications. Deliberately not links: chart axis labels,
+detail-page titles (they ARE the request page), rows frozen by a
+merchandiser hold, and dialog prose.
+
+## Follow-up (19 Aug 2026) — Tranche release gate (Tranche 2 onwards)
+
+From Tranche 2 onwards a tranche is a FUTURE payment gated behind an
+explicit merchandiser release (all four scoping answers: real gate /
+backfill released / keep reminding past due / bell + push + accounts
+notified on release).
+
+- **Data (migration 0032)**: `released_at` / `released_by` on
+  payment_tranches; ALL existing rows backfilled released. Tranche 1 is
+  auto-released at creation (request form and add_tranche); tranche 2+
+  starts "Yet to be Released".
+- **Gate**: `pay_tranche` refuses an unreleased tranche 2+;
+  `release_tranche` (owner merchandiser / super admin; unpaid, unrejected,
+  not already released) sets the release, audits, and notifies accounts +
+  super admins ("Tranche released — ready to pay", bell + push). Endpoint:
+  `POST /requests/{id}/tranches/{tid}/release`.
+- **Merchandiser UI**: disclaimer dialog before the Add Tranche form ("a
+  new tranche is created as Yet to be Released…"), amber "Yet to be
+  Released" pill on the row, "Release Tranche N for Payment" button with a
+  confirm, and a "Tranche Payments to be Released" tile on the workspace
+  (shows when > 0).
+- **Accounts Workspace**: "Yet to be Released by Merchandiser" KPI tile
+  (live, not FY) + a "Yet to be Released" tab listing tranche-level rows —
+  Request # (linked), Invoice #, Supplier, Merchandiser, Tranche,
+  **Amount (to be released)**, Tentative Payment. On the request view an
+  unreleased tranche shows a notice instead of the payment form. Requests
+  stay in Pending too (their released tranches remain payable).
+- **Reminders**: daily APScheduler job (03:30 UTC ≈ 09:00 IST) —
+  merchandisers with unreleased tranches due within 5 days get "5 days
+  left" → … → "due TODAY" → "overdue by N days", bell + Web Push, until
+  released or the file leaves pending. New endpoint
+  `GET /requests/pending-release` (merchandisers: own; other roles: all)
+  drives both tiles and the tab, polled every 10 s.
+- Also fixed in passing: the accounts sort dropdown fallback still said
+  "oldest" for the pending tab after the latest-first change.
+
+Tests: 278 green — gate round-trip (add → blocked pay → release → pay),
+release permissions/conflicts, reminder countdown (3-days-left + overdue
+sent; far-future / released / tranche-1 silent); the reopen round-trip now
+releases before re-paying. `make_tranche` factory defaults to released
+(mirrors the 0032 backfill).
+
+Deploy: **`alembic upgrade head` (0032)** + backend & frontend together.
+
+**Same-day addition:** the Pending Payment list shows a **"Yet to be
+Released"** amount column beside Amount Payable (amber when > 0, — when
+none; also a line on the mobile cards), and `payableDueSoon` now EXCLUDES
+unreleased tranches — an unreleased amount is never counted as payable.
+
+## Follow-up (19 Aug 2026) — Session lifetime extended to 72 h
+
+Auto-logout is the JWT expiry: `access_token_expire_minutes` default raised
+**720 (12 h) → 4320 (72 h)** (config.py, .env.example, README). The
+frontend cookie Max-Age follows the server's `expires_in` automatically.
+Caveat: an environment that sets `ACCESS_TOKEN_EXPIRE_MINUTES` explicitly
+overrides the default — update that env var there. Existing tokens keep
+their old expiry; users get 72 h from their next sign-in.
+
+## Follow-up (19 Aug 2026) — File Remarks: file-number dropdown + full chains
+
+Scoping answers: file number = sunshine invoice # (fallbacks preserved),
+approved splits only, FULL chain depth.
+
+1. **Dropdown shows the file number only** — no supplier appended. Backed by
+   `GET /file-remarks/selectable-files`: for every payment-completed
+   request, the server replays its APPROVED remarks over the root file —
+   a split moves value into the target files (parent keeps the balance,
+   drops out at zero), an invoice change swaps the file number — and
+   returns the LIVE file set. Files under an open remark are held back
+   until decided.
+2. **Split-born files are selectable** for Invoice Change AND (full chain)
+   for further splits; invoice-changed numbers re-enter too — any depth.
+   `FileRemarkCreate` gained `file_number` (validated server-side against
+   the live set); old amount / ceiling / locked new-amount all derive from
+   the SELECTED file's live amount, not the request total.
+3. **Audit chain on the core file** — every chained remark stays anchored
+   to the original deposit_request_id, so its raise/approve/reject audit
+   rows land on the main file's trail (existing behaviour, now guaranteed
+   by design). RemarkDetails now prefers the stored parent file number so a
+   chained remark displays its true parent.
+
+280 tests green (live-set replay incl. re-split ceiling; selectable rules:
+consumed parent gone, open remark holds a file back, non-live file
+refused); tsc clean. No migration; deploy backend + frontend together.
+
+## Follow-up (19 Aug 2026) — KPI tiles link to their listing tab
+
+Every payment-status tile is now clickable and opens the matching table
+tab, smooth-scrolling it into view (StatCard gained an `onClick` mode).
+
+- **Accounts Workspace**: Pending Payment → Pending, On Hold → On Hold,
+  Processed → NEW Processed tab (StatusTable + pagination — the tile had no
+  listing before), Rejected → Rejected, Cancelled → Cancelled, Total →
+  All Requests, Yet to be Released tile → its tab.
+- **Merchandiser Workspace**: all six cards open their matching tab
+  (Total → All, Pending, On Hold, Processed, Rejected, Cancelled).
+- Fixed in passing: the pending table subtitle still said "Sorted oldest
+  first" after the latest-first change.
+
+Frontend-only; tsc clean.
+
+## Follow-up (19 Aug 2026) — Masters admin page (Suppliers / Customers / Verticals)
+
+The create/update endpoints existed since the initial schema but no UI was
+ever built — suppliers only entered via imports. New **Admin → Masters**
+page (super admin + finance admin), three tabs:
+
+- **Suppliers**: add (code required + name + optional country; code is
+  create-only), edit name/country, activate/deactivate.
+- **Customers / Verticals**: add by name, rename, activate/deactivate.
+- All tabs: active + inactive rows (new `GET /masters/{x}/all` admin
+  endpoints, mirroring banks), search/sort/pagination, audit-logged
+  server-side (pre-existing). Deactivating hides an entry from the request
+  form dropdowns without touching history. Sidebar "Masters" entry + admin
+  overview card added; dropdown caches invalidated on change.
+
+No migration; 280 tests green, tsc clean.
+
+## Follow-up (19 Aug 2026) — Executive emails: TT upload + Mark Paid, with attachment
+
+Scoping answers: recipients = EVERYONE (all active users), both events,
+real attachment.
+
+- **TT copy uploaded** → email to every active user with the document
+  (PDF/JPG/PNG) attached — bytes are in hand at upload, no Drive
+  round-trip. Bell/push behaviour unchanged (uploads still don't ping).
+- **Tranche marked paid** → email to every active user: tranche, amount,
+  payment date, bank, completion note when it was the final tranche, and
+  the TT copy attached (new `download_tt_copy_from_drive` fetches it back;
+  falls back to the Drive view link on failure). Replaces the old
+  completion-only HoM/super email — everyone includes them, so no
+  duplicates.
+- `send_email` gained attachment support; two new pure builders
+  (`build_tt_uploaded_email`, `build_tranche_paid_email`).
+- **Deploy prerequisite**: SMTP must be configured (`SMTP_HOST` etc.) or
+  emails are skipped silently (logged) — same gate as before. TT files are
+  ≤ 10 MB, safely under normal mail-size limits.
+
+283 tests green (builder wording + everyone-audience/attachment test).
+
+## Follow-up (19 Aug 2026) — Vendor Master (FY 2025-26) seed script
+
+`scripts/seed_vendor_master.py` imports `seed_data/Vendor Master
+(FY 2025-26).csv` (371 suppliers / 23 verticals / 31 customers) into the
+masters WITHOUT duplicates: name-matched case-/whitespace-insensitively;
+missing rows inserted (new suppliers get generated `ABC-00042`-style codes
+continuing the existing sequence); deactivated rows the CSV still lists are
+reactivated (skip with `--no-reactivate`); `--dry-run` reports without
+writing. Idempotent — a second run adds nothing. Touches no users, no
+requests, deletes nothing.
+
+## Follow-up (19 Aug 2026) — Bank extraction hardened for Chinese DBS statements
+
+DBS HK statements (bilingual, 支出 Withdrawal / 存入 Deposit / 結餘 running
+Balance per row, 承上結餘 brought-forward opening, 總額 Grand Total +
+戶口結餘 Closing Balance at the end) broke the Citi-shaped extraction:
+flipped debit/credit, summary rows counted as transactions, wrong ending
+balance. Fixes (analysed against the real DBS HKD/USD June samples):
+
+1. **Bilingual layout-aware prompt**: explicit CN/EN column mapping
+   (支出→debit, 存入→credit, 結餘→running balance — never an amount),
+   summary-row exclusions with their Chinese labels, printed Grand Total →
+   header totals, DD-Mon-YY date conversion.
+2. **Per-row running balance captured** and used for a deterministic
+   `reconcile_directions` pass: a debit/credit whose direction contradicts
+   the balance delta is auto-flipped; a missing amount is recovered from an
+   unambiguous delta. Corrections are counted in the extraction note.
+3. **Summary-row safety net** (`is_non_transaction`, bilingual regex) drops
+   brought-forward/closing/total rows the model still returns.
+4. **Fallbacks**: beginning derived from the first row's balance, ending
+   from the last running balance, when the header misses them.
+5. **Printed-totals cross-check**: extracted debit/credit sums are compared
+   with the statement's own 總額 Grand Total — MATCH or MISMATCH stated
+   loudly in the note, alongside the existing beginning/ending integrity
+   check.
+6. Render DPI 150 → 200 (denser CJK pages, fewer misread digits);
+   `safe_date` accepts 31-May-26 / 01-Jun-2026 (4-digit year tried first —
+   truncation ambiguity fixed).
+
+287 tests green (direction flip, delta recovery, bilingual summary-row
+filter, DBS date formats). Re-upload the DBS statements after deploy —
+delete the bad rows first (delete + re-upload is the correction path).
+
+## Follow-up (19 Aug 2026) — Deactivated users were unreachable
+
+Deactivating a user removed them from the admin Users list (backend
+returned active-only) while their email stayed reserved — no Activate path,
+and re-creating threw "already exists". The admin page always knew how to
+render inactive rows with an Activate toggle; the list endpoint now returns
+active AND deactivated users (super-admin-only endpoint), and creating a
+user whose email belongs to a DEACTIVATED account now says so explicitly
+and points at the Activate button. Backend-only; 287 tests green.
+
+## Follow-up (2 Sep 2026) — Tracker import script (FY sheet, 1,011 rows)
+
+`scripts/seed_tracker.py` loads `seed_data/Deposit Sunshine Tracker - Form
+Submission.csv` — one-time load that REFUSES to run if any deposit request
+exists. Numbering sequential by request date (Dep-2025-0001…0049,
+Dep-2026-0001…0962). Status mapping: Payment Processed (971) → processed +
+locked + paid legacy tranche + payment_details (payment/ship dates, bank —
+SCB'/CIT/ciit normalised to SCB/CITI/DBS); Cancelled (21), Holds (2+2),
+blank (15) → pending_payment. Missing staff emails become ACTIVE
+merchandiser users (existing users NEVER touched); masters get-or-created
+by normalised name with generated supplier codes. StatusHistory seeded;
+submission_source=google_form; --dry-run reports without writing. Parsing
+validated offline: 0 issues across 1,011 rows.
+
+**Cutoff (2 Sep)**: only rows with Request Date ≤ **31 Aug 2026** import
+(default `--cutoff 2026-08-31`, overridable). On the current file that is
+985 rows in (Dep-2025-0001…0049, Dep-2026-0001…0936) and 26 skipped
+(dated 1–2 Sep 2026), reported in the run output. Skipped rows consume no
+request numbers.
+
+## Follow-up (2 Sep 2026) — Five-change batch
+
+1. **Excel export**: Export button on every Accounts Workspace tab (incl.
+   Yet to be Released) and the merchandiser tabs — exports the CURRENT
+   filtered view via SheetJS (lazy-loaded; new `xlsx` dependency). Columns =
+   bank ledger + context (Request #, Request Date, Supplier, Proforma #,
+   Sunshine #, Customer, Currency, Deposit, Status, Payment Date). Note:
+   server-paginated tabs export the visible page (50 rows).
+2. **Payment date beside every paid amount** + request date: Live Exposure
+   tables (exposure endpoint now returns payment_date + request_date),
+   Accounts Processed tab, the merchandiser requests table, and the
+   All-Shipments snapshot (endpoint gained payment_date via PaymentDetails
+   join).
+3. **Number inputs**: spinner arrows hidden app-wide and wheel-scroll can
+   no longer change a focused number field (global blur-on-wheel).
+4. **Merchandiser form editing**: the OWNER edits the full form (supplier —
+   new in the update schema —, customer, vertical, invoice numbers,
+   currency, ETD, invoice total) while the request is pending AND Accounts
+   have not acted (no request-wide write, no tranche paid/TT'd/detailed) —
+   server-gated in DepositRequestService.update; invoice-number endpoint
+   guard now admits the merchandiser (ownership + gate enforced by the
+   service). New collapsible "Edit Request" card on the merchandiser detail
+   view, shown only while the gate is open. Deposit amount stays
+   tranche-derived. Super admin unchanged.
+5. **Sidebar**: Logout moved from the fixed footer to the END of the menu
+   (scrolls with it); the footer keeps avatar/name/role.
+
+289 tests green (edit-gate pair), tsc clean; no migration; deploy backend +
+frontend together (new exposure/shipments fields, update-schema change).
+
+## Follow-up (2 Sep 2026) — Cost of Fund aligned to the client's FINAL sheet formulas
+
+Verification first: contrary to the client-side note, the engine already
+anchored the day-count at ORIGINAL ETD ((ship or today) − Est ETD, signed,
+frozen at ship date) and already required payment — the grace-anchored
+metric is the separate defaulter column. The one REAL difference was the
+charge gate. Changed to match `AF = IF(AND(paid, TODAY() > Grace ETD),
+deposit × rate/365 × days)`:
+
+- Gate is now calendar-based: nothing until TODAY crosses Grace ETD; after
+  that the signed T→(ship|today) figure applies — including the small
+  charge for shipped-within-grace rows and the negative early-ship gain
+  (which now also waits for the grace crossing). This REMOVES the 10 Jul
+  zero-within-grace divergence; the golden fixture now matches the client
+  sheet exactly (27.70/13.85 rows restored).
+- Unshipped behaviour unchanged (gate identical there); unpaid rows still
+  never charge; day-count/freeze unchanged.
+- Note for ops: the sheet uses 12% — `cost_of_fund_rate` in system config
+  must be 0.12 for totals to match. Stored snapshots recompute via the
+  30-min job / admin Recalculate.
+
+290 tests green (2 golden rows updated to sheet values; 2 engine tests
+retargeted; new gate-timing test).
+
+## Follow-up (2 Sep 2026) — Analytics aligned to the Deposit Dashboard Formula Reference
+
+Full audit of the Analytics screens against the client's Formula Reference
+(.md handoff). Already matching: Delayed definition (paid + graced ETD
+passed + unshipped ⇔ etd_grace_overdue_days > 0), Overdue-amount KPIs,
+"% of Delayed" denominator quirk (kept as the sheet has it), the
+Outstanding weekly tab (request-date weeks, unpaid tranches, per-currency —
+including both ⚠ items the doc asked to confirm), RMB→CNY label handling,
+TODAY()-based recompute. Fixed to match:
+
+1. **Cancelled/rejected PIs excluded from every screen** (§4) — new
+   `_DASH_EXCLUDED_STATUSES` on all dashboard queries + drill filters.
+2. **Overdue KPIs (§3.A)**: Notional Gain per currency now sums ALL live
+   rows, not just Delayed ones.
+3. **Shipment KPIs (§3.B)** rebuilt on the sheet's STATUS: Graced = paid,
+   unshipped, Est ETD < today ≤ Grace ETD (the old between(−10,0) had been
+   dead since the 11 Aug engine change); Shipped = ship date recorded (was
+   status processed); Yet to Ship = paid, unshipped, ETD not passed (was
+   status pending); Total Active = PAID rows (was all rows).
+4. **Delay Buckets (§2.2/2.3/3.C)**: day counts anchored at ORIGINAL Est
+   ETD (Graced 0-10, G-15 = 11-15, …, terminal ">150 Days" replacing the
+   dynamic extension); Cases/Overdue columns cover Graced/Delayed rows only
+   (shipped / yet-to-ship rows carry no delay range — previously everything
+   landed in "Graced ETD"); Notional columns keyed off Actual-ETD-Overdue
+   days (shipped rows included), deliberately a different row set.
+5. **By Merchandiser (§3.D)**: Contribution % now CASES-based (was USD);
+   Avg Delay from Est ETD; Notional Gain = ALL live USD rows of the staff.
+   **By Vertical (§3.E)**: same avg/notional fixes. **By Customer (§3.F)**:
+   avg/max from Est ETD; ETD Pending = "Yet to be Shipped" rows over ALL
+   live rows (the old count looked for pending_payment among delayed rows —
+   the doc's flagged always-0 bug, now per the doc's stated intent);
+   notional aligned.
+6. **Frontend**: bucket filter G-15 bounds now 10–15 (est-anchored); drill
+   cross-filters and bucket matching compute days-from-Est-ETD
+   (overdue + grace span); shipment drills mirror the new STATUS
+   definitions; ">150 Days" (null max) handled in drill URLs.
+
+290 tests green, tsc clean; no migration; deploy backend + frontend
+together.
+
+## Validation (3 Sep 2026) — Sunshine Deposits Analysis V2.xlsx replay
+
+Replayed the app engine over ALL 991 non-cancelled rows of the client's
+live workbook (sheet TODAY = 2026-09-03), comparing every cached computed
+column. Result: **exact match, no code changes needed** —
+- Actual-ETD-Overdue days (AE): 991/991 identical.
+- Cost of Fund (AF): 991/991 identical (±2 cents rounding).
+- Row STATUS (Delayed/Graced/Shipped/Yet-to-be-Shipped/blank): 991/991.
+- Delay Range buckets (AI): 991/991.
+- Overall Range (AJ): the sheet leaves it blank wherever CoF is blank;
+  every such row carries zero CoF, so bucket notional sums are identical —
+  functional match, no change.
+Dashboard SUMIFS/COUNTIF formulas confirmed = the 2 Sep alignment
+(unfiltered notional, paid-rows Total Active, cases-%, AJ-keyed notional,
+excl-graced denominator). For the DATA to match in the app:
+`cost_of_fund_rate` must be 0.12 in system config, and snapshots must be
+recalculated after deploying the 2 Sep CoF gate change.
+
+Deploy checklist:
+1. `cd backend && alembic upgrade head` — applies **0028 → 0029**.
+2. Deploy backend + frontend together (new endpoints: `/requests/{id}/reject`,
+   `/requests/queue-kpis`, `/masters/suppliers/{id}/exposure`,
+   `/file-remarks/{id}/approve|reject`, `/reports/bank-ledger`; removed:
+   `/file-remarks/{id}/resolve`).
+3. Final state: 257 backend unit tests green, `tsc` clean.
+
+## Follow-up (4 Sep 2026) — Excel export: Bank Ledger option
+
+Executive request: the payment-queue "Export Excel" button now opens a
+2-option menu — **Export in Bank Ledger** and **Export** (unchanged
+standard format).
+
+Bank Ledger format (`exportBankLedgerToExcel`, `lib/exportExcel.ts`) —
+columns exactly as the executives' ledger:
+`Date | Supplier | Voucher No. | File Nos. | Customer | Curr | EURO/CNY |
+Rate | Debit | Credit | BALANCE`
+- **One row per tranche** (rejected tranches excluded), sorted
+  chronologically (oldest first).
+- Paid tranche: Date = its payment date, EURO/CNY = amount, Debit = amount.
+- Unpaid tranche: Date = request date, EURO/CNY = amount, Debit blank
+  (an upcoming entry).
+- Voucher No., Rate, Credit, BALANCE export **blank** — no such data in
+  the system; maintained manually in Excel (confirmed with client).
+- Exports the current filtered view, like the standard export.
+
+Scope: all six request tabs of the Accounts Workspace (Pending, Processed,
+On Hold, Rejected, Cancelled, All). The Yet-to-be-Released tab and the
+merchandiser export keep the single-option button (ledger format doesn't
+apply). `ExportButton` gained an optional `onExportLedger` prop — a small
+self-contained dropdown (no new dependency), closes on outside click.
+
+tsc clean; frontend-only change.
+
+## Follow-up (4 Sep 2026) — Pending Payments Bank Ledger tile + tab
+
+Executive request: view the pending payments in the bank-ledger layout on
+screen, no download needed.
+
+- Accounts Workspace gains a **"Pending Payments (Bank Ledger)"** tile
+  (live count of ledger entries — one per tranche) that opens a new
+  **Bank Ledger** tab next to Pending.
+- The tab renders the pending queue through the same `bankLedgerEntries()`
+  shaping the Excel export uses (extracted from `exportBankLedgerToExcel`,
+  `lib/exportExcel.ts`) — identical rows, columns and ordering to the
+  downloaded file: one row per non-rejected tranche, oldest first; paid
+  tranches dated by payment date with Debit filled, unpaid dated by request
+  date with Debit empty; Voucher No., Rate, Credit, BALANCE empty (kept in
+  Excel). Dark header band mirroring the executives' sheet.
+- New `components/tables/BankLedgerTable.tsx` — client-side pagination
+  (50/page), search/sort from the page apply (it reads the filtered queue).
+- The tab keeps a single "Export Excel" button that downloads exactly what
+  is on screen (ledger format).
+
+tsc clean; frontend-only change.
+
+### Amendment (4 Sep 2026): the ledger's "EURO/CNY" amount column is renamed
+**"Currency"** (export + on-screen tab) — a generic term so the ledger
+supports every currency in the system, not just EUR/CNY. The "Curr" code
+column is unchanged.
+
+## Follow-up (4 Sep 2026) — Modify Request renames, Invoice Value Change,
+## ledger totals, tranche secondary currency, bank dropdown
+
+**Migration 0033** (`0033_value_change_and_secondary_currency.py`):
+`file_remarks.proposed_amount`, category CHECK widened with
+`invoice_value_change`; `payment_tranches.secondary_currency` +
+`secondary_amount`. Downgrade removes value-change rows, restores the check.
+
+1. **Sidebar**: "File Remarks" → **"Modify Request"** (route unchanged).
+2. **"Invoice Change" → "File Change"** everywhere it is displayed
+   (dropdown, tables, notifications, audit summaries) — the stored category
+   value stays `invoice_amount_change`.
+3. **New remark category "Invoice Value Change"** (`invoice_value_change`):
+   the invoice's VALUE changes, its number stays.
+   - Merchandiser raises it with a **proposed new amount** (required, > 0;
+     no ceiling — revisions can go up or down). Current amount pre-filled
+     and locked from the live file, like the other categories.
+   - Accounts **approve/reject** as usual; approval does NOT move the value.
+   - **Separate step** (client decision): Accounts then "Update Revised
+     Amount" (`POST /file-remarks/{id}/revised-amount`, pre-filled with the
+     proposal, applied exactly once) — only then does the file's live-ledger
+     amount change and flow into later splits/changes.
+   - A file with an approved-but-unapplied value change is held back from
+     the selectable-files dropdown (its amount is about to move).
+   - Deciders' "Open Remarks" inbox also lists approved value changes
+     awaiting the amount, with the Update Revised Amount action.
+   - **Notifications, both parties**: raise → Accounts team (existing);
+     approval/rejection of a value change → raiser + all other active
+     Accounts users; revised-amount update → raiser + all other active
+     Accounts users (`notify_file_remark_amount_updated`, new type
+     `file_remark_amount_updated`). Bell + push.
+4. **Bank Ledger tab total value**: per-currency "Total value" rows at the
+   bottom of the on-screen ledger — Currency-amount and Debit sums over the
+   whole filtered ledger (not just the visible page).
+5. **Tranche secondary currency + amount** (both optional; client decision:
+   Accounts enter them in the payment-details section): new inputs on the
+   per-tranche payment form, saved with Mark Paid; schema rejects an amount
+   without its currency; shown on the tranche card ("Secondary amount") for
+   all roles when present.
+6. **Bank dropdown no longer appends the currency** — shows/stores the bare
+   master name ("DBS", not "DBS (USD)"). Backend accepts bare names AND the
+   legacy composed values; stored legacy values still render (disabled
+   "legacy" option).
+
+295 backend tests green (new: value-change full flow raise→approve→apply,
+apply guards — not-approved/second-apply/wrong-category/role, schema
+proposed-amount requirement, secondary-currency pair validation, bare bank
+name accepted); tsc clean. Deploy: `alembic upgrade head` (0033) + backend
+and frontend together.
+
+### Amendment (4 Sep 2026): Bank Ledger column mapping corrected — the
+"Currency" column carries the currency CODE, "Debit" carries the tranche
+amount, and the redundant "Curr" column is removed. Final columns:
+Date | Supplier | Voucher No. | File Nos. | Customer | Currency | Rate |
+Debit | Credit | BALANCE. Applied to the on-screen tab (totals now sum
+under Debit, per currency) AND the Excel export.
+
+## Fixes + validation (4 Sep 2026) — Analytics: empty By-Merchandiser/Vertical
+## tabs, per-currency CoF columns, Sunshine Deposits Analysis V2 (1).xlsx replay
+
+**Root cause of the empty tabs (real bug, fixed):** the 2 Sep alignment's
+separate notional query in `get_by_merchandiser` / `get_by_vertical` selected
+`User.full_name` (resp. `Vertical.name`) first without `select_from`, so
+SQLAlchemy emitted `FROM users JOIN … JOIN users …, deposit_requests` —
+Postgres rejects the duplicate table, the endpoint 500'd, and the frontend
+swallowed the error into the "No data yet" empty state. `get_by_customer`
+already had `select_from(DepositRequest)`, which is why only those two tabs
+died. Fixed with explicit `select_from`; regression tests added
+(`test_analytics_grouped_tables.py`, 4 tests); the three tabs now render an
+explicit error row (`ErrorTable`) instead of masquerading as empty.
+
+**Cost of Fund in the grouped tables:** By Merchandiser / By Vertical /
+By Customer now carry per-currency "(Notional Gain)/Loss" = Cost of Fund
+columns (USD / CNY / EUR), summed over ALL live rows of the group — matching
+the new sheet's U:W / AG:AI / AU:AW columns. `notional_gain` (USD) kept for
+API compatibility. Headers read "CoF / Notional (USD|CNY|EUR)".
+
+**Validation replay (sheet TODAY = 2026-09-04, 991 non-cancelled rows):**
+- Actual-ETD-Overdue days (AE): 991/991 exact.
+- Cost of Fund (AF): 991/991 exact (±2¢).
+- STATUS: matches semantically (sheet adds decorations "⚠ Delayed by N days",
+  "⏰ Graced ETD — N days"); only nuance: 2 rows shipped-but-never-paid show
+  blank in the sheet (its STATUS is paid-first) vs "Shipped" in the app.
+- Delay ranges: sheet moved to the 15-day scheme (Graced ETD / G-15 /
+  15-30 … 135-150 / >150 Days) — the app's 2 Sep buckets ALREADY use exactly
+  this scheme; 991/991 match.
+- Headline KPIs recomputed from raw rows with app rules: Delayed 109,
+  Graced 58, overdue USD 4,721,737.81 / RMB 413,427.58 / EUR 4,004.00 —
+  all EXACT vs the sheet dashboard.
+
+**Sheet-side quirks that make small app-vs-sheet diffs (report, not bugs):**
+1. Notional totals: sheet SUMIFS has NO cancellation filter — 20 cancelled
+   rows contribute ≈183.87 USD (sheet 207,882.66 vs app-rule 207,698.79).
+   The app excludes cancelled/rejected everywhere.
+2. Bucket "% of Delayed Cases" divides by SUM(B23:B32), which misses the
+   ">150 Days" row added later (denominator 103 vs 109) — app divides by all
+   delayed buckets.
+3. Customer "ETD Pending" counts AH = "⏳ ETD Pending", a label AH never
+   produces (it says "Yet to be Shipped") — the sheet column is stuck at 0;
+   the app computes the real pending count.
+4. Several dashboard formulas stop at raw-data row 1003 while data now runs
+   past row 1014 — the sheet under-counts its own newest rows.
+5. Sheet "TOTAL SHIPPED" = 621 vs app 622: the paid-first STATUS drops
+   shipped rows that carry no payment date.
+
+**For the DATA to match in the app:** deploy this batch (backend+frontend),
+`cost_of_fund_rate` = 0.12 in system config, run Recalculate after deploy,
+and remember the app's row set = imported tracker (985 rows ≤31 Aug cutoff)
+plus PWA-entered rows — the sheet has 1011 rows.
+
+299 backend tests green; tsc clean; no migration in this batch.
+
+## Cost-of-Fund reconciliation tooling (4 Sep 2026)
+
+Client reported requests (e.g. 855/3256/2026-27, Dep-2026-0549) showing NO
+cost of fund / analytics snapshot while the tracker sheet computes one
+(≈1,241). Offline audit findings:
+- The import CSV parsed 100% cleanly (0 unparseable payment/ETD/ship dates
+  across 985 rows; 10 processed rows genuinely have no payment date in the
+  source). 855/3256 imported with correct inputs (paid 3 Jun, ETD 13 Aug,
+  unshipped) — the engine WOULD produce the sheet's CoF from them.
+- ⇒ the gap is on the SNAPSHOT side: analytics_snapshots rows missing/stale
+  on the server (scheduler not completing, or Recalculate never run after
+  the import + CoF-gate deploy). If MISSING_SNAPSHOT is large, check the
+  backend logs for "Snapshot failed" / "refresh_all_snapshots crashed".
+- xlsx (2 Sep) vs imported CSV drift is tiny: 4 ship dates added later,
+  23 rows renamed/added, and 145 rows share sunshine numbers (multi-tranche
+  sheet entries) — handled by tiered matching.
+
+New `scripts/validate_cost_of_fund.py` — run on the server (report-only by
+default):
+    python -m scripts.validate_cost_of_fund
+    python -m scripts.validate_cost_of_fund --fix --actor-email <admin>
+- Matches every sheet row to a DB request (sunshine number, disambiguated
+  by deposit amount then request date; each request consumed once).
+- Classifies: MISSING_IN_DB / STATUS_DRIFT / INPUT_DRIFT (payment date,
+  ship date, Est ETD, deposit report-only) / MISSING_SNAPSHOT /
+  STALE_SNAPSHOT (stored ≠ engine-today on DB inputs) / OK, plus DB-only
+  rows (post-2-Sep app entries).
+- --fix (audited, google_form rows only): corrects payment/ship dates on
+  payment_details (creating the row if absent), estimated_etd, keeps the
+  legacy paid tranche's dates consistent — then recomputes + upserts the
+  analytics snapshot for every mismatched request, so analytics are right
+  immediately without waiting for the scheduler.
+- Warns when cost_of_fund_rate ≠ 0.12.
+Requires seed_data/Deposit Sunshine Tracker.xlsx (committed) and openpyxl
+(already in requirements). 299 tests green.
+
+### Snapshot-job skip rule fixed (4 Sep 2026)
+
+Answering "is there something where processed/locked won't get CoF?": YES —
+the 30-minute scheduler skipped every **processed + shipped** request
+(assumed static). Two flaws:
+1. Imported tracker rows arrive ALREADY processed+shipped with no snapshot —
+   the regular job would never give them their first one (~620 of the 985
+   imported rows). Only force=True (admin Recalculate) reached them.
+2. Since the 2 Sep CoF gate, a row shipped WITHIN grace carries 0 CoF until
+   TODAY crosses its grace ETD — not static, must keep recomputing.
+
+Fix (`snapshot_job.py`): the non-force run now skips a processed+shipped row
+only when it already HAS a snapshot AND its grace_etd has passed (truly
+static). New `tests/unit/test_snapshot_job.py` (3 tests: first snapshot for
+imported shipped rows, recompute-until-grace-crosses, truly-static skipped +
+force recomputes). `is_locked` plays no role in snapshots.
+
+Note: settings default cost_of_fund_rate is 0.18 — the 0.12 must be set in
+SystemConfig (tests pin it; the validation script warns when it isn't).
+
+302 backend tests green.
+
+## Follow-up (4 Sep 2026) — Vertical filter on the merchandiser request list
+
+Executive request: a Vertical dropdown ("All verticals" + the active
+verticals master) beside Search/Sort on My Requests. It filters the
+server-paginated list on every status tab (the backend GET /requests already
+accepted vertical_id — frontend-only change); resets to page 1 on change;
+the Excel export follows the filtered view as before. The KPI tiles and tab
+counts deliberately keep their overall numbers, matching how Search behaves.
+
+tsc clean; no backend change.
+
+## Follow-up (4 Sep 2026) — Replace / Delete TT copy (Accounts)
+
+Client: TT copies could be uploaded but never edited or removed.
+
+- **Replace**: beside "View TT copy", Accounts get a Replace button (opens
+  the file picker; uploads immediately). `attach_tt_copy` now lets Accounts
+  overwrite (previously Super Admin only); the swap is audited old → new
+  filename, the executive TT email fires for the new document, and the old
+  Drive file is deleted best-effort in the background
+  (`delete_tt_copy_from_drive`, new in drive_service).
+- **Delete**: a Delete button with a confirm dialog →
+  `DELETE /requests/{id}/tranches/{tid}/tt-copy` → new
+  `TrancheService.remove_tt_copy` (Accounts/Super only; blocked on
+  cancelled/rejected requests and merchandiser holds; audited — legacy rows
+  without a filename audit the URL instead). On an UNPAID tranche the delete
+  re-blocks Mark Paid until a new copy is uploaded (readiness tick resets);
+  paid tranches allowed too (mirrors the legacy "upload to complete the
+  record" flow). Drive file removed best-effort in the background.
+- Rejected tranches: no replace/delete (consistent with attach).
+- TrancheList now renders ONE shared hidden file input per tranche in
+  accounts mode — Upload (unpaid), legacy Upload (paid, missing copy) and
+  Replace all drive the same picker.
+
+Tests: accounts replace (audited swap) replaces the old duplicate-rejected
+test; delete flow (fields cleared, audit row, second delete conflicts,
+merchandiser forbidden, Mark Paid re-blocked). 303 backend tests green;
+tsc clean; no migration.
+
+## Follow-up batch (4 Sep 2026 evening) — ledger columns, unpaid-only pending
+## ledger, pending table columns, Deposit %, analytics for all, dynamic filters
+
+1. **Bank Ledger final column sequence** (tab + export):
+   Date | Supplier | **Supplier Proforma Invoice #** (replaced Voucher No.,
+   carries supplier_invoice_number) | File Nos. | Customer | Curr (code) |
+   **EURO/CNY (restored, kept EMPTY — client decision)** | Rate | Debit
+   (amount) | Credit | BALANCE.
+2. **The "1323" fix**: the Pending Payments Bank Ledger (tab + its export)
+   lists ONLY unpaid tranches — paid tranches of a partially-paid request no
+   longer appear in the pending sheet (`bankLedgerEntries(..., {unpaidOnly})`).
+   Ledger exports from other tabs unchanged (client decision).
+3. **Pending Payment table**: new "Supplier Proforma Invoice #" column after
+   Supplier; Vertical column now BEFORE Customer.
+4. **Yet to be Released removed from the Accounts Workspace** (tile, tab,
+   table, export, per-row column) — replaced in the pending table by a
+   **Deposit %** column (stored percentage, else deposit/proforma total).
+   The release WORKFLOW is untouched: merchandiser tile/release button stay,
+   unreleased tranches remain unpayable and excluded from Amount Payable.
+5. **Analytics open to all roles**: DEFAULT_PERMISSIONS now grants every
+   section to all five roles; the Super Admin permission switches remain.
+   NOTE for servers previously configured: a stored `analytics_permissions`
+   system_config row overrides defaults — flip the toggles in admin, or
+   `DELETE FROM system_config WHERE config_key='analytics_permissions'`.
+   The analytics staff dropdown now reads the new any-role
+   `GET /masters/users/merchandisers` endpoint (was Super-Admin-only master).
+6. **Dynamic filter module** (`components/filters/RequestFilterBar.tsx`):
+   add-a-filter chips for Supplier / Customer / Vertical / Merchandiser /
+   Currency / Request-date range; emits one RequestFilterValues object with
+   `filterParams()` (server) + `matchesRequestFilters()` (client) helpers.
+   Wired app-wide: Accounts Workspace (all tabs; pending queue + ledger
+   filtered client-side, paginated tabs server-side), Merchandiser My
+   Requests (replaces the morning's single vertical dropdown; no
+   merchandiser field), HoM approval queue (client-side). Backend
+   GET /requests gained `currency`, `date_from`, `date_to` filters
+   (repo `_apply_filters`).
+
+303 backend tests green; tsc clean; no migration. Deploy backend + frontend
+together (new filters + merchandisers endpoint).
+
+## Projections module (4 Sep 2026) — migration 0034
+
+Monthly per-vertical deposit projections (USD / EUR / CNY) vs actuals.
+Client decisions: window collects the NEXT month; actuals = deposit amounts
+of live requests by request date; only merchandisers WITH assigned verticals
+are nagged/blocked; after the deadline only the Super Admin can add values
+(no late self-fill).
+
+**Data (0034):** `verticals.assigned_user_id` (single vertical → single
+user; user → many verticals; drives ONLY the projection form) and
+`projections` (vertical, year, month, amount_usd/eur/cny, user_id,
+submitted_by; unique per vertical+period).
+
+**Cycle:**
+- 25th → month end: merchandisers fill/edit next month's numbers per
+  assigned vertical (`/projections` form; upsert). Daily 04:00 UTC reminders
+  (bell + push, countdown wording) via `send_projection_reminders`; a
+  once-per-session popup on My Requests links to the form.
+- From the 1st: any assigned vertical missing the CURRENT month's projection
+  BLOCKS request creation (guard in POST /requests) with the formal message
+  naming the missing verticals and "contact the Super Admin"; a one-time
+  formal notification (TYPE_PROJECTION_BLOCKED) plus a red banner on My
+  Requests. Merchandisers with no verticals are never contacted or blocked.
+- Super Admin unblocks via the on-behalf form on /projections (current or
+  next month, any merchandiser's verticals).
+
+**Endpoints:** GET /projections/status, POST /projections,
+GET /projections/dashboard (all roles), PUT
+/masters/verticals/assignments/{user_id} (Super Admin; refuses verticals
+held by another user). VerticalResponse carries `assigned_user_id`.
+
+**Frontend:** sidebar "Projections" (all roles) → merchandiser form (window
+state, prefilled amounts, pending markers), Super-Admin on-behalf card,
+projections-vs-actuals dashboard (month picker, Filled/Pending pills,
+per-currency totals row). Admin Users page: "Verticals" column on
+merchandiser rows opens the multi-select assignment dialog (verticals held
+by others disabled, single-owner enforced server-side too).
+
+Nothing else reads the assignments — request forms and other dropdowns are
+untouched. 5 new unit tests (window math, exclusive assignment, window/
+ownership guards, block + super-admin unblock, dashboard actuals).
+308 backend tests green; tsc clean. Deploy: `alembic upgrade head` (0034),
+backend + frontend together.
+
+### Amendment: the projections popup now returns EVERY DAY (dismissal key
+carries the date) until the form is complete — a per-month key would have
+fired only once inside the 72-hour PWA sessions. Daily bell+push reminders
+were already in (04:00 UTC job, 25th→EOM countdown wording).
+
+### Projections analysis view (5 Sep 2026)
+The Projections dashboard now carries a full analysis block above the table:
+an achievement strip (Projected / Actual / Achievement % for the selected
+currency), a USD-EUR-CNY toggle, and a grouped BAR CHART (Projected vs
+Actual per vertical, lazy-loaded Recharts — `charts/ProjectionChart.tsx`).
+The detail table with the per-currency totals row stays below. tsc clean.
+
+## Priority of Tranche Payment (5 Sep 2026) — migration 0035
+
+`payment_tranches.priority` — 'normal' (default) / 'high', CHECK-constrained.
+- **New Request form**: each tranche row gains a "Priority of Tranche
+  Payment" dropdown (default Normal; "High Priority" for urgent payments).
+- Also selectable on **Add Tranche** and the merchandiser's tranche **edit**
+  form (unpaid tranches only, same rules as amount/date; flows through the
+  existing update audit).
+- **Display, never ordering**: a red "High" pill appears beside the request
+  number in the Accounts Pending Payment queue (desktop + mobile card) and
+  in the merchandiser's request list — only while at least one UNPAID
+  tranche is high (paid/rejected tranches stop badging the row). Tranche
+  cards show a "High Priority" pill. No sort/filter behaviour changes.
+- Backend: TrancheCreate/TrancheUpdate/TrancheResponse carry `priority`;
+  request-create and add-tranche persist it. New unit test (default normal,
+  add high, edit back to normal). 309 backend tests green; tsc clean.
+
+Deploy: `alembic upgrade head` (0035) + backend & frontend together.
+
+### Priority filter (5 Sep 2026 follow-up)
+The dynamic filter bar gained a **Priority** field — "High Priority" (at
+least one unpaid high-priority tranche, i.e. exactly the rows carrying the
+queue badge) or "Normal only". Works everywhere the bar lives (Accounts
+Workspace all tabs incl. the client-filtered pending queue + Bank Ledger,
+merchandiser My Requests, HoM queue). Backend: GET /requests `priority`
+param (EXISTS subquery on unpaid high tranches). Opt-in — default listing
+untouched. 309 tests green; tsc clean.
+
+## Invoice Value Change rework (5 Sep 2026) — two client bugs fixed
+
+The 4 Sep design treated the value change as a file-ledger entry; the client
+clarified it revises the request's **Total Supplier Proforma Invoice
+Amount**, must work BEFORE payment, and applying it must actually update the
+request (raising the tranche ceiling so more tranches can be added).
+
+1. **Eligibility + prefill**: `/file-remarks/selectable-files?category=
+   invoice_value_change` now lists ANY live request (pending, hold, or
+   processed — cancelled/rejected excluded), one row per request, with the
+   TOTAL proforma invoice amount (bug: it previously listed only
+   payment-completed requests and showed the paid/deposit amount). The form
+   labels it "Current Total Invoice Amount"; Split / File Change eligibility
+   is unchanged (payment-completed live files). `create()` gates the value
+   change on live-status only and derives old_amount from the total.
+2. **Apply updates the request**: `apply_revised_amount` now WRITES the
+   revised figure into `deposit_requests.total_supplier_invoice_amount`
+   (field-level audit old→new), recomputes the stored deposit %, and guards
+   that the new total still covers the existing non-rejected tranche sum.
+   Tranche "% of invoice" figures recompute automatically; the merchandiser
+   can immediately add tranches up to the new total. The notification and
+   the UI dialogs now say so explicitly.
+3. Value changes no longer touch the split/File-Change deposit ledger
+   (they never moved deposit value); the hold-back of files under a pending
+   value change remains.
+
+Tests: full flow rewritten (old_amount = total; total updated on apply;
+below-tranche-sum guard; ledger untouched) + new pre-payment eligibility
+test. 310 backend tests green; tsc clean; no migration.
+
+## Batch (9 Sep 2026) — analytics visibility, queue cleanup, invoice edits,
+## BULK PAYMENT, HoM retrospective remarks
+
+1. **By Merchandiser tab invisible to Accounts** — root cause: a stored
+   `analytics_permissions` system_config row (saved under the old role
+   scheme) overrides the 4 Sep all-open defaults. **Migration 0036** deletes
+   the stored row once; the all-open defaults apply and the Super Admin
+   toggles keep working (saving recreates the row).
+2. **Pending queue "Process" column removed** (desktop) — the Request #
+   hyperlink opens the request; mobile cards keep their button.
+3. **Invoice numbers editable at ANY status** (client decision): Accounts /
+   Super Admin invoice-number-only updates bypass the completion lock and
+   terminal freezes in `DepositRequestService.update` — all other fields
+   keep the existing lock rules; cross-request uniqueness + old→new audit
+   unchanged. Tests: locked-request edit allowed, other fields still locked.
+4. **Bulk payment** (`POST /requests/bulk-pay`, multipart): Accounts tick
+   same-supplier rows on the Pending tab (checkbox column; rows without a
+   payable tranche or of a different supplier than the first pick are
+   disabled — the wrong-supplier safety) → "Pay Selected (n)" opens the
+   BulkPayDialog (`components/accounts/BulkPayDialog.tsx`): the per-tranche
+   payment form (date, bank, ref, remarks, secondary currency/amount) + ONE
+   TT copy. Client decisions: pays each request's NEXT payable tranche
+   (lowest-numbered unpaid + released) and marks it PAID in one atomic
+   action (any failure rolls the whole batch back). One Drive upload shared
+   by every tranche (filename TT_BULK_{supplier_code}_{date}); per-request
+   snapshot reseed, paid notification and executive TT email; batch capped
+   at 25.
+5. **HoM retrospective remarks**: `GET /requests/{id}/hom-history` returns
+   past HoM approve/reject decisions (status-history rows leaving
+   pending_hom_approval) on the SAME supplier's earlier requests, newest
+   first. The HoM request page shows a "Previous HoM Decisions" card
+   (decision pill, remark, who/when, links) above the default history.
+
+312 backend tests green; tsc clean. Deploy: `alembic upgrade head` (0036) +
+backend & frontend together.
+
+## All requests visible to ALL merchandisers with FULL RIGHTS (11 Sep 2026)
+
+Executive request, delivered in two steps within the same session: first the
+read boundary was lifted, then (per the follow-up "they will be having all the
+same rights not just read only") the ownership guards on every write path were
+removed too. Any merchandiser can now see AND act on any request.
+
+**Backend**
+- `DepositRequestRepository._apply_filters` — MERCHANDISER own-requests
+  scoping removed (listing + counts). The `created_by` param remains for the
+  opt-in Merchandiser filter chip.
+- `GET /requests/{id}` + tranches `_request_or_404` — non-owner 404 removed.
+- `GET /requests/pending-payment-queue` and `GET /requests/pending-release` —
+  merchandisers see all rows.
+- Ownership guards removed (role gates kept): `DepositRequestService.update`,
+  `transition_status` (hold/resume/cancel), `update_remarks`;
+  `TrancheService` add/update/delete/release; `FileRemarkService`
+  selectable-files, create, and list (merchandisers now see every Modify
+  Request, like Accounts).
+- `GET /adjustments` — merchandiser `performed_by` scoping removed.
+- Analytics `_merchandiser_scope` now returns None (unscoped for all roles);
+  the old predicate is kept as `_merchandiser_scope_pre_sep2026` for reference.
+- New `tests/unit/test_merchandiser_visibility.py` (5 tests: sees-all,
+  mine-only filter, cross-owner edit / status change / add tranche);
+  3 tranche-service ownership tests and 2 file-remark tests flipped to the
+  new behavior. 317 backend tests green; tsc clean. No migration.
+
+**Frontend**
+- Merchandiser workspace: sidebar/title "My Requests" → "Requests"; subtitle
+  says all requests across every merchandiser; Merchandiser filter chip
+  enabled (`showMerchandiser` on RequestFilterBar); new opt-in Merchandiser
+  column on RequestsTable; export renamed `requests-{tab}.xlsx`.
+- Detail page unchanged functionally — same edit/hold/cancel/tranche powers
+  regardless of who raised the request ("Back to requests" wording updated).
+
+**Note**: audit trail unchanged — every action still records WHO did it, so
+cross-merchandiser edits stay fully attributable.

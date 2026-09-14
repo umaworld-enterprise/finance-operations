@@ -8,9 +8,9 @@ import { Suspense } from "react";
 import { cn } from "@/lib/utils";
 
 function LoginForm() {
-  const { signInWithGoogle, loading } = useAuth();
+  const { signInWithGoogle, loading, authError } = useAuth();
   const searchParams = useSearchParams();
-  const error = searchParams.get("error");
+  const error = searchParams.get("error") ?? (authError === "auth_failed" ? "auth_failed" : null);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">

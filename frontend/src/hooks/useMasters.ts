@@ -95,10 +95,41 @@ export function useSuppliers() {
   });
 }
 
+export function useBanks() {
+  return useQuery({
+    queryKey: ["banks"],
+    queryFn: masterService.getBanks,
+    staleTime: STALE,
+    gcTime: GC,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useSupplierDefaultStatus(supplierId: string | null) {
   return useQuery({
     queryKey: ["supplier-default", supplierId],
     queryFn: () => masterService.checkSupplierDefault(supplierId!),
+    enabled: !!supplierId,
+    staleTime: STALE,
+    gcTime: GC,
+  });
+}
+
+export function useSupplierDefaultHistory(supplierId: string | null) {
+  return useQuery({
+    queryKey: ["supplier-default-history", supplierId],
+    queryFn: () => masterService.getSupplierDefaultHistory(supplierId!),
+    enabled: !!supplierId,
+    staleTime: STALE,
+    gcTime: GC,
+  });
+}
+
+// Whole live exposure for one supplier (UAT Aug 2026, item 2).
+export function useSupplierExposure(supplierId: string | null) {
+  return useQuery({
+    queryKey: ["supplier-exposure", supplierId],
+    queryFn: () => masterService.getSupplierExposure(supplierId!),
     enabled: !!supplierId,
     staleTime: STALE,
     gcTime: GC,
@@ -131,6 +162,18 @@ export function useResolveDefault() {
   return useMutation({
     mutationFn: masterService.resolveDefaultFlag,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["defaulted-suppliers"] }),
+  });
+}
+
+// Merchandiser options for the dynamic filter bar (4 Sep 2026) — every role.
+export function useMerchandiserOptions(enabled = true) {
+  return useQuery({
+    queryKey: ["merchandiser-options"],
+    queryFn: masterService.getMerchandiserOptions,
+    enabled,
+    staleTime: STALE,
+    gcTime: GC,
+    placeholderData: keepPreviousData,
   });
 }
 

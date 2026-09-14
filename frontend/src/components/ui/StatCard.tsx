@@ -11,14 +11,18 @@ interface StatCardProps {
   trend?: { value: number; label: string };
   /** When set, the whole card becomes a link (in-page anchors work too). */
   href?: string;
+  /** When set, the whole card becomes a button — e.g. tiles that switch the
+   * page's table to their tab (19 Aug 2026). Ignored when href is given. */
+  onClick?: () => void;
 }
 
-export function StatCard({ label, value, icon: Icon, subtext, trend, href }: StatCardProps) {
+export function StatCard({ label, value, icon: Icon, subtext, trend, href, onClick }: StatCardProps) {
+  const interactive = Boolean(href || onClick);
   const card = (
     <Card
       className={cn(
         "relative overflow-hidden border-l-4 border-l-primary",
-        href && "hover:shadow-md hover:border-foreground/30 transition-all cursor-pointer h-full"
+        interactive && "hover:shadow-md hover:border-foreground/30 transition-all cursor-pointer h-full"
       )}
     >
       <CardContent className="p-5">
@@ -50,10 +54,24 @@ export function StatCard({ label, value, icon: Icon, subtext, trend, href }: Sta
     </Card>
   );
 
-  if (!href) return card;
-  return (
-    <Link href={href} aria-label={`${label} — view details`} className="block h-full">
-      {card}
-    </Link>
-  );
+  if (href) {
+    return (
+      <Link href={href} aria-label={`${label} — view details`} className="block h-full">
+        {card}
+      </Link>
+    );
+  }
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={`${label} — view listing`}
+        className="block h-full w-full text-left"
+      >
+        {card}
+      </button>
+    );
+  }
+  return card;
 }

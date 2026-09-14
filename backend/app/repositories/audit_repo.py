@@ -70,6 +70,29 @@ class AuditRepository(BaseRepository[AuditLog]):
         )
         return list(result.scalars().all())
 
+    async def list_for_entity_scope(
+        self, scope: list[tuple[str, list[UUID]]], limit: int = 200
+    ) -> list[AuditLog]:
+        """Audit rows across several entity groups in one query — e.g. a
+        request plus its tranches plus their adjustments."""
+        from sqlalchemy import and_, or_
+
+        conditions = [
+            and_(AuditLog.entity_name == name, AuditLog.entity_id.in_(ids))
+            for name, ids in scope
+            if ids
+        ]
+        if not conditions:
+            return []
+        result = await self._session.execute(
+            select(AuditLog)
+            .options(selectinload(AuditLog.changed_by_user))
+            .where(or_(*conditions))
+            .order_by(AuditLog.changed_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def list_all_paginated(
         self,
         offset: int = 0,

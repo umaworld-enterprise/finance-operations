@@ -10,7 +10,7 @@ export function useNotifications() {
     queryKey: ["notifications"],
     queryFn: () => notificationService.list(1, 20),
     enabled: !!user,
-    refetchInterval: 30_000,
+    refetchInterval: 10_000,
   });
 }
 
@@ -20,7 +20,7 @@ export function useNotificationsPaginated(page: number, pageSize: number) {
     queryKey: ["notifications", "page", page, pageSize],
     queryFn: () => notificationService.list(page, pageSize),
     enabled: !!user,
-    refetchInterval: 30_000,
+    refetchInterval: 10_000,
   });
 }
 

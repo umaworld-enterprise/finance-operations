@@ -57,9 +57,10 @@ const GROUPS: { label: string; fields: { key: string; label: string; desc: strin
 ];
 
 const ROLES: { value: string; label: string }[] = [
-  { value: "merchandiser",  label: "Merchandiser" },
-  { value: "accounts_team", label: "Accounts Team" },
-  { value: "finance_admin", label: "Finance Admin" },
+  { value: "merchandiser",         label: "Merchandiser" },
+  { value: "head_of_merchandiser", label: "Head of Merchandiser" },
+  { value: "accounts_team",        label: "Accounts Team" },
+  { value: "finance_admin",        label: "Finance Admin" },
 ];
 
 async function fetchConfig(): Promise<FieldConfig> {

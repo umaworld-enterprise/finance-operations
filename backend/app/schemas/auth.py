@@ -23,6 +23,18 @@ class CurrentUserResponse(OrmBase):
     font_size: str = "default"
 
 
+class GoogleLoginRequest(BaseModel):
+    # One-time authorization code from the Google sign-in popup
+    code: str
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int  # seconds
+    user: CurrentUserResponse
+
+
 class ProfileUpdate(BaseModel):
     full_name: str
     secondary_email: str | None = None

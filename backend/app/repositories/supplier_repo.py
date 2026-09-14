@@ -47,6 +47,18 @@ class DefaultedSupplierRepository(BaseRepository[DefaultedSupplier]):
         )
         return list(result.scalars().all())
 
+    async def list_for_supplier(self, supplier_id: UUID) -> list[DefaultedSupplier]:
+        """Full default history for one supplier — active AND resolved flags,
+        newest first (Aug 2026 follow-up: shown on request detail pages so
+        approvers see the supplier's track record)."""
+        result = await self._session.execute(
+            select(DefaultedSupplier)
+            .where(DefaultedSupplier.supplier_id == supplier_id)
+            .options(selectinload(DefaultedSupplier.supplier))
+            .order_by(DefaultedSupplier.flagged_date.desc())
+        )
+        return list(result.scalars().all())
+
     async def resolve(
         self, flag: DefaultedSupplier, resolved_by: UUID
     ) -> DefaultedSupplier:

@@ -26,6 +26,14 @@ _ALLOWED_TRANSITIONS: dict[tuple[RequestStatus, RequestStatus], frozenset[UserRo
     (RequestStatus.PENDING_PAYMENT, RequestStatus.PAYMENT_PROCESSED): frozenset({
         UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN,
     }),
+    # Accounts rejects the whole request — terminal (UAT Aug 2026, item 12/17/18)
+    (RequestStatus.PENDING_PAYMENT, RequestStatus.REJECTED_BY_ACCOUNTS): frozenset({
+        UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN,
+    }),
+    # Accounts may also reject after first placing the request on hold
+    (RequestStatus.HOLD_BY_ACCOUNTS, RequestStatus.REJECTED_BY_ACCOUNTS): frozenset({
+        UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN,
+    }),
     # Merchandiser resumes from own hold
     (RequestStatus.HOLD_BY_MERCHANDISER, RequestStatus.PENDING_PAYMENT): frozenset({
         UserRole.MERCHANDISER, UserRole.SUPER_ADMIN,
@@ -49,6 +57,13 @@ _ALLOWED_TRANSITIONS: dict[tuple[RequestStatus, RequestStatus], frozenset[UserRo
     # After reopen → back to pending payment
     (RequestStatus.REOPENED, RequestStatus.PENDING_PAYMENT): frozenset({
         UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN,
+    }),
+    # Merchandiser adds a tranche to a completed file (19 Aug 2026) — the
+    # request REOPENS into the payment queue for the additional amount (up
+    # to the invoice total) and completes again once the new tranches are
+    # paid. Fired by TrancheService.add_tranche, not a standalone action.
+    (RequestStatus.PAYMENT_PROCESSED, RequestStatus.PENDING_PAYMENT): frozenset({
+        UserRole.MERCHANDISER, UserRole.SUPER_ADMIN,
     }),
     # HoM approves → request goes to Accounts normally
     (RequestStatus.PENDING_HOM_APPROVAL, RequestStatus.PENDING_PAYMENT): frozenset({

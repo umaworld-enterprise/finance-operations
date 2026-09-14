@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.database import get_db_session
 from app.core.exceptions import AuthenticationError
-from app.core.security import decode_supabase_token
+from app.core.security import decode_access_token
 from app.models.enums import UserRole
 from app.repositories.user_repo import UserRepository
 
@@ -47,10 +47,6 @@ class CurrentUser:
         return self._user.role  # type: ignore[union-attr]
 
     @property
-    def supabase_uid(self) -> UUID:
-        return self._user.supabase_uid  # type: ignore[union-attr]
-
-    @property
     def onboarding_completed(self) -> bool:
         return self._user.onboarding_completed  # type: ignore[union-attr]
 
@@ -73,13 +69,14 @@ class CurrentUser:
         return self._user.role == UserRole.SUPER_ADMIN  # type: ignore[union-attr]
 
 
+_DEV_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
+
 _DEV_USER = CurrentUser(
     types.SimpleNamespace(
-        id=UUID("00000000-0000-0000-0000-000000000001"),
+        id=_DEV_USER_ID,
         email="admin@sunshine.dev",
         full_name="Dev Admin",
         role=UserRole.SUPER_ADMIN,
-        supabase_uid=UUID("00000000-0000-0000-0000-000000000002"),
         onboarding_completed=True,
         secondary_email=None,
         department=None,
@@ -88,14 +85,38 @@ _DEV_USER = CurrentUser(
 )
 
 
+async def _get_or_create_dev_user(db: AsyncSession) -> CurrentUser:
+    """Development bypass with a REAL users row.
+
+    Audit logs, tranche payments and adjustments all carry FK references to
+    users.id — an in-memory fake identity breaks every write path with a
+    ForeignKeyViolation. Persist the dev admin on first use instead.
+    """
+    from app.models.masters import User
+
+    user = await db.get(User, _DEV_USER_ID)
+    if user is None:
+        user = User(
+            id=_DEV_USER_ID,
+            email=_DEV_USER.email,
+            full_name=_DEV_USER.full_name,
+            role=UserRole.SUPER_ADMIN,
+            is_active=True,
+            onboarding_completed=True,
+        )
+        db.add(user)
+        await db.flush()
+    return CurrentUser(user)
+
+
 async def get_current_user(
     authorization: Annotated[str | None, Header()] = None,
     db: Annotated[AsyncSession, Depends(get_db_session)] = None,
 ) -> CurrentUser:
-    """Resolve Supabase JWT → application user record. Bypassed in development."""
+    """Resolve app-issued JWT → application user record. Bypassed in development."""
     settings = get_settings()
     if settings.app_env == "development":
-        return _DEV_USER
+        return await _get_or_create_dev_user(db)
 
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
@@ -105,7 +126,7 @@ async def get_current_user(
         )
     token = authorization.split(" ", 1)[1]
     try:
-        payload = decode_supabase_token(token)
+        payload = decode_access_token(token)
     except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -113,24 +134,17 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
-    supabase_uid_str: str | None = payload.get("sub")
-    if not supabase_uid_str:
+    user_id_str: str | None = payload.get("sub")
+    if not user_id_str:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token subject")
 
     try:
-        supabase_uid = UUID(supabase_uid_str)
+        user_id = UUID(user_id_str)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token subject")
 
     repo = UserRepository(db)
-    user = await repo.get_by_supabase_uid(supabase_uid)
-
-    if not user:
-        email = payload.get("email")
-        if email:
-            by_email = await repo.get_by_email(email)
-            if by_email and by_email.supabase_uid is None:
-                user = await repo.update(by_email, supabase_uid=supabase_uid)
+    user = await repo.get_by_id(user_id)
 
     if not user:
         raise HTTPException(

@@ -224,6 +224,55 @@ async def get_by_customer(
     )
 
 
+@router.get("/outstanding")
+async def get_outstanding_tracker(
+    current_user: User, db: DB,
+    group_by: str = Query("week", pattern="^(week|merchandiser|customer|vertical)$"),
+    date_from: str | None = Query(None), date_to: str | None = Query(None),
+) -> list[dict]:
+    """Outstanding Deposit Tracker — unpaid requested tranche value grouped by
+    weekly request-date range, merchandiser, customer or vertical, with
+    per-currency totals."""
+    await _check_section_access("outstanding_tracker", current_user, db)
+    svc = AnalyticsService(db)
+    return await svc.get_outstanding_tracker(
+        group_by, _parse_d(date_from), _parse_d(date_to)
+    )
+
+
+@router.get("/weekly-deposits")
+async def get_weekly_deposit_tracker(
+    current_user: User, db: DB,
+) -> list[dict]:
+    """Weekly Deposit Tracker — requested, unpaid deposits sorted by ETD,
+    bucketed into ISO weeks of the ETD (Aug 2026 batch, item 4.1). Shares the
+    outstanding_tracker section permission — same data domain."""
+    await _check_section_access("outstanding_tracker", current_user, db)
+    svc = AnalyticsService(db)
+    return await svc.get_weekly_deposit_tracker()
+
+
+_SHIPMENTS_ROLES = {
+    UserRole.HEAD_OF_MERCHANDISER,
+    UserRole.ACCOUNTS_TEAM,
+    UserRole.SUPER_ADMIN,
+    UserRole.FINANCE_ADMIN,
+}
+
+
+@router.get("/shipments")
+async def get_shipments_list(
+    current_user: User, db: DB,
+) -> list[dict]:
+    """All shipments for the HoM / Accounts Analytical Snapshot tables
+    (Aug 2026 batch, item 4.2): Request #, Sunshine Invoice No., Original ETD,
+    Amount, Days Delayed (server-computed against today), most-delayed first."""
+    if current_user.role not in _SHIPMENTS_ROLES:
+        raise AuthorizationError("The shipments list is not available for your role.")
+    svc = AnalyticsService(db)
+    return await svc.get_shipments_list()
+
+
 @router.get("/npa", response_model=NpaResponse)
 async def get_npa(
     current_user: User,

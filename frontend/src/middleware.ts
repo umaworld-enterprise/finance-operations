@@ -1,5 +1,21 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
+
+const AUTH_COOKIE_NAME = "fo_token";
+
+/** Cheap local check: token present and its `exp` claim not in the past.
+ *  No signature verification here — that happens in the backend on every API
+ *  call. The middleware only needs an "is there a plausible session" gate. */
+function hasLiveSession(request: NextRequest): boolean {
+  const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+  if (!token) return false;
+  try {
+    const payloadB64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(payloadB64));
+    return typeof payload.exp === "number" && payload.exp * 1000 > Date.now();
+  } catch {
+    return false;
+  }
+}
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -7,7 +23,6 @@ export async function middleware(request: NextRequest) {
   // Public routes — let through without checking session
   if (
     pathname.startsWith("/login") ||
-    pathname.startsWith("/auth") ||
     pathname.startsWith("/form") ||
     pathname.startsWith("/onboarding") ||
     pathname.startsWith("/_next") ||
@@ -26,49 +41,16 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const response = NextResponse.next({ request });
-
-  try {
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return request.cookies.getAll();
-          },
-          setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              request.cookies.set(name, value);
-              response.cookies.set(name, value, options);
-            });
-          },
-        },
-      }
-    );
-
-    // getSession() parses the JWT from cookies locally — no network call.
-    // getUser() would round-trip to Supabase on EVERY navigation (100-400ms).
-    // Fine-grained authorization happens in the backend on each API call,
-    // so the middleware only needs a cheap "is there a session" gate.
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
-      const loginUrl = new URL("/login", request.url);
-      return NextResponse.redirect(loginUrl);
-    }
-  } catch {
+  if (!hasLiveSession(request)) {
     const loginUrl = new URL("/login", request.url);
     return NextResponse.redirect(loginUrl);
   }
 
-  return response;
+  return NextResponse.next();
 }
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|sw.js|manifest.webmanifest|login|auth|form|onboarding|.*\\.(?:png|jpg|jpeg|svg|ico|webp|gif)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|sw.js|manifest.webmanifest|login|form|onboarding|.*\\.(?:png|jpg|jpeg|svg|ico|webp|gif)$).*)",
   ],
 };

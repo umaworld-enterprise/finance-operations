@@ -38,8 +38,9 @@ class DepositRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     deposit_percentage: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     total_supplier_invoice_amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
 
-    # Dates
-    estimated_shipment_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Dates. The estimated-shipment-date column was removed from the model
+    # (14 Jul 2026 change note, C5); the DB column is dropped in a follow-up
+    # migration.
     estimated_etd: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Payment terms
@@ -95,6 +96,9 @@ class DepositRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     analytics_snapshot: Mapped["AnalyticsSnapshot | None"] = relationship(
         back_populates="deposit_request", uselist=False
     )
+    tranches: Mapped[list["PaymentTranche"]] = relationship(
+        back_populates="deposit_request", order_by="PaymentTranche.tranche_number"
+    )
 
     __table_args__ = (
         Index("idx_deposit_requests_status", "current_status"),
@@ -110,3 +114,4 @@ from app.models.masters import Customer, Supplier, User, Vertical  # noqa: E402,
 from app.models.payment import PaymentDetails  # noqa: E402, F401
 from app.models.workflow import AccountsAction, MerchandiserAction, StatusHistory  # noqa: E402, F401
 from app.models.analytics import AnalyticsSnapshot  # noqa: E402, F401
+from app.models.tranche import PaymentTranche  # noqa: E402, F401
