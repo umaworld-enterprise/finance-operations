@@ -67,6 +67,19 @@ export function formatDate(dateStr: string | null | undefined): string {
   });
 }
 
+// DD-Mon-YY (e.g. 27-Apr-26) — the executives' Excel sheet format, used on
+// the Pending Payment and Bank Ledger tables (and their exports) so
+// copy-pasted dates land in the sheet already streamlined (16 Sep 2026).
+export function formatDateSheet(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "";
+  const day = String(d.getDate()).padStart(2, "0");
+  const mon = d.toLocaleDateString("en-GB", { month: "short" });
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${day}-${mon}-${yy}`;
+}
+
 // DD/MM/YYYY, HH:MM — for the few places that show a full timestamp.
 export function formatDateTime(dateStr: string | null | undefined): string {
   if (!dateStr) return "—";

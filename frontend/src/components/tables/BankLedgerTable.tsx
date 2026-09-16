@@ -21,9 +21,21 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { BankLedgerEntry } from "@/lib/exportExcel";
-import { formatDate } from "@/lib/utils";
+import { formatDateSheet } from "@/lib/utils";
+import { SortableHead, sortByColumn, useColumnSortState, type ColumnAccessors } from "@/components/ui/SortableHead";
 
 const PAGE_SIZE = 50;
+
+// Column-header sorting (16 Sep 2026, executive request).
+const ACCESSORS: ColumnAccessors<BankLedgerEntry> = {
+  date:     (e) => e.date,
+  supplier: (e) => e.supplier,
+  proforma: (e) => e.supplier_invoice,
+  file_nos: (e) => e.file_nos,
+  customer: (e) => e.customer,
+  curr:     (e) => e.curr,
+  debit:    (e) => e.amount,
+};
 
 function num(value: number | null): string {
   return value == null
@@ -39,9 +51,13 @@ export function BankLedgerTable({
   loading: boolean;
 }) {
   const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  // Column-header sorting (16 Sep 2026) — applied to the WHOLE ledger before
+  // pagination, so asc/desc runs across every page.
+  const colSort = useColumnSortState();
+  const sortedEntries = sortByColumn(entries, ACCESSORS, colSort.sort);
+  const totalPages = Math.max(1, Math.ceil(sortedEntries.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const rows = entries.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const rows = sortedEntries.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   // Total value (4 Sep 2026, executive request) — per currency, over ALL
   // entries (not just the visible page). Currencies cannot be summed together.
@@ -77,16 +93,17 @@ export function BankLedgerTable({
               <TableHeader>
                 {/* Dark header band, like the executives' Excel ledger. */}
                 <TableRow className="bg-foreground hover:bg-foreground">
-                  <TableHead className="text-background whitespace-nowrap">Date</TableHead>
-                  <TableHead className="text-background">Supplier</TableHead>
-                  <TableHead className="text-background whitespace-nowrap">Supplier Proforma Invoice #</TableHead>
-                  <TableHead className="text-background whitespace-nowrap">File Nos.</TableHead>
-                  <TableHead className="text-background">Customer</TableHead>
-                  <TableHead className="text-background">Curr</TableHead>
+                  {/* Asc/desc on every data-bearing header (16 Sep 2026). */}
+                  <SortableHead label="Date" sortKey="date" state={colSort} className="text-background whitespace-nowrap" />
+                  <SortableHead label="Supplier" sortKey="supplier" state={colSort} className="text-background" />
+                  <SortableHead label="Supplier Proforma Invoice #" sortKey="proforma" state={colSort} className="text-background whitespace-nowrap" />
+                  <SortableHead label="File Nos." sortKey="file_nos" state={colSort} className="text-background whitespace-nowrap" />
+                  <SortableHead label="Customer" sortKey="customer" state={colSort} className="text-background" />
+                  <SortableHead label="Curr" sortKey="curr" state={colSort} className="text-background" />
                   {/* Kept empty for now (client decision, 4 Sep 2026). */}
                   <TableHead className="text-background text-right whitespace-nowrap">EURO/CNY</TableHead>
                   <TableHead className="text-background text-right">Rate</TableHead>
-                  <TableHead className="text-background text-right">Debit</TableHead>
+                  <SortableHead label="Debit" sortKey="debit" state={colSort} align="right" className="text-background text-right" />
                   <TableHead className="text-background text-right">Credit</TableHead>
                   <TableHead className="text-background text-right">BALANCE</TableHead>
                 </TableRow>
@@ -97,8 +114,10 @@ export function BankLedgerTable({
                 ) : (
                   rows.map((e, i) => (
                     <TableRow key={i}>
+                      {/* DD-Mon-YY (16 Sep 2026) — matches the executives'
+                          Excel sheet, so copy-paste needs no reformatting. */}
                       <TableCell className="whitespace-nowrap text-sm">
-                        {e.date ? formatDate(e.date) : ""}
+                        {formatDateSheet(e.date)}
                       </TableCell>
                       <TableCell className="text-sm font-medium">{e.supplier}</TableCell>
                       <TableCell className="whitespace-nowrap text-sm">{e.supplier_invoice}</TableCell>

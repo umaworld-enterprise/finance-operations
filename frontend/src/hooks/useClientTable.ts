@@ -21,9 +21,12 @@ export function useClientTable<T>(
     searchHaystack: (row: T) => (string | null | undefined)[];
     sortOptions: ClientSortOption<T>[];
     pageSize?: number;
+    /** Column-header sorting (16 Sep 2026): when set, this comparator wins
+     * over the dropdown sort — pass makeColumnCompare(...) or null. */
+    overrideCompare?: ((a: T, b: T) => number) | null;
   },
 ) {
-  const { searchHaystack, sortOptions, pageSize = 20 } = options;
+  const { searchHaystack, sortOptions, pageSize = 20, overrideCompare = null } = options;
   const [search, setSearchRaw] = useState("");
   const [sort, setSortRaw] = useState(sortOptions[0]?.value ?? "");
   const [page, setPage] = useState(1);
@@ -36,13 +39,18 @@ export function useClientTable<T>(
         searchHaystack(row).some((v) => v?.toLowerCase().includes(term)),
       );
     }
+    if (overrideCompare) {
+      out = [...out].sort(overrideCompare);
+      return out;
+    }
     const sorter = sortOptions.find((o) => o.value === sort);
     if (sorter) out = [...out].sort(sorter.compare);
     return out;
     // searchHaystack/sortOptions are stable per call site (defined inline
-    // with constant behaviour) — rows/search/sort drive recomputation.
+    // with constant behaviour) — rows/search/sort/overrideCompare drive
+    // recomputation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, search, sort]);
+  }, [rows, search, sort, overrideCompare]);
 
   const total = filtered.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));

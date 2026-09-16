@@ -1787,3 +1787,30 @@ removed too. Any merchandiser can now see AND act on any request.
 
 **Note**: audit trail unchanged — every action still records WHO did it, so
 cross-merchandiser edits stay fully attributable.
+
+## Batch (16 Sep 2026) — header sorting app-wide, alphabetical masters, sheet date format, pending totals
+
+1. **Asc/desc on table headers** — new `components/ui/SortableHead.tsx`
+   (`useColumnSortState` + `sortByColumn` + `SortableHead`): click a header
+   for A→Z, again for Z→A, a third time to restore the natural order; blanks
+   always sink to the bottom; string compare is case-insensitive and
+   numeric-aware. Wired into: Accounts Pending queue (sorts the WHOLE queue
+   before pagination), Processed/On Hold/Rejected/Cancelled (StatusTable),
+   All Requests, Bank Ledger tab, merchandiser/HoM RequestsTable, HoM queue,
+   Analytical Snapshot shipments (header sort overrides the dropdown via a new
+   `overrideCompare` option on useClientTable), and the Analytics tables
+   (Delay Buckets, By Merchandiser, By Vertical, By Customer, Outstanding
+   Tracker incl. dynamic currency columns, Per-Request Metrics).
+2. **Masters alphabetical** — supplier/customer/vertical/merchandiser/bank
+   lists now `ORDER BY lower(name)` server-side, so capitals and lowercase
+   interleave correctly in every dropdown and master page.
+3. **Sheet date format** — new `formatDateSheet` (DD-Mon-YY, e.g. 27-Apr-26)
+   on the Pending Payment table (Request Date, Tentative Payment), the Bank
+   Ledger tab's Date column, and ALL Excel exports' date fields — copy-paste
+   into the executives' ledger sheet needs no reformatting.
+4. **Pending payment totals** — per-currency Total rows at the bottom of the
+   Pending queue (Amount Payable 0–10d and Deposit columns), computed over
+   the whole filtered queue like the Bank Ledger totals; mobile cards get a
+   totals footer.
+
+317 backend tests green; tsc clean. No migration.

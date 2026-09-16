@@ -12,11 +12,12 @@ import { Pagination } from "@/components/ui/Pagination";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table, TableBody, TableCell, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { useShipments } from "@/hooks/useAnalytics";
 import { TableControls } from "@/components/ui/TableControls";
 import { byNumber, byString, useClientTable } from "@/hooks/useClientTable";
+import { makeColumnCompare, SortableHead, useColumnSortState, type ColumnAccessors } from "@/components/ui/SortableHead";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { ShipmentRow } from "@/services/analyticsService";
 import type { RequestStatus } from "@/types";
@@ -31,6 +32,19 @@ function DelayCell({ days }: { days: number | null }) {
   );
 }
 
+// Column-header sorting (16 Sep 2026, executive request) — clicking a header
+// overrides the dropdown sort until the third click clears it.
+const SHIPMENT_ACCESSORS: ColumnAccessors<ShipmentRow> = {
+  request:      (s) => s.request_number,
+  invoice:      (s) => s.sunshine_invoice_number,
+  supplier:     (s) => s.supplier_name,
+  amount:       (s) => Number(s.amount),
+  payment_date: (s) => s.payment_date,
+  etd:          (s) => s.estimated_etd,
+  delay:        (s) => s.days_delayed,
+  status:       (s) => s.current_status,
+};
+
 const SHIPMENT_SORTS = [
   { value: "delay", label: "Most delayed first", compare: byNumber<ShipmentRow>((s) => s.days_delayed ?? -1, true) },
   { value: "created", label: "Request date (new → old)", compare: byString<ShipmentRow>((s) => s.created_at ?? "", true) },
@@ -42,6 +56,7 @@ const SHIPMENT_SORTS = [
 
 export function ShipmentsTable({ linkBase }: { linkBase: "/hom" | "/accounts" }) {
   const { data: shipments = [], isLoading } = useShipments();
+  const colSort = useColumnSortState();
   // Search / sort / pagination (10 Aug 2026, app-wide table controls).
   const table = useClientTable(shipments, {
     searchHaystack: (s) => [
@@ -49,6 +64,7 @@ export function ShipmentsTable({ linkBase }: { linkBase: "/hom" | "/accounts" })
     ],
     sortOptions: SHIPMENT_SORTS,
     pageSize: 25,
+    overrideCompare: colSort.sort ? makeColumnCompare(SHIPMENT_ACCESSORS, colSort.sort) : null,
   });
 
   return (
@@ -91,14 +107,14 @@ export function ShipmentsTable({ linkBase }: { linkBase: "/hom" | "/accounts" })
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Request #</TableHead>
-                  <TableHead>Invoice #</TableHead>
-                  <TableHead>Supplier</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead>Payment Date</TableHead>
-                  <TableHead>Original ETD</TableHead>
-                  <TableHead>Days Delayed</TableHead>
-                  <TableHead>Status</TableHead>
+                  <SortableHead label="Request #" sortKey="request" state={colSort} />
+                  <SortableHead label="Invoice #" sortKey="invoice" state={colSort} />
+                  <SortableHead label="Supplier" sortKey="supplier" state={colSort} />
+                  <SortableHead label="Amount" sortKey="amount" state={colSort} align="right" className="text-right" />
+                  <SortableHead label="Payment Date" sortKey="payment_date" state={colSort} />
+                  <SortableHead label="Original ETD" sortKey="etd" state={colSort} />
+                  <SortableHead label="Days Delayed" sortKey="delay" state={colSort} />
+                  <SortableHead label="Status" sortKey="status" state={colSort} />
                 </TableRow>
               </TableHeader>
               <TableBody>
