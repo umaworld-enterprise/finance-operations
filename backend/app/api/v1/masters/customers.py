@@ -36,9 +36,9 @@ async def list_customers(db: DB, _: User) -> list[CustomerResponse]:
 @router.get("/all", response_model=list[CustomerResponse])
 async def list_all_customers(db: DB, _: FinanceAdmin) -> list[CustomerResponse]:
     """Admin endpoint (19 Aug 2026 masters page) — active AND inactive."""
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 
-    result = await db.execute(select(Customer).order_by(Customer.name))
+    result = await db.execute(select(Customer).order_by(func.lower(Customer.name)))
     return [CustomerResponse.model_validate(c) for c in result.scalars().all()]
 
 

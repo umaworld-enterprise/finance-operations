@@ -50,7 +50,7 @@ async def list_suppliers(db: DB, _: User) -> list[SupplierResponse]:
 @router.get("/all", response_model=list[SupplierResponse])
 async def list_all_suppliers(db: DB, _: FinanceAdmin) -> list[SupplierResponse]:
     """Admin endpoint (19 Aug 2026 masters page) — active AND inactive."""
-    result = await db.execute(select(Supplier).order_by(Supplier.name))
+    result = await db.execute(select(Supplier).order_by(func.lower(Supplier.name)))
     return [SupplierResponse.model_validate(s) for s in result.scalars().all()]
 
 
