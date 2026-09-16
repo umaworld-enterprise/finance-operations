@@ -36,9 +36,9 @@ async def list_verticals(db: DB, _: User) -> list[VerticalResponse]:
 @router.get("/all", response_model=list[VerticalResponse])
 async def list_all_verticals(db: DB, _: FinanceAdmin) -> list[VerticalResponse]:
     """Admin endpoint (19 Aug 2026 masters page) — active AND inactive."""
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 
-    result = await db.execute(select(Vertical).order_by(Vertical.name))
+    result = await db.execute(select(Vertical).order_by(func.lower(Vertical.name)))
     return [VerticalResponse.model_validate(v) for v in result.scalars().all()]
 
 

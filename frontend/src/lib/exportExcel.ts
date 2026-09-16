@@ -1,8 +1,10 @@
 // Excel export for request tables (2 Sep 2026): bank-ledger columns plus
 // context (Request #, Request Date, Status, Payment Date) — one format for
 // every tab. SheetJS is imported lazily so it stays out of the main bundle.
+// Dates export as DD-Mon-YY (e.g. 27-Apr-26) since 16 Sep 2026 — the
+// executives' sheet format, so copy-paste needs no reformatting.
 
-import { formatDate } from "@/lib/utils";
+import { formatDateSheet } from "@/lib/utils";
 import type { DepositRequest, PendingReleaseRow } from "@/types";
 
 /** Latest paid tranche's payment date — the request row's "paid on". */
@@ -32,7 +34,7 @@ export async function exportRequestsToExcel(
   await writeSheet(
     rows.map((r) => ({
       "Request #": r.request_number,
-      "Request Date": formatDate(r.created_at),
+      "Request Date": formatDateSheet(r.created_at),
       "Supplier": r.supplier?.name ?? "",
       "Supplier Proforma Invoice No.": r.supplier_invoice_number ?? "",
       "Sunshine Invoice No.": r.sunshine_invoice_number ?? "",
@@ -40,7 +42,7 @@ export async function exportRequestsToExcel(
       "Currency": r.currency ?? "",
       "Deposit Amount": Number(r.deposit_amount),
       "Status": statusLabel(r.current_status),
-      "Payment Date": latestPaymentDate(r) ? formatDate(latestPaymentDate(r)) : "",
+      "Payment Date": latestPaymentDate(r) ? formatDateSheet(latestPaymentDate(r)) : "",
     })),
     filename,
     "Requests",
@@ -104,7 +106,7 @@ export async function exportBankLedgerToExcel(
 ): Promise<void> {
   await writeSheet(
     bankLedgerEntries(rows, opts).map((e) => ({
-      "Date": e.date ? formatDate(e.date) : "",
+      "Date": formatDateSheet(e.date),
       "Supplier": e.supplier,
       "Supplier Proforma Invoice #": e.supplier_invoice,
       "File Nos.": e.file_nos,
@@ -133,7 +135,7 @@ export async function exportPendingReleaseToExcel(
       "Tranche": r.tranche_label,
       "Currency": r.currency ?? "",
       "Amount (to be released)": Number(r.amount),
-      "Tentative Payment": r.tentative_payment_date ? formatDate(r.tentative_payment_date) : "",
+      "Tentative Payment": formatDateSheet(r.tentative_payment_date),
     })),
     filename,
     "Yet to be Released",

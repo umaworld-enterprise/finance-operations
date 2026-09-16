@@ -23,7 +23,7 @@ async def list_merchandiser_options(current_user: AnyUser, db: DB) -> list[dict]
     """Minimal merchandiser list for filter dropdowns (4 Sep 2026 dynamic
     filter module) — any authenticated role; id + name only, active
     merchandiser-role users."""
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 
     from app.models.enums import UserRole
     from app.models.masters import User as UserModel
@@ -32,7 +32,7 @@ async def list_merchandiser_options(current_user: AnyUser, db: DB) -> list[dict]
         await db.execute(
             select(UserModel.id, UserModel.full_name)
             .where(UserModel.role == UserRole.MERCHANDISER, UserModel.is_active == True)  # noqa: E712
-            .order_by(UserModel.full_name)
+            .order_by(func.lower(UserModel.full_name))
         )
     ).all()
     return [{"id": str(r.id), "full_name": r.full_name} for r in rows]

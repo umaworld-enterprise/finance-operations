@@ -25,7 +25,8 @@ import { ShipmentsTable } from "@/components/analytics/ShipmentsTable";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
-import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, cn, hasHighPriorityUnpaid, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
+import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, formatDateSheet, cn, hasHighPriorityUnpaid, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
+import { SortableHead, sortByColumn, useColumnSortState, type ColumnAccessors } from "@/components/ui/SortableHead";
 import { differenceInDays } from "date-fns";
 import { needsRelease } from "@/components/tranches/TrancheList";
 import { ExportButton } from "@/components/ui/ExportButton";
@@ -77,14 +78,51 @@ function payableDueSoon(req: DepositRequest): number {
 
 // Deposit % (4 Sep 2026 — replaced the Yet to be Released column): the
 // stored percentage, else derived from deposit / proforma total.
-function depositPct(req: DepositRequest): string {
+function depositPctValue(req: DepositRequest): number | null {
   const pct =
     req.deposit_percentage ??
     (req.total_supplier_invoice_amount
       ? (req.deposit_amount / req.total_supplier_invoice_amount) * 100
       : null);
-  return pct != null ? `${Number(pct).toFixed(2)}%` : "—";
+  return pct != null ? Number(pct) : null;
 }
+
+function depositPct(req: DepositRequest): string {
+  const pct = depositPctValue(req);
+  return pct != null ? `${pct.toFixed(2)}%` : "—";
+}
+
+// Column-header sorting (16 Sep 2026) — accessor maps per table.
+const PENDING_ACCESSORS: ColumnAccessors<DepositRequest> = {
+  request:      (r) => requestDisplayNumber(r),
+  request_date: (r) => r.created_at,
+  invoice:      (r) => r.sunshine_invoice_number,
+  supplier:     (r) => r.supplier?.name,
+  proforma:     (r) => r.supplier_invoice_number,
+  vertical:     (r) => r.vertical?.name,
+  customer:     (r) => r.customer?.name,
+  merchandiser: (r) => r.creator?.full_name,
+  payable:      (r) => payableDueSoon(r),
+  deposit_pct:  (r) => depositPctValue(r),
+  deposit:      (r) => Number(r.deposit_amount),
+  currency:     (r) => r.currency,
+  tentative:    (r) => nextTentativeDate(r),
+  // Waiting asc = fewest days waiting first (newest requests).
+  waiting:      (r) => -new Date(r.created_at).getTime(),
+};
+
+const STATUS_ACCESSORS: ColumnAccessors<DepositRequest> = {
+  request:      (r) => requestDisplayNumber(r),
+  invoice:      (r) => r.sunshine_invoice_number,
+  supplier:     (r) => r.supplier?.name,
+  customer:     (r) => r.customer?.name,
+  payable:      (r) => amountPayable(r),
+  deposit:      (r) => Number(r.deposit_amount),
+  payment_date: (r) => latestPaymentDate(r),
+  status:       (r) => r.current_status,
+  by:           (r) => r.last_status_change_by,
+  submitted:    (r) => r.created_at,
+};
 
 function PendingTable({
   rows: allRows,
@@ -108,9 +146,25 @@ function PendingTable({
   // Each bucket paginates client-side (10 Aug 2026, app-wide table
   // controls) — the page-level search/sort apply before the split.
   const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
+  // Column-header sorting (16 Sep 2026) — applied to the WHOLE list before
+  // pagination, so asc/desc runs across every page.
+  const colSort = useColumnSortState();
+  const sortedRows = sortByColumn(allRows, PENDING_ACCESSORS, colSort.sort);
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const rows = allRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const rows = sortedRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  // Total per currency (16 Sep 2026, executive request — like the Bank
+  // Ledger): over ALL rows in the queue, not just the visible page.
+  const totals = new Map<string, { payable: number; deposit: number }>();
+  for (const r of allRows) {
+    const key = r.currency ?? "—";
+    const t = totals.get(key) ?? { payable: 0, deposit: 0 };
+    t.payable += payableDueSoon(r);
+    t.deposit += Number(r.deposit_amount);
+    totals.set(key, t);
+  }
+  const totalRows = [...totals.entries()].sort(([a], [b]) => a.localeCompare(b));
   return (
     <Card className="overflow-hidden">
       <div className="px-5 py-4 border-b border-border flex items-center justify-between">
@@ -160,14 +214,14 @@ function PendingTable({
               {agingBadge(req.created_at)}
             </div>
             <div className="text-xs text-muted-foreground font-mono">Invoice # {req.sunshine_invoice_number || "—"}</div>
-            <div className="text-xs text-muted-foreground">Requested: {formatDate(req.created_at)}</div>
+            <div className="text-xs text-muted-foreground">Requested: {formatDateSheet(req.created_at) || "—"}</div>
             <div className="text-sm font-semibold text-foreground">{req.supplier.name}</div>
             <div className="text-xs text-muted-foreground">{req.customer.name}</div>
             <div className="text-xs text-muted-foreground">
               {req.vertical?.name ?? "—"} · {req.creator?.full_name ?? "—"}
             </div>
             <div className="text-xs text-muted-foreground">
-              Tentative payment: {formatDate(nextTentativeDate(req))}
+              Tentative payment: {formatDateSheet(nextTentativeDate(req)) || "—"}
             </div>
             <div className="text-xs text-muted-foreground">
               Payable (0–10 days): <span className="font-semibold text-foreground">{formatCurrency(payableDueSoon(req), req.currency)}</span>
@@ -185,6 +239,17 @@ function PendingTable({
             </div>
           </div>
         ))}
+        {/* Total per currency (16 Sep 2026) — over the whole queue. */}
+        {!loading && allRows.length > 0 && (
+          <div className="p-4 bg-muted/40 space-y-1">
+            {totalRows.map(([cur, t]) => (
+              <div key={`m-total-${cur}`} className="flex items-center justify-between text-sm font-semibold">
+                <span>Total ({cur})</span>
+                <span className="tabular-nums">{formatCurrency(t.deposit, cur === "—" ? null : cur)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Desktop table */}
@@ -193,21 +258,22 @@ function PendingTable({
           <TableHeader>
             <TableRow>
               {selectable && <TableHead className="w-8" aria-label="Select for bulk payment" />}
-              <TableHead>Request #</TableHead>
-              <TableHead>Request Date</TableHead>
-              <TableHead>Invoice #</TableHead>
-              <TableHead>Supplier</TableHead>
+              {/* Asc/desc on every header (16 Sep 2026, executive request). */}
+              <SortableHead label="Request #" sortKey="request" state={colSort} />
+              <SortableHead label="Request Date" sortKey="request_date" state={colSort} />
+              <SortableHead label="Invoice #" sortKey="invoice" state={colSort} />
+              <SortableHead label="Supplier" sortKey="supplier" state={colSort} />
               {/* 4 Sep 2026: proforma # after Supplier; Vertical before Customer. */}
-              <TableHead>Supplier Proforma Invoice #</TableHead>
-              <TableHead>Vertical/Category</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Merchandiser</TableHead>
-              <TableHead className="text-right">Amount Payable (0–10 days)</TableHead>
-              <TableHead className="text-right">Deposit %</TableHead>
-              <TableHead className="text-right">Deposit</TableHead>
-              <TableHead>Currency</TableHead>
-              <TableHead>Tentative Payment</TableHead>
-              <TableHead>Waiting</TableHead>
+              <SortableHead label="Supplier Proforma Invoice #" sortKey="proforma" state={colSort} />
+              <SortableHead label="Vertical/Category" sortKey="vertical" state={colSort} />
+              <SortableHead label="Customer" sortKey="customer" state={colSort} />
+              <SortableHead label="Merchandiser" sortKey="merchandiser" state={colSort} />
+              <SortableHead label="Amount Payable (0–10 days)" sortKey="payable" state={colSort} align="right" className="text-right" />
+              <SortableHead label="Deposit %" sortKey="deposit_pct" state={colSort} align="right" className="text-right" />
+              <SortableHead label="Deposit" sortKey="deposit" state={colSort} align="right" className="text-right" />
+              <SortableHead label="Currency" sortKey="currency" state={colSort} />
+              <SortableHead label="Tentative Payment" sortKey="tentative" state={colSort} />
+              <SortableHead label="Waiting" sortKey="waiting" state={colSort} />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -241,7 +307,9 @@ function PendingTable({
                     )}
                   </div>
                 </TableCell>
-                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDate(req.created_at)}</TableCell>
+                {/* DD-Mon-YY (16 Sep 2026) — copy-paste lands in the
+                    executives' sheet already in its date format. */}
+                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDateSheet(req.created_at) || "—"}</TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.supplier_invoice_number || "—"}</TableCell>
@@ -252,12 +320,33 @@ function PendingTable({
                 <TableCell className="text-right text-sm text-muted-foreground">{depositPct(req)}</TableCell>
                 <TableCell className="text-right font-semibold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</TableCell>
                 <TableCell className="text-muted-foreground text-xs font-medium">{currencyDisplayLabel(req.currency)}</TableCell>
-                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDate(nextTentativeDate(req))}</TableCell>
+                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDateSheet(nextTentativeDate(req)) || "—"}</TableCell>
                 {/* Process column removed (9 Sep 2026) — the Request # link
                     opens the request. */}
                 <TableCell>{agingBadge(req.created_at)}</TableCell>
               </TableRow>
             ))}
+            {/* Total per currency (16 Sep 2026) — mirrors the Bank Ledger
+                totals; computed over the whole queue, not just this page. */}
+            {!loading && rows.length > 0 &&
+              totalRows.map(([cur, t]) => (
+                <TableRow key={`total-${cur}`} className="bg-muted/60 hover:bg-muted/60 font-semibold">
+                  {selectable && <TableCell className="w-8" />}
+                  <TableCell colSpan={8} className="text-sm">
+                    Total ({cur})
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatCurrency(t.payable, cur === "—" ? null : cur)}
+                  </TableCell>
+                  <TableCell />
+                  <TableCell className="text-right tabular-nums">
+                    {formatCurrency(t.deposit, cur === "—" ? null : cur)}
+                  </TableCell>
+                  <TableCell className="text-xs">{cur}</TableCell>
+                  <TableCell />
+                  <TableCell />
+                </TableRow>
+              ))}
           </TableBody>
         </Table>
       </div>
@@ -307,6 +396,9 @@ function StatusTable({
   /** Payment Date column (2 Sep 2026) — for the Processed tab. */
   showPaymentDate?: boolean;
 }) {
+  // Column-header sorting (16 Sep 2026) — client-side over the loaded rows.
+  const colSort = useColumnSortState();
+  rows = sortByColumn(rows, STATUS_ACCESSORS, colSort.sort);
   return (
     <Card className="overflow-hidden">
       <div className="px-5 py-4 border-b border-border">
@@ -360,16 +452,16 @@ function StatusTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Request #</TableHead>
-              <TableHead>Invoice #</TableHead>
-              <TableHead>Supplier</TableHead>
-              <TableHead>Customer</TableHead>
-              {showPayable && <TableHead className="text-right">Amount Payable</TableHead>}
-              <TableHead className="text-right">Deposit</TableHead>
-              {showPaymentDate && <TableHead>Payment Date</TableHead>}
-              <TableHead>Status</TableHead>
-              <TableHead>By</TableHead>
-              <TableHead className="hidden lg:table-cell">Submitted</TableHead>
+              <SortableHead label="Request #" sortKey="request" state={colSort} />
+              <SortableHead label="Invoice #" sortKey="invoice" state={colSort} />
+              <SortableHead label="Supplier" sortKey="supplier" state={colSort} />
+              <SortableHead label="Customer" sortKey="customer" state={colSort} />
+              {showPayable && <SortableHead label="Amount Payable" sortKey="payable" state={colSort} align="right" className="text-right" />}
+              <SortableHead label="Deposit" sortKey="deposit" state={colSort} align="right" className="text-right" />
+              {showPaymentDate && <SortableHead label="Payment Date" sortKey="payment_date" state={colSort} />}
+              <SortableHead label="Status" sortKey="status" state={colSort} />
+              <SortableHead label="By" sortKey="by" state={colSort} />
+              <SortableHead label="Submitted" sortKey="submitted" state={colSort} className="hidden lg:table-cell" />
               <TableHead />
             </TableRow>
           </TableHeader>
@@ -415,6 +507,9 @@ function StatusTable({
 }
 
 function AllTable({ rows }: { rows: DepositRequest[] }) {
+  // Column-header sorting (16 Sep 2026) — client-side over the loaded rows.
+  const colSort = useColumnSortState();
+  rows = sortByColumn(rows, STATUS_ACCESSORS, colSort.sort);
   return (
     <Card className="overflow-hidden">
       <div className="px-5 py-4 border-b border-border">
@@ -461,14 +556,14 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Request #</TableHead>
-              <TableHead>Invoice #</TableHead>
-              <TableHead>Supplier</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead className="text-right">Amount Payable</TableHead>
-              <TableHead className="text-right">Deposit</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="hidden lg:table-cell">Submitted</TableHead>
+              <SortableHead label="Request #" sortKey="request" state={colSort} />
+              <SortableHead label="Invoice #" sortKey="invoice" state={colSort} />
+              <SortableHead label="Supplier" sortKey="supplier" state={colSort} />
+              <SortableHead label="Customer" sortKey="customer" state={colSort} />
+              <SortableHead label="Amount Payable" sortKey="payable" state={colSort} align="right" className="text-right" />
+              <SortableHead label="Deposit" sortKey="deposit" state={colSort} align="right" className="text-right" />
+              <SortableHead label="Status" sortKey="status" state={colSort} />
+              <SortableHead label="Submitted" sortKey="submitted" state={colSort} className="hidden lg:table-cell" />
               <TableHead />
             </TableRow>
           </TableHeader>

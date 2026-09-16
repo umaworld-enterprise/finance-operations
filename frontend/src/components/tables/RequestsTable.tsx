@@ -17,6 +17,22 @@ import {
 } from "@/components/ui/table";
 import type { DepositRequest } from "@/types";
 import { ClipboardList, ArrowUpRight } from "lucide-react";
+import { SortableHead, sortByColumn, useColumnSortState, type ColumnAccessors } from "@/components/ui/SortableHead";
+
+// Column-header sorting (16 Sep 2026, executive request).
+const ACCESSORS: ColumnAccessors<DepositRequest> = {
+  request:      (r) => requestDisplayNumber(r),
+  invoice:      (r) => r.sunshine_invoice_number,
+  supplier:     (r) => r.supplier?.name,
+  customer:     (r) => r.customer?.name,
+  vertical:     (r) => r.vertical?.name,
+  merchandiser: (r) => r.creator?.full_name,
+  payable:      (r) => amountPayable(r),
+  deposit:      (r) => Number(r.deposit_amount),
+  status:       (r) => r.current_status,
+  payment_date: (r) => latestPaymentDate(r),
+  submitted:    (r) => r.created_at,
+};
 
 interface RequestsTableProps {
   requests: DepositRequest[];
@@ -33,6 +49,9 @@ export function RequestsTable({
   emptyMessage = "Requests you submit will appear here.",
   showMerchandiser = false,
 }: RequestsTableProps) {
+  // Column-header sorting (16 Sep 2026) — client-side over the loaded rows.
+  const colSort = useColumnSortState();
+  requests = sortByColumn(requests, ACCESSORS, colSort.sort);
   if (requests.length === 0) {
     return (
       <EmptyState
@@ -48,19 +67,19 @@ export function RequestsTable({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Request #</TableHead>
-            <TableHead className="hidden sm:table-cell">Invoice #</TableHead>
-            <TableHead>Supplier</TableHead>
-            <TableHead>Customer</TableHead>
-            <TableHead className="hidden md:table-cell">Vertical</TableHead>
+            <SortableHead label="Request #" sortKey="request" state={colSort} />
+            <SortableHead label="Invoice #" sortKey="invoice" state={colSort} className="hidden sm:table-cell" />
+            <SortableHead label="Supplier" sortKey="supplier" state={colSort} />
+            <SortableHead label="Customer" sortKey="customer" state={colSort} />
+            <SortableHead label="Vertical" sortKey="vertical" state={colSort} className="hidden md:table-cell" />
             {showMerchandiser && (
-              <TableHead className="hidden md:table-cell">Merchandiser</TableHead>
+              <SortableHead label="Merchandiser" sortKey="merchandiser" state={colSort} className="hidden md:table-cell" />
             )}
-            <TableHead className="hidden sm:table-cell text-right">Amount Payable</TableHead>
-            <TableHead className="text-right">Deposit</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="hidden md:table-cell">Payment Date</TableHead>
-            <TableHead className="hidden lg:table-cell">Submitted</TableHead>
+            <SortableHead label="Amount Payable" sortKey="payable" state={colSort} align="right" className="hidden sm:table-cell text-right" />
+            <SortableHead label="Deposit" sortKey="deposit" state={colSort} align="right" className="text-right" />
+            <SortableHead label="Status" sortKey="status" state={colSort} />
+            <SortableHead label="Payment Date" sortKey="payment_date" state={colSort} className="hidden md:table-cell" />
+            <SortableHead label="Submitted" sortKey="submitted" state={colSort} className="hidden lg:table-cell" />
             <TableHead />
           </TableRow>
         </TableHeader>

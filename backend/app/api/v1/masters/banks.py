@@ -36,7 +36,7 @@ async def list_banks(db: DB, _: User) -> list[BankResponse]:
     result = await db.execute(
         select(BankMaster)
         .where(BankMaster.is_active == True)  # noqa: E712
-        .order_by(BankMaster.sort_order, BankMaster.name)
+        .order_by(BankMaster.sort_order, func.lower(BankMaster.name))
     )
     return [BankResponse.model_validate(b) for b in result.scalars().all()]
 
@@ -45,7 +45,7 @@ async def list_banks(db: DB, _: User) -> list[BankResponse]:
 async def list_all_banks(db: DB, _: FinanceAdmin) -> list[BankResponse]:
     """Admin endpoint — returns active and inactive banks."""
     result = await db.execute(
-        select(BankMaster).order_by(BankMaster.sort_order, BankMaster.name)
+        select(BankMaster).order_by(BankMaster.sort_order, func.lower(BankMaster.name))
     )
     return [BankResponse.model_validate(b) for b in result.scalars().all()]
 

@@ -20,6 +20,18 @@ import { matchesRequestFilters, RequestFilterBar, type RequestFilterValues } fro
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
 import { formatCurrency, formatDate, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
+import { SortableHead, sortByColumn, useColumnSortState, type ColumnAccessors } from "@/components/ui/SortableHead";
+
+// Column-header sorting (16 Sep 2026, executive request).
+const QUEUE_ACCESSORS: ColumnAccessors<DepositRequest> = {
+  request:      (r) => requestDisplayNumber(r),
+  invoice:      (r) => r.sunshine_invoice_number,
+  supplier:     (r) => r.supplier?.name,
+  merchandiser: (r) => r.creator?.full_name,
+  amount:       (r) => Number(r.deposit_amount),
+  status:       (r) => r.current_status,
+  submitted:    (r) => r.created_at,
+};
 import { toast } from "sonner";
 import { Check, X, ClipboardList, UserCog, ArrowUpRight } from "lucide-react";
 import Link from "next/link";
@@ -106,13 +118,16 @@ export default function HomDashboard() {
   const [filters, setFilters] = useState<RequestFilterValues>({});
 
   // The HoM queue is a plain array (not server-paginated) — filter/sort client-side.
+  const colSort = useColumnSortState();
   const term = search.trim();
-  const filtered = sortRequests(
+  let filtered = sortRequests(
     (term ? queue.filter((r) => requestMatchesSearch(r, term)) : queue).filter((r) =>
       matchesRequestFilters(r, filters),
     ),
     sort,
   );
+  // Column-header sorting (16 Sep 2026) wins over the dropdown while active.
+  filtered = sortByColumn(filtered, QUEUE_ACCESSORS, colSort.sort);
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -208,13 +223,13 @@ export default function HomDashboard() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Request #</TableHead>
-                      <TableHead>Invoice #</TableHead>
-                      <TableHead>Supplier</TableHead>
-                      <TableHead>Merchandiser</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="hidden lg:table-cell">Submitted</TableHead>
+                      <SortableHead label="Request #" sortKey="request" state={colSort} />
+                      <SortableHead label="Invoice #" sortKey="invoice" state={colSort} />
+                      <SortableHead label="Supplier" sortKey="supplier" state={colSort} />
+                      <SortableHead label="Merchandiser" sortKey="merchandiser" state={colSort} />
+                      <SortableHead label="Amount" sortKey="amount" state={colSort} align="right" className="text-right" />
+                      <SortableHead label="Status" sortKey="status" state={colSort} />
+                      <SortableHead label="Submitted" sortKey="submitted" state={colSort} className="hidden lg:table-cell" />
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>

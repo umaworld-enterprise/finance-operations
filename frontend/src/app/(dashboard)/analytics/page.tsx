@@ -43,8 +43,59 @@ import {
   Package, Truck, Activity, Lock, ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
+import { SortableHead, sortByColumn, useColumnSortState, type ColumnAccessors } from "@/components/ui/SortableHead";
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
+
+// Column-header sorting (16 Sep 2026, executive request) — accessor maps for
+// the analytics tables. Rows come from the API as plain dicts.
+type AnyRow = Record<string, unknown>;
+const asNum = (v: unknown) => (v == null ? null : Number(v));
+const asStr = (v: unknown) => (v == null ? null : String(v));
+
+const BUCKET_COLS: ColumnAccessors<AnyRow> = {
+  range:        (r) => asStr(r.delay_range),
+  cases:        (r) => asNum(r.cases),
+  overdue_usd:  (r) => asNum(r.overdue_usd),
+  overdue_cny:  (r) => asNum(r.overdue_cny),
+  overdue_eur:  (r) => asNum(r.overdue_eur),
+  pct:          (r) => asNum(r.pct_of_delayed_cases),
+  notional_usd: (r) => asNum(r.notional_usd),
+  notional_cny: (r) => asNum(r.notional_cny),
+  notional_eur: (r) => asNum(r.notional_eur),
+};
+
+function groupedCols(nameField: string): ColumnAccessors<AnyRow> {
+  return {
+    name:         (r) => asStr(r[nameField]),
+    cases:        (r) => asNum(r.overdue_cases),
+    overdue_usd:  (r) => asNum(r.overdue_usd),
+    overdue_cny:  (r) => asNum(r.overdue_cny),
+    overdue_eur:  (r) => asNum(r.overdue_eur),
+    contribution: (r) => asNum(r.contribution_pct),
+    avg_delay:    (r) => asNum(r.avg_delay_days),
+    max_delay:    (r) => asNum(r.max_delay_days),
+    etd_pending:  (r) => asNum(r.etd_pending),
+    notional_usd: (r) => asNum(r.notional_usd ?? r.notional_gain),
+    notional_cny: (r) => asNum(r.notional_cny),
+    notional_eur: (r) => asNum(r.notional_eur),
+  };
+}
+const MERCH_COLS = groupedCols("merchandiser");
+const VERTICAL_COLS = groupedCols("category");
+const CUSTOMER_COLS = groupedCols("customer");
+
+const SNAP_COLS: ColumnAccessors<AnyRow> = {
+  request:      (r) => asStr(r.request_number),
+  status:       (r) => asStr(r.current_status),
+  grace_etd:    (r) => asStr(r.grace_etd),
+  etd_overdue:  (r) => asNum(r.etd_grace_overdue_days),
+  pmt_ship:     (r) => asNum(r.payment_to_ship_days),
+  pmt_request:  (r) => asNum(r.payment_to_request_days),
+  cof:          (r) => asNum(r.cost_of_fund_amount),
+  default:      (r) => asStr(r.default_status),
+  calculated:   (r) => asStr(r.calculated_at),
+};
 
 function fmtCurrency(val: number, cur: string) {
   if (!val) return "—";
@@ -499,6 +550,8 @@ function DelayBucketsTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: str
   const [customerId, setCustomerId] = useState("");
   const filters: TabFilters = { dateFrom, dateTo, staffId: staffId || undefined, verticalId: verticalId || undefined, customerId: customerId || undefined };
   const { data = [], isLoading } = useDelayBuckets(true, filters);
+  const colSort = useColumnSortState();
+  const rows = sortByColumn(data as AnyRow[], BUCKET_COLS, colSort.sort);
   return (
     <div className="space-y-3">
       <TabFilterBar
@@ -512,21 +565,21 @@ function DelayBucketsTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: str
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-32">Delay Range</TableHead>
-                <TableHead className="text-right">Cases</TableHead>
-                <TableHead className="text-right">Overdue USD</TableHead>
-                <TableHead className="text-right hidden md:table-cell">Overdue CNY</TableHead>
-                <TableHead className="text-right hidden md:table-cell">Overdue EUR</TableHead>
-                <TableHead className="text-right">% of Delayed</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">Notional USD</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">Notional CNY</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">Notional EUR</TableHead>
+                <SortableHead label="Delay Range" sortKey="range" state={colSort} className="w-32" />
+                <SortableHead label="Cases" sortKey="cases" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Overdue USD" sortKey="overdue_usd" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Overdue CNY" sortKey="overdue_cny" state={colSort} align="right" className="text-right hidden md:table-cell" />
+                <SortableHead label="Overdue EUR" sortKey="overdue_eur" state={colSort} align="right" className="text-right hidden md:table-cell" />
+                <SortableHead label="% of Delayed" sortKey="pct" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Notional USD" sortKey="notional_usd" state={colSort} align="right" className="text-right hidden lg:table-cell" />
+                <SortableHead label="Notional CNY" sortKey="notional_cny" state={colSort} align="right" className="text-right hidden lg:table-cell" />
+                <SortableHead label="Notional EUR" sortKey="notional_eur" state={colSort} align="right" className="text-right hidden lg:table-cell" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? <TableSkeleton rows={11} cols={9} />
-                : data.length === 0 ? <EmptyTable cols={9} />
-                : data.map((row: any) => {
+                : rows.length === 0 ? <EmptyTable cols={9} />
+                : rows.map((row: any) => {
                   const minPart = row.bucket_min !== null && row.bucket_min !== undefined ? `&min=${row.bucket_min}` : "";
                   const maxPart = row.bucket_max !== null && row.bucket_max !== undefined ? `&max=${row.bucket_max}` : "";
                   const xf = (staffId ? `&staff_id=${staffId}` : "") + (verticalId ? `&vertical_id=${verticalId}` : "") + (customerId ? `&customer_id=${customerId}` : "");
@@ -564,6 +617,8 @@ function ByMerchandiserTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: s
   const { etd_min: etdMin, etd_max: etdMax } = decodeBucket(bucketVal);
   const filters: TabFilters = { dateFrom, dateTo, verticalId: verticalId || undefined, customerId: customerId || undefined, etdMin, etdMax };
   const { data = [], isLoading, isError, error } = useByMerchandiser(true, filters);
+  const colSort = useColumnSortState();
+  const rows = sortByColumn(data as AnyRow[], MERCH_COLS, colSort.sort);
   return (
     <div className="space-y-3">
       <TabFilterBar
@@ -577,24 +632,24 @@ function ByMerchandiserTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: s
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Merchandiser</TableHead>
-                <TableHead className="text-right">Overdue Cases</TableHead>
-                <TableHead className="text-right">Overdue USD</TableHead>
-                <TableHead className="text-right hidden md:table-cell">Overdue CNY</TableHead>
-                <TableHead className="text-right hidden md:table-cell">Overdue EUR</TableHead>
-                <TableHead className="text-right">Contribution</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">Avg Delay</TableHead>
+                <SortableHead label="Merchandiser" sortKey="name" state={colSort} />
+                <SortableHead label="Overdue Cases" sortKey="cases" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Overdue USD" sortKey="overdue_usd" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Overdue CNY" sortKey="overdue_cny" state={colSort} align="right" className="text-right hidden md:table-cell" />
+                <SortableHead label="Overdue EUR" sortKey="overdue_eur" state={colSort} align="right" className="text-right hidden md:table-cell" />
+                <SortableHead label="Contribution" sortKey="contribution" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Avg Delay" sortKey="avg_delay" state={colSort} align="right" className="text-right hidden lg:table-cell" />
                 {/* Cost of Fund per currency (4 Sep 2026 sheet). */}
-                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (USD)</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (CNY)</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (EUR)</TableHead>
+                <SortableHead label="CoF / Notional (USD)" sortKey="notional_usd" state={colSort} align="right" className="text-right hidden lg:table-cell" />
+                <SortableHead label="CoF / Notional (CNY)" sortKey="notional_cny" state={colSort} align="right" className="text-right hidden lg:table-cell" />
+                <SortableHead label="CoF / Notional (EUR)" sortKey="notional_eur" state={colSort} align="right" className="text-right hidden lg:table-cell" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? <TableSkeleton rows={8} cols={10} />
                 : isError ? <ErrorTable cols={10} error={error} />
-                : data.length === 0 ? <EmptyTable cols={10} />
-                : data.map((row: any) => (
+                : rows.length === 0 ? <EmptyTable cols={10} />
+                : rows.map((row: any) => (
                   <TableRow key={row.merchandiser} className="hover:bg-muted/40 cursor-pointer">
                     <TableCell className="font-medium">
                       <Link href={`/analytics/drill?section=by_merchandiser&name=${encodeURIComponent(row.merchandiser)}${verticalId ? `&vertical_id=${verticalId}` : ""}${customerId ? `&customer_id=${customerId}` : ""}${etdMin !== undefined ? `&etd_min=${etdMin}` : ""}${etdMax !== undefined ? `&etd_max=${etdMax}` : ""}`} className="flex items-center gap-1.5 group/link hover:text-foreground transition-colors">
@@ -628,6 +683,8 @@ function ByVerticalTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
   const { etd_min: etdMin, etd_max: etdMax } = decodeBucket(bucketVal);
   const filters: TabFilters = { dateFrom, dateTo, staffId: staffId || undefined, customerId: customerId || undefined, etdMin, etdMax };
   const { data = [], isLoading, isError, error } = useByVertical(true, filters);
+  const colSort = useColumnSortState();
+  const rows = sortByColumn(data as AnyRow[], VERTICAL_COLS, colSort.sort);
   return (
     <div className="space-y-3">
       <TabFilterBar
@@ -641,24 +698,24 @@ function ByVerticalTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Category</TableHead>
-                <TableHead className="text-right">Overdue Cases</TableHead>
-                <TableHead className="text-right">Overdue USD</TableHead>
-                <TableHead className="text-right hidden md:table-cell">Overdue CNY</TableHead>
-                <TableHead className="text-right hidden md:table-cell">Overdue EUR</TableHead>
-                <TableHead className="text-right">Contribution</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">Avg Delay</TableHead>
+                <SortableHead label="Category" sortKey="name" state={colSort} />
+                <SortableHead label="Overdue Cases" sortKey="cases" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Overdue USD" sortKey="overdue_usd" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Overdue CNY" sortKey="overdue_cny" state={colSort} align="right" className="text-right hidden md:table-cell" />
+                <SortableHead label="Overdue EUR" sortKey="overdue_eur" state={colSort} align="right" className="text-right hidden md:table-cell" />
+                <SortableHead label="Contribution" sortKey="contribution" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Avg Delay" sortKey="avg_delay" state={colSort} align="right" className="text-right hidden lg:table-cell" />
                 {/* Cost of Fund per currency (4 Sep 2026 sheet). */}
-                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (USD)</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (CNY)</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (EUR)</TableHead>
+                <SortableHead label="CoF / Notional (USD)" sortKey="notional_usd" state={colSort} align="right" className="text-right hidden lg:table-cell" />
+                <SortableHead label="CoF / Notional (CNY)" sortKey="notional_cny" state={colSort} align="right" className="text-right hidden lg:table-cell" />
+                <SortableHead label="CoF / Notional (EUR)" sortKey="notional_eur" state={colSort} align="right" className="text-right hidden lg:table-cell" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? <TableSkeleton rows={8} cols={10} />
                 : isError ? <ErrorTable cols={10} error={error} />
-                : data.length === 0 ? <EmptyTable cols={10} />
-                : data.map((row: any) => (
+                : rows.length === 0 ? <EmptyTable cols={10} />
+                : rows.map((row: any) => (
                   <TableRow key={row.category} className="hover:bg-muted/40 cursor-pointer">
                     <TableCell className="font-medium">
                       <Link href={`/analytics/drill?section=by_vertical&name=${encodeURIComponent(row.category)}${staffId ? `&staff_id=${staffId}` : ""}${customerId ? `&customer_id=${customerId}` : ""}${etdMin !== undefined ? `&etd_min=${etdMin}` : ""}${etdMax !== undefined ? `&etd_max=${etdMax}` : ""}`} className="flex items-center gap-1.5 group/link hover:text-foreground transition-colors">
@@ -692,6 +749,8 @@ function ByCustomerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
   const { etd_min: etdMin, etd_max: etdMax } = decodeBucket(bucketVal);
   const filters: TabFilters = { dateFrom, dateTo, staffId: staffId || undefined, verticalId: verticalId || undefined, etdMin, etdMax };
   const { data = [], isLoading, isError, error } = useByCustomer(true, filters);
+  const colSort = useColumnSortState();
+  const rows = sortByColumn(data as AnyRow[], CUSTOMER_COLS, colSort.sort);
   return (
     <div className="space-y-3">
       <TabFilterBar
@@ -705,26 +764,26 @@ function ByCustomerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Customer</TableHead>
-                <TableHead className="text-right">Cases</TableHead>
-                <TableHead className="text-right">Overdue USD</TableHead>
-                <TableHead className="text-right hidden md:table-cell">Overdue CNY</TableHead>
-                <TableHead className="text-right hidden md:table-cell">Overdue EUR</TableHead>
-                <TableHead className="text-right">Contribution</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">Avg Delay</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">Max Delay</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">ETD Pending</TableHead>
+                <SortableHead label="Customer" sortKey="name" state={colSort} />
+                <SortableHead label="Cases" sortKey="cases" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Overdue USD" sortKey="overdue_usd" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Overdue CNY" sortKey="overdue_cny" state={colSort} align="right" className="text-right hidden md:table-cell" />
+                <SortableHead label="Overdue EUR" sortKey="overdue_eur" state={colSort} align="right" className="text-right hidden md:table-cell" />
+                <SortableHead label="Contribution" sortKey="contribution" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Avg Delay" sortKey="avg_delay" state={colSort} align="right" className="text-right hidden lg:table-cell" />
+                <SortableHead label="Max Delay" sortKey="max_delay" state={colSort} align="right" className="text-right hidden lg:table-cell" />
+                <SortableHead label="ETD Pending" sortKey="etd_pending" state={colSort} align="right" className="text-right hidden lg:table-cell" />
                 {/* Cost of Fund per currency (4 Sep 2026 sheet). */}
-                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (USD)</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (CNY)</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">CoF / Notional (EUR)</TableHead>
+                <SortableHead label="CoF / Notional (USD)" sortKey="notional_usd" state={colSort} align="right" className="text-right hidden lg:table-cell" />
+                <SortableHead label="CoF / Notional (CNY)" sortKey="notional_cny" state={colSort} align="right" className="text-right hidden lg:table-cell" />
+                <SortableHead label="CoF / Notional (EUR)" sortKey="notional_eur" state={colSort} align="right" className="text-right hidden lg:table-cell" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? <TableSkeleton rows={8} cols={12} />
                 : isError ? <ErrorTable cols={12} error={error} />
-                : data.length === 0 ? <EmptyTable cols={12} />
-                : data.map((row: any) => (
+                : rows.length === 0 ? <EmptyTable cols={12} />
+                : rows.map((row: any) => (
                   <TableRow key={row.customer} className="hover:bg-muted/40 cursor-pointer">
                     <TableCell className="font-medium">
                       <Link href={`/analytics/drill?section=by_customer&name=${encodeURIComponent(row.customer)}${staffId ? `&staff_id=${staffId}` : ""}${verticalId ? `&vertical_id=${verticalId}` : ""}${etdMin !== undefined ? `&etd_min=${etdMin}` : ""}${etdMax !== undefined ? `&etd_max=${etdMax}` : ""}`} className="flex items-center gap-1.5 group/link hover:text-foreground transition-colors">
@@ -767,6 +826,7 @@ const OUTSTANDING_GROUPS = [
 function OutstandingTrackerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: string }) {
   const [groupBy, setGroupBy] = useState<string>("week");
   const { data = [], isLoading } = useOutstandingTracker(true, groupBy, dateFrom, dateTo);
+  const colSort = useColumnSortState();
 
   // Currency columns are driven by the data — USD/CNY/EUR first, then any
   // other currency present, so nothing is artificially hidden.
@@ -782,6 +842,18 @@ function OutstandingTrackerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo
   const cols = 3 + Math.max(currencies.length, 1);
 
   const groupHeading = OUTSTANDING_GROUPS.find((g) => g.key === groupBy)?.label ?? "Group";
+
+  // Column-header sorting (16 Sep 2026) — currency columns are dynamic, so
+  // the accessor map is built alongside them.
+  const outstandingCols: ColumnAccessors<(typeof data)[number]> = {
+    group:    (r) => r.group,
+    requests: (r) => r.request_count,
+    tranches: (r) => r.tranche_count,
+    ...Object.fromEntries(
+      currencies.map((c) => [`out_${c}`, (r: (typeof data)[number]) => r.outstanding[c] ?? null]),
+    ),
+  };
+  const rows = sortByColumn(data, outstandingCols, colSort.sort);
 
   return (
     <div className="space-y-3">
@@ -806,22 +878,22 @@ function OutstandingTrackerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{groupHeading}</TableHead>
-                <TableHead className="text-right">Requests</TableHead>
-                <TableHead className="text-right">Unpaid Tranches</TableHead>
+                <SortableHead label={groupHeading} sortKey="group" state={colSort} />
+                <SortableHead label="Requests" sortKey="requests" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Unpaid Tranches" sortKey="tranches" state={colSort} align="right" className="text-right" />
                 {currencies.length === 0 ? (
                   <TableHead className="text-right">Outstanding</TableHead>
                 ) : (
                   currencies.map((c) => (
-                    <TableHead key={c} className="text-right">Outstanding {currencyDisplayLabel(c)}</TableHead>
+                    <SortableHead key={c} label={`Outstanding ${currencyDisplayLabel(c)}`} sortKey={`out_${c}`} state={colSort} align="right" className="text-right" />
                   ))
                 )}
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? <TableSkeleton rows={8} cols={cols} />
-                : data.length === 0 ? <EmptyTable cols={cols} />
-                : data.map((row) => (
+                : rows.length === 0 ? <EmptyTable cols={cols} />
+                : rows.map((row) => (
                   <TableRow key={row.group}>
                     <TableCell className="font-medium text-sm whitespace-nowrap">{row.group}</TableCell>
                     <TableCell className="text-right tabular-nums">{row.request_count}</TableCell>
@@ -1009,8 +1081,12 @@ function OverviewTab({ filters, draftFilters, setDraft, applyFilters, clearFilte
     return [...map.values()].sort((a, b) => b.overdueDays - a.overdueDays);
   }, [snapshots, requestMap]);
 
-  const snapsTotalPages = Math.ceil(snapshots.length / SNAPS_PAGE_SIZE);
-  const snapsSlice = snapshots.slice((snapsPage - 1) * SNAPS_PAGE_SIZE, snapsPage * SNAPS_PAGE_SIZE);
+  // Column-header sorting (16 Sep 2026) — applied before pagination so
+  // asc/desc runs across every page.
+  const colSort = useColumnSortState();
+  const sortedSnaps = sortByColumn(snapshots as unknown as AnyRow[], SNAP_COLS, colSort.sort) as unknown as typeof snapshots;
+  const snapsTotalPages = Math.ceil(sortedSnaps.length / SNAPS_PAGE_SIZE);
+  const snapsSlice = sortedSnaps.slice((snapsPage - 1) * SNAPS_PAGE_SIZE, snapsPage * SNAPS_PAGE_SIZE);
 
   useEffect(() => { setSnapsPage(1); }, [snapshots]);
 
@@ -1208,15 +1284,15 @@ function OverviewTab({ filters, draftFilters, setDraft, applyFilters, clearFilte
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Request #</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right"><span className="inline-flex items-center gap-1">Grace ETD <HelpTooltip content="Estimated shipment date + grace period (default 7 days)." /></span></TableHead>
-              <TableHead className="text-right"><span className="inline-flex items-center gap-1">ETD Overdue <HelpTooltip content="Days past the Grace ETD. Zero means on time." /></span></TableHead>
-              <TableHead className="text-right hidden md:table-cell"><span className="inline-flex items-center gap-1">Pmt→Ship <HelpTooltip content="Days from payment processed to ship date." /></span></TableHead>
-              <TableHead className="text-right hidden md:table-cell"><span className="inline-flex items-center gap-1">Pmt→Request <HelpTooltip content="Days from request submission to payment processed." /></span></TableHead>
-              <TableHead className="text-right"><span className="inline-flex items-center gap-1">Cost of Fund <HelpTooltip content="Estimated financial cost of holding the advance deposit." /></span></TableHead>
-              <TableHead>Default</TableHead>
-              <TableHead className="hidden lg:table-cell">Calculated</TableHead>
+              <SortableHead label="Request #" sortKey="request" state={colSort} />
+              <SortableHead label="Status" sortKey="status" state={colSort} />
+              <SortableHead sortKey="grace_etd" state={colSort} align="right" className="text-right" label={<span className="inline-flex items-center gap-1">Grace ETD <HelpTooltip content="Estimated shipment date + grace period (default 7 days)." /></span>} />
+              <SortableHead sortKey="etd_overdue" state={colSort} align="right" className="text-right" label={<span className="inline-flex items-center gap-1">ETD Overdue <HelpTooltip content="Days past the Grace ETD. Zero means on time." /></span>} />
+              <SortableHead sortKey="pmt_ship" state={colSort} align="right" className="text-right hidden md:table-cell" label={<span className="inline-flex items-center gap-1">Pmt→Ship <HelpTooltip content="Days from payment processed to ship date." /></span>} />
+              <SortableHead sortKey="pmt_request" state={colSort} align="right" className="text-right hidden md:table-cell" label={<span className="inline-flex items-center gap-1">Pmt→Request <HelpTooltip content="Days from request submission to payment processed." /></span>} />
+              <SortableHead sortKey="cof" state={colSort} align="right" className="text-right" label={<span className="inline-flex items-center gap-1">Cost of Fund <HelpTooltip content="Estimated financial cost of holding the advance deposit." /></span>} />
+              <SortableHead label="Default" sortKey="default" state={colSort} />
+              <SortableHead label="Calculated" sortKey="calculated" state={colSort} className="hidden lg:table-cell" />
             </TableRow>
           </TableHeader>
           <TableBody>
