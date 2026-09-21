@@ -41,6 +41,18 @@ class DepositRequestCreate(BaseModel):
             raise ValueError("Deposit percentage must be between 0 and 100")
         return v
 
+    # NEW requests only (21 Sep 2026, executive request): the ETD must be
+    # tomorrow or later. DepositRequestUpdate is deliberately exempt — legacy
+    # requests carry past ETDs and editing them must not be blocked.
+    @field_validator("estimated_etd")
+    @classmethod
+    def validate_etd_not_past(cls, v: date | None) -> date | None:
+        if v is not None and v <= date.today():
+            raise ValueError(
+                "ETD cannot be today or a past date — it must be tomorrow or later."
+            )
+        return v
+
     @model_validator(mode="after")
     def validate_tranches(self) -> "DepositRequestCreate":
         if self.tranches:
