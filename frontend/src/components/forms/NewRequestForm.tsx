@@ -17,7 +17,7 @@ import { Field } from "@/components/ui/field";
 import { useVerticals, useCustomers, useSuppliers, useSupplierDefaultStatus } from "@/hooks/useMasters";
 import { useCreateRequest } from "@/hooks/useRequests";
 import requestService from "@/services/requestService";
-import { currencyDisplayLabel, formatCurrency, todayLocalISO } from "@/lib/utils";
+import { currencyDisplayLabel, formatCurrency, todayLocalISO, tomorrowLocalISO } from "@/lib/utils";
 import type { DepositRequest } from "@/types";
 
 type InvoiceField = "sunshine_invoice_number" | "supplier_invoice_number";
@@ -44,7 +44,14 @@ const schema = z
     supplier_invoice_number: z.string().optional(),
     currency: z.string().min(1),
     total_supplier_invoice_amount: z.coerce.number().positive("Must be positive"),
-    estimated_etd: z.string().optional(),
+    // ETD on a NEW request must be tomorrow or later (21 Sep 2026, executive
+    // request) — the backend enforces the same rule on create.
+    estimated_etd: z
+      .string()
+      .optional()
+      .refine((v) => !v || v > todayLocalISO(), {
+        message: "ETD cannot be today or a past date — pick tomorrow or later.",
+      }),
     remarks: z.string().optional(),
     tranches: z.array(trancheSchema).min(1, "At least one tranche is required"),
   })
@@ -304,9 +311,10 @@ export function NewRequestForm({ onSuccess, onCancel }: Props) {
 
               <Field
                 label="ETD"
-                tooltip="Estimated Time of Departure — when goods are expected to leave the origin port/warehouse."
+                tooltip="Estimated Time of Departure — when goods are expected to leave the origin port/warehouse. Must be tomorrow or later."
                 error={errors.estimated_etd?.message}
                 type="date"
+                min={tomorrowLocalISO()}
                 {...register("estimated_etd")}
               />
             </div>

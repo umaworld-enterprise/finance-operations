@@ -33,6 +33,14 @@ export function todayLocalISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Tomorrow in the user's local timezone — the earliest ETD a new request may
+// carry (21 Sep 2026, executive request).
+export function tomorrowLocalISO(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 // Amount still payable on a request (10 Aug 2026): the sum of its UNPAID
 // tranches — paid tranches are out the door, rejected ones don't count.
 // Legacy rows without tranches fall back to the full deposit until processed.
