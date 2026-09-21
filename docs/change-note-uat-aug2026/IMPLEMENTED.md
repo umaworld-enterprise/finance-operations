@@ -1814,3 +1814,14 @@ cross-merchandiser edits stay fully attributable.
    totals footer.
 
 317 backend tests green; tsc clean. No migration.
+
+## ETD must be tomorrow or later (21 Sep 2026)
+
+NEW requests only (confirmed choice): the ETD on the request form must be at
+least tomorrow — today and past dates are rejected. Enforced twice:
+frontend (`NewRequestForm` zod refine + `min` attribute on the date picker,
+new `tomorrowLocalISO` helper) and backend (`DepositRequestCreate`
+field_validator — also covers the public form API path).
+`DepositRequestUpdate` is deliberately exempt so legacy requests with past
+ETDs stay editable. New `tests/unit/test_etd_validation.py` (3 tests).
+320 backend tests green; tsc clean. No migration.
