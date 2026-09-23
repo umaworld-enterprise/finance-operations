@@ -10,6 +10,20 @@ import masterService, {
 const STALE = 5 * 60 * 1000;
 const GC    = 30 * 60 * 1000;  // master data changes rarely; keep in memory 30 min
 
+// Alphabetical, case-insensitive (16 Sep 2026 executive request: capitals and
+// lowercase were interleaving wrongly). The API already orders by lower(name);
+// sorting here too guarantees the order in every dropdown even when an older
+// or cached response comes back. Module-level so the `select` identity stays
+// stable across renders. Banks are excluded — they carry a deliberate
+// sort_order set by admins.
+const byName = <T extends { name: string }>(rows: T[]): T[] =>
+  [...rows].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+
+const byFullName = <T extends { full_name: string }>(rows: T[]): T[] =>
+  [...rows].sort((a, b) =>
+    a.full_name.localeCompare(b.full_name, undefined, { sensitivity: "base" }),
+  );
+
 export function usePaymentTerms() {
   return useQuery({
     queryKey: ["payment-terms"],
@@ -69,6 +83,7 @@ export function useVerticals() {
   return useQuery({
     queryKey: ["verticals"],
     queryFn: masterService.getVerticals,
+    select: byName,
     staleTime: STALE,
     gcTime: GC,
     placeholderData: keepPreviousData,
@@ -79,6 +94,7 @@ export function useCustomers() {
   return useQuery({
     queryKey: ["customers"],
     queryFn: masterService.getCustomers,
+    select: byName,
     staleTime: STALE,
     gcTime: GC,
     placeholderData: keepPreviousData,
@@ -89,6 +105,7 @@ export function useSuppliers() {
   return useQuery({
     queryKey: ["suppliers"],
     queryFn: masterService.getSuppliers,
+    select: byName,
     staleTime: STALE,
     gcTime: GC,
     placeholderData: keepPreviousData,
@@ -170,6 +187,7 @@ export function useMerchandiserOptions(enabled = true) {
   return useQuery({
     queryKey: ["merchandiser-options"],
     queryFn: masterService.getMerchandiserOptions,
+    select: byFullName,
     enabled,
     staleTime: STALE,
     gcTime: GC,

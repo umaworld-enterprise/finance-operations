@@ -279,6 +279,21 @@ async def check_invoice_number(
     )
 
 
+# ── Seen/unseen red dot (23 Sep 2026, executive request) ─────────────────────
+# Declared BEFORE /{request_id} so "unseen" is not swallowed as an id.
+
+
+@router.get("/unseen")
+async def unseen_requests(current_user: User, db: DB) -> dict:
+    """Ids of requests changed since the caller last opened them — the rows
+    that carry the red dot. A request never opened counts only when its
+    activity is newer than the user's baseline, so historical files stay
+    quiet."""
+    from app.services.presence_service import PresenceService
+
+    return {"ids": await PresenceService(db).unseen_request_ids(current_user.id)}
+
+
 @router.get("/{request_id}", response_model=DepositRequestDetailResponse)
 async def get_request(
     request_id: UUID,
@@ -745,3 +760,17 @@ async def hom_reject(
     )
     background_tasks.add_task(notify_hom_decision, request_id, "rejected", body.remarks)
     return DepositRequestResponse.model_validate(req)
+
+
+@router.post("/{request_id}/view", response_model=MessageResponse)
+async def mark_request_viewed(
+    request_id: UUID,
+    current_user: User,
+    db: DB,
+) -> MessageResponse:
+    """Clears this request's red dot for the caller (23 Sep 2026) — sent when
+    they open the request."""
+    from app.services.presence_service import PresenceService
+
+    await PresenceService(db).mark_viewed(current_user.id, request_id)
+    return MessageResponse(message="ok")

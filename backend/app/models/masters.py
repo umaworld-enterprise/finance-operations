@@ -62,6 +62,14 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     department: Mapped[str | None] = mapped_column(String(100), nullable=True)
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     font_size: Mapped[str] = mapped_column(String(16), nullable=False, default="default")
+    # Presence + seen/unseen tracking (23 Sep 2026). last_seen_at is the
+    # heartbeat written while the app tab is visible — the gap on return is
+    # the "away" window the pop-up reports. unseen_since is the red-dot
+    # baseline, so files that predate the feature do not all light up.
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    unseen_since: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
     # Relationships
     created_requests: Mapped[list["DepositRequest"]] = relationship(
