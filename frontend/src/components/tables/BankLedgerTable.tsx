@@ -98,6 +98,9 @@ export function BankLedgerTable({
                   <SortableHead label="Supplier" sortKey="supplier" state={colSort} className="text-background" />
                   <SortableHead label="Supplier Proforma Invoice #" sortKey="proforma" state={colSort} className="text-background whitespace-nowrap" />
                   <SortableHead label="File Nos." sortKey="file_nos" state={colSort} className="text-background whitespace-nowrap" />
+                  {/* Staff (23 Sep 2026, executive request) — sits right after
+                      File Nos. and stays EMPTY for now; the data follows later. */}
+                  <TableHead className="text-background">Staff</TableHead>
                   <SortableHead label="Customer" sortKey="customer" state={colSort} className="text-background" />
                   <SortableHead label="Curr" sortKey="curr" state={colSort} className="text-background" />
                   {/* Kept empty for now (client decision, 4 Sep 2026). */}
@@ -110,7 +113,7 @@ export function BankLedgerTable({
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableSkeleton rows={6} cols={11} />
+                  <TableSkeleton rows={6} cols={12} />
                 ) : (
                   rows.map((e, i) => (
                     <TableRow key={i}>
@@ -122,6 +125,8 @@ export function BankLedgerTable({
                       <TableCell className="text-sm font-medium">{e.supplier}</TableCell>
                       <TableCell className="whitespace-nowrap text-sm">{e.supplier_invoice}</TableCell>
                       <TableCell className="whitespace-nowrap text-sm">{e.file_nos}</TableCell>
+                      {/* Staff — intentionally blank until the data lands. */}
+                      <TableCell />
                       <TableCell className="text-sm">{e.customer}</TableCell>
                       <TableCell className="text-sm">{e.curr}</TableCell>
                       <TableCell />
@@ -137,7 +142,8 @@ export function BankLedgerTable({
                 {!loading &&
                   totalRows.map(([curr, sum]) => (
                     <TableRow key={`total-${curr}`} className="bg-muted/60 hover:bg-muted/60 font-semibold">
-                      <TableCell className="text-sm" colSpan={5}>
+                      {/* Date → Staff → Customer is now 6 columns. */}
+                      <TableCell className="text-sm" colSpan={6}>
                         Total value{totalRows.length > 1 || curr !== "—" ? ` (${curr})` : ""}
                       </TableCell>
                       <TableCell className="text-sm">{curr}</TableCell>

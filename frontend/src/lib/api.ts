@@ -27,6 +27,15 @@ function createApiClient(): AxiosInstance {
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    // Never let a GET be answered from the browser's HTTP cache (23 Sep 2026:
+    // polled refetches were returning cached bodies, so new requests appeared
+    // only after a manual reload). The backend also sends `no-store`; this is
+    // the client-side half, and costs nothing — the Authorization header
+    // already forces a CORS preflight on these calls.
+    if ((config.method ?? "get").toLowerCase() === "get") {
+      config.headers["Cache-Control"] = "no-cache";
+      config.headers.Pragma = "no-cache";
+    }
     return config;
   });
 

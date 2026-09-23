@@ -338,6 +338,17 @@ const requestService = {
     return data;
   },
 
+  // Seen/unseen red dot (23 Sep 2026): ids of requests changed since this
+  // user last opened them, and the call that clears one.
+  unseenIds: async (): Promise<string[]> => {
+    const { data } = await api.get<{ ids: string[] }>("/requests/unseen");
+    return data.ids;
+  },
+
+  markViewed: async (id: string): Promise<void> => {
+    await api.post(`/requests/${id}/view`);
+  },
+
   auditTrail: async (id: string): Promise<RequestAuditEntry[]> => {
     const { data } = await api.get<RequestAuditEntry[]>(`/requests/${id}/audit`);
     return data;

@@ -110,6 +110,9 @@ export async function exportBankLedgerToExcel(
       "Supplier": e.supplier,
       "Supplier Proforma Invoice #": e.supplier_invoice,
       "File Nos.": e.file_nos,
+      // Staff (23 Sep 2026) — column reserved right after File Nos., blank
+      // until the data is decided; mirrors the on-screen ledger.
+      "Staff": "",
       "Customer": e.customer,
       "Curr": e.curr,
       "EURO/CNY": "",

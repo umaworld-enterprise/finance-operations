@@ -12,6 +12,7 @@ from app.repositories.notification_repo import (
     PushSubscriptionRepository,
 )
 from app.schemas.common import MessageResponse
+from app.services.presence_service import PresenceService
 from app.schemas.notification import (
     MarkReadRequest,
     NotificationListResponse,
@@ -40,6 +41,25 @@ async def list_notifications(
         total=total,
         unread_count=unread,
     )
+
+
+# ── Presence: the "while you were away" pop-up (23 Sep 2026) ────────────────
+
+
+@router.post("/presence", response_model=MessageResponse)
+async def heartbeat(current_user: User, db: DB) -> MessageResponse:
+    """Called on a timer while the app tab is visible. The gap between the
+    last heartbeat and the user's return is what counts as being away."""
+    await PresenceService(db).touch(current_user.id)
+    return MessageResponse(message="ok")
+
+
+@router.get("/away-summary")
+async def away_summary(current_user: User, db: DB) -> dict:
+    """How long the user was away and how many requests reached the Accounts
+    queue meanwhile. `show` is true only for a real absence with new work in
+    it — the frontend pops the dialog on that."""
+    return await PresenceService(db).away_summary(current_user.id)
 
 
 @router.post("/read", response_model=MessageResponse)
