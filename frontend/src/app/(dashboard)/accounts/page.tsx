@@ -34,6 +34,10 @@ import { bankLedgerEntries, exportBankLedgerToExcel, exportRequestsToExcel, late
 import { BankLedgerTable } from "@/components/tables/BankLedgerTable";
 import { filterParams, matchesRequestFilters, RequestFilterBar, type RequestFilterValues } from "@/components/filters/RequestFilterBar";
 import { BulkPayDialog, nextPayableTranche } from "@/components/accounts/BulkPayDialog";
+import { AwayDialog } from "@/components/notifications/AwayDialog";
+import { UnseenDot } from "@/components/ui/UnseenDot";
+import { usePresence } from "@/hooks/usePresence";
+import { useUnseenRequests } from "@/hooks/useUnseenRequests";
 import { Clock, CheckCircle, AlertTriangle, BookOpen, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
 import Link from "next/link";
 import type { DepositRequest } from "@/types";
@@ -132,6 +136,7 @@ function PendingTable({
   selectedIds,
   onToggleSelect,
   canSelect,
+  unseenIds,
 }: {
   rows: DepositRequest[];
   loading: boolean;
@@ -141,6 +146,8 @@ function PendingTable({
   selectedIds?: Set<string>;
   onToggleSelect?: (req: DepositRequest) => void;
   canSelect?: (req: DepositRequest) => boolean;
+  /** Seen/unseen (23 Sep 2026): ids changed since this user last opened them. */
+  unseenIds?: Set<string>;
 }) {
   const selectable = !!onToggleSelect;
   // Each bucket paginates client-side (10 Aug 2026, app-wide table
@@ -202,6 +209,7 @@ function PendingTable({
           <div key={req.id} className="p-4 space-y-2.5">
             <div className="flex items-start justify-between gap-3">
               <span className="flex items-center gap-1.5">
+                <UnseenDot show={unseenIds?.has(req.id) ?? false} />
                 <Link href={`/accounts/${req.id}`} className="font-mono text-xs font-bold text-foreground hover:underline underline-offset-2">
                   {requestDisplayNumber(req)}
                 </Link>
@@ -296,6 +304,8 @@ function PendingTable({
                 )}
                 <TableCell>
                   <div className="flex items-center gap-1.5">
+                    {/* Seen/unseen (23 Sep 2026): changed since you last opened it. */}
+                    <UnseenDot show={unseenIds?.has(req.id) ?? false} />
                     <Link href={`/accounts/${req.id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
                       {requestDisplayNumber(req)}
                     </Link>
@@ -385,6 +395,7 @@ function StatusTable({
   emptyTitle,
   showPayable = false,
   showPaymentDate = false,
+  unseenIds,
 }: {
   rows: DepositRequest[];
   title: string;
@@ -395,6 +406,8 @@ function StatusTable({
   showPayable?: boolean;
   /** Payment Date column (2 Sep 2026) — for the Processed tab. */
   showPaymentDate?: boolean;
+  /** Seen/unseen (23 Sep 2026). */
+  unseenIds?: Set<string>;
 }) {
   // Column-header sorting (16 Sep 2026) — client-side over the loaded rows.
   const colSort = useColumnSortState();
@@ -413,13 +426,16 @@ function StatusTable({
         ) : rows.map((req) => (
           <div key={req.id} className={cn("p-4 space-y-2.5", frozenForAccounts(req) && "opacity-50")}>
             <div className="flex items-start justify-between gap-3">
-              {frozenForAccounts(req) ? (
-                <span className="font-mono text-xs font-bold text-foreground">{requestDisplayNumber(req)}</span>
-              ) : (
-                <Link href={`/accounts/${req.id}`} className="font-mono text-xs font-bold text-foreground hover:underline underline-offset-2">
-                  {requestDisplayNumber(req)}
-                </Link>
-              )}
+              <span className="flex items-center gap-1.5">
+                <UnseenDot show={unseenIds?.has(req.id) ?? false} />
+                {frozenForAccounts(req) ? (
+                  <span className="font-mono text-xs font-bold text-foreground">{requestDisplayNumber(req)}</span>
+                ) : (
+                  <Link href={`/accounts/${req.id}`} className="font-mono text-xs font-bold text-foreground hover:underline underline-offset-2">
+                    {requestDisplayNumber(req)}
+                  </Link>
+                )}
+              </span>
               <StatusBadge status={req.current_status} showFull />
             </div>
             <div className="text-xs text-muted-foreground font-mono">Invoice # {req.sunshine_invoice_number || "—"}</div>
@@ -471,9 +487,12 @@ function StatusTable({
             ) : rows.map((req) => (
               <TableRow key={req.id} className={cn(frozenForAccounts(req) && "opacity-50 pointer-events-none select-none")}>
                 <TableCell>
-                  <Link href={`/accounts/${req.id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
-                    {requestDisplayNumber(req)}
-                  </Link>
+                  <div className="flex items-center gap-1.5">
+                    <UnseenDot show={unseenIds?.has(req.id) ?? false} />
+                    <Link href={`/accounts/${req.id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
+                      {requestDisplayNumber(req)}
+                    </Link>
+                  </div>
                 </TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
@@ -506,7 +525,7 @@ function StatusTable({
   );
 }
 
-function AllTable({ rows }: { rows: DepositRequest[] }) {
+function AllTable({ rows, unseenIds }: { rows: DepositRequest[]; unseenIds?: Set<string> }) {
   // Column-header sorting (16 Sep 2026) — client-side over the loaded rows.
   const colSort = useColumnSortState();
   rows = sortByColumn(rows, STATUS_ACCESSORS, colSort.sort);
@@ -523,13 +542,16 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
         ) : rows.map((req) => (
           <div key={req.id} className={cn("p-4 space-y-2.5", frozenForAccounts(req) && "opacity-50")}>
             <div className="flex items-start justify-between gap-3">
-              {frozenForAccounts(req) ? (
-                <span className="font-mono text-xs font-bold text-foreground">{requestDisplayNumber(req)}</span>
-              ) : (
-                <Link href={`/accounts/${req.id}`} className="font-mono text-xs font-bold text-foreground hover:underline underline-offset-2">
-                  {requestDisplayNumber(req)}
-                </Link>
-              )}
+              <span className="flex items-center gap-1.5">
+                <UnseenDot show={unseenIds?.has(req.id) ?? false} />
+                {frozenForAccounts(req) ? (
+                  <span className="font-mono text-xs font-bold text-foreground">{requestDisplayNumber(req)}</span>
+                ) : (
+                  <Link href={`/accounts/${req.id}`} className="font-mono text-xs font-bold text-foreground hover:underline underline-offset-2">
+                    {requestDisplayNumber(req)}
+                  </Link>
+                )}
+              </span>
               <StatusBadge status={req.current_status} showFull />
             </div>
             <div className="text-sm font-semibold text-foreground">{req.supplier.name}</div>
@@ -573,9 +595,12 @@ function AllTable({ rows }: { rows: DepositRequest[] }) {
             ) : rows.map((req) => (
               <TableRow key={req.id} className={cn(frozenForAccounts(req) && "opacity-50 pointer-events-none select-none")}>
                 <TableCell>
-                  <Link href={`/accounts/${req.id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
-                    {requestDisplayNumber(req)}
-                  </Link>
+                  <div className="flex items-center gap-1.5">
+                    <UnseenDot show={unseenIds?.has(req.id) ?? false} />
+                    <Link href={`/accounts/${req.id}`} className="font-mono text-xs text-foreground font-semibold hover:underline underline-offset-2">
+                      {requestDisplayNumber(req)}
+                    </Link>
+                  </div>
                 </TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
@@ -624,6 +649,10 @@ export default function AccountsDashboard() {
     ...(sort && sort !== "newest" ? { sort } : {}),
     ...filterParams(filters),
   };
+
+  // Seen/unseen red dot + "while you were away" pop-up (23 Sep 2026).
+  const unseenIds = useUnseenRequests();
+  const { summary: awaySummary, dismiss: dismissAway } = usePresence(true);
 
   const { data: queue = [], isLoading: queueLoading } = usePendingQueue();
   // Pending queue is a plain array (not server-paginated) — filter/sort
@@ -899,6 +928,7 @@ export default function AccountsDashboard() {
               selectedIds={bulkSelected}
               onToggleSelect={toggleBulkSelect}
               canSelect={canBulkSelect}
+              unseenIds={unseenIds}
             />
           </TabsContent>
 
@@ -943,6 +973,7 @@ export default function AccountsDashboard() {
                   subtitle="Payment-completed requests"
                   emptyTitle="No processed requests"
                   showPaymentDate
+                  unseenIds={unseenIds}
                 />
                 <Pagination
                   page={processedPage}
@@ -984,6 +1015,7 @@ export default function AccountsDashboard() {
                   subtitle="Requests placed on hold"
                   emptyTitle="No requests on hold"
                   showPayable
+                  unseenIds={unseenIds}
                 />
                 <Pagination
                   page={holdPage}
@@ -1024,6 +1056,7 @@ export default function AccountsDashboard() {
                   title="Rejected"
                   subtitle="Rejected by Accounts or Head of Merchandiser — terminal; invoice numbers are reusable"
                   emptyTitle="No rejected requests"
+                  unseenIds={unseenIds}
                 />
                 <Pagination
                   page={rejectedPage}
@@ -1064,6 +1097,7 @@ export default function AccountsDashboard() {
                   title="Cancelled"
                   subtitle="Cancelled by the merchandiser or Accounts"
                   emptyTitle="No cancelled requests"
+                  unseenIds={unseenIds}
                 />
                 <Pagination
                   page={cancelledPage}
@@ -1099,7 +1133,7 @@ export default function AccountsDashboard() {
               </Card>
             ) : (
               <>
-                <AllTable rows={allItems} />
+                <AllTable rows={allItems} unseenIds={unseenIds} />
                 <Pagination
                   page={allPage}
                   totalPages={allTotalPages}
@@ -1115,6 +1149,18 @@ export default function AccountsDashboard() {
         {/* Analytical Snapshot — all shipments (Aug 2026, item 4.2) */}
         <ShipmentsTable linkBase="/accounts" />
       </main>
+
+      {/* "While you were away" pop-up (23 Sep 2026) — shows on return to the
+          tab after a real absence with new requests waiting. */}
+      <AwayDialog
+        summary={awaySummary}
+        onClose={dismissAway}
+        onGoToQueue={() => {
+          dismissAway();
+          setActiveTab("pending");
+          document.getElementById("status-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }}
+      />
 
       {/* Bulk payment dialog (9 Sep 2026). */}
       <BulkPayDialog

@@ -66,6 +66,51 @@ class JSONErrorEnvelopeMiddleware:
             )
             await response(scope, receive, send)
 
+
+class NoStoreCacheMiddleware:
+    """Stamp every API response as uncacheable (23 Sep 2026, executive bug:
+    "requests are only visible after a refresh").
+
+    The API sent NO cache headers at all, so browsers were free to apply
+    heuristic caching to GET responses — Safari and installed PWAs do this
+    aggressively. The frontend polls every 10–15 s, but those refetches were
+    answered from the browser's own HTTP cache with the SAME stale body, so
+    new requests/status changes only appeared after a manual reload (which
+    bypasses the cache). Caddy and the service worker cache nothing, so this
+    is the only cache in the path.
+
+    `no-store` forbids storing the response at all; `no-cache` and the
+    legacy `Pragma`/`Expires` pair cover older intermediaries.
+    """
+
+    _HEADERS = (
+        (b"cache-control", b"no-store, no-cache, must-revalidate, max-age=0"),
+        (b"pragma", b"no-cache"),
+        (b"expires", b"0"),
+    )
+    _DROP = {b"cache-control", b"pragma", b"expires"}
+
+    def __init__(self, app) -> None:  # type: ignore[no-untyped-def]
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:  # type: ignore[no-untyped-def]
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message) -> None:  # type: ignore[no-untyped-def]
+            if message["type"] == "http.response.start":
+                headers = [
+                    (k, v) for k, v in message.get("headers", [])
+                    if k.lower() not in self._DROP
+                ]
+                headers.extend(self._HEADERS)
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
 # ── Scheduler (analytics snapshot refresh every 30 minutes) ──────────────────
 _scheduler = AsyncIOScheduler()
 _scheduler_lock_file = None
@@ -181,6 +226,9 @@ def create_app() -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(JSONErrorEnvelopeMiddleware)
     app.add_middleware(SlowAPIMiddleware)
+    # Added after SlowAPI so it sits OUTSIDE it — rate-limit 429s get the
+    # no-store headers too — and before CORS so CORS stays outermost.
+    app.add_middleware(NoStoreCacheMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

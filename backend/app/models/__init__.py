@@ -13,3 +13,4 @@ from app.models.tranche import InvoiceAdjustment, PaymentTranche  # noqa: F401
 from app.models.file_remark import FileRemark  # noqa: F401
 from app.models.bank_statement import BankDailyBalance, BankStatement, BankTransaction  # noqa: F401
 from app.models.projection import Projection  # noqa: F401
+from app.models.request_view import RequestView  # noqa: F401

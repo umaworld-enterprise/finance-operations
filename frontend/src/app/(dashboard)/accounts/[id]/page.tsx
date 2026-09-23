@@ -19,6 +19,7 @@ import { RequestAdjustments } from "@/components/tranches/RequestAdjustments";
 import { useRequest, usePayment, useRequestAction, useFieldVisibility, useUpdateRequest, useRejectRequest } from "@/hooks/useRequests";
 import { DecisionDialog } from "@/components/hom/DecisionDialog";
 import { useAuth } from "@/hooks/useAuth";
+import { useMarkRequestViewed } from "@/hooks/useUnseenRequests";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { ArrowLeft, Lock, FileQuestion } from "lucide-react";
 import Link from "next/link";
@@ -36,6 +37,16 @@ export default function AccountsPaymentPage() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [holdRemarks, setHoldRemarks] = useState("");
   const { user } = useAuth();
+
+  // Seen/unseen (23 Sep 2026): opening the file clears its red dot in the
+  // queue. Re-runs per request id, so navigating between files marks each.
+  const markViewed = useMarkRequestViewed();
+  useEffect(() => {
+    if (id) markViewed.mutate(id);
+    // markViewed is a stable mutation object — only the id should re-trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
   // Finance Admin may only record the ship date — everything else read-only.
   const isFinance = user?.role === "finance_admin";
   // Invoice numbers: editable by Super Admin, and by Accounts Team from the

@@ -1825,3 +1825,92 @@ field_validator — also covers the public form API path).
 `DepositRequestUpdate` is deliberately exempt so legacy requests with past
 ETDs stay editable. New `tests/unit/test_etd_validation.py` (3 tests).
 320 backend tests green; tsc clean. No migration.
+
+## Stale-data / stale-app fix + Bank Ledger Staff column (23 Sep 2026)
+
+**Context.** The executives re-sent the 16 Sep list (alphabetical masters,
+header sorting, DD-Mon-YY dates, currency totals) as if nothing had shipped.
+Those changes were already merged: `9356e6f` is on BOTH `staging` and `main`
+(PRs #60/#61, 21 Sep). The reason they could not see them is the same root
+cause as their "only visible after refresh" report — nothing in the stack
+said "do not cache".
+
+**Root cause.** Neither the API nor the frontend sent any `Cache-Control`
+header, and heuristic browser caching filled the gap (Safari and installed
+PWAs do this aggressively). Caddy is a plain reverse proxy and `public/sw.js`
+is push-only with no fetch handler, so the browser's own HTTP cache was the
+only cache in the path. Two symptoms, one cause:
+* API GETs — the frontend's 10-15 s React Query polls were answered from the
+  local cache with the same stale body, so new requests and status changes
+  appeared only after a manual reload (a reload bypasses the cache).
+* HTML documents — after a deploy the browser kept serving the old app shell,
+  which points at the old JS chunk hashes, so shipped UI changes stayed
+  invisible until a hard refresh.
+
+**Fixes.**
+* `NoStoreCacheMiddleware` (backend `app/main.py`) stamps every response
+  `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` plus
+  `Pragma`/`Expires`, replacing (never duplicating) any existing value.
+  Registered after SlowAPI so rate-limit 429s are covered, before CORS so
+  CORS stays outermost. 3 tests in `tests/unit/test_no_store_cache_headers.py`.
+* `lib/api.ts` sends `Cache-Control: no-cache` on every GET — the client-side
+  half, free because `Authorization` already forces a CORS preflight.
+* `next.config.ts` — `/_next/static/*` becomes `immutable` (hashed
+  filenames), everything else `no-store, must-revalidate`. Verified against a
+  real production build: HTML `no-store, must-revalidate`, chunks
+  `public, max-age=31536000, immutable`.
+* `useMasters.ts` — suppliers / customers / verticals / merchandisers also
+  sort alphabetically client-side (`select`), so dropdown order no longer
+  depends on the backend being current. Banks keep their admin `sort_order`.
+
+**Bank Ledger Staff column.** New `Staff` column immediately after
+`File Nos.` on the PWA ledger tab and in the Bank Ledger Excel export,
+deliberately left blank for now (data to follow) — like EURO/CNY, Rate,
+Credit and BALANCE. Ledger is now 12 columns; the per-currency total row
+spans 6.
+
+323 backend tests green; tsc clean; production build verified. No migration.
+
+## "While you were away" pop-up + seen/unseen red dot (23 Sep 2026)
+
+Two executive requests for the Accounts team, sharing one schema change
+(**migration 0037**).
+
+**Confirmed choices:** away = since last active (server-tracked, not since
+login); red dot = ANY change since the user last opened that file (not just
+unread notifications); pop-up re-appears on every return to the tab.
+
+**Schema (0037).** `users.last_seen_at` (presence heartbeat),
+`users.unseen_since` (red-dot baseline, seeded `now()` so the roll-out does
+not light up every historical file), and `request_views(user_id,
+deposit_request_id, viewed_at)` with a unique pair constraint. Downgrade
+verified — both directions generate clean SQL.
+
+**Pop-up.** `usePresence` beats `POST /notifications/presence` every 60 s but
+ONLY while the tab is visible, so the gap it leaves is exactly the absence.
+On return it reads `GET /notifications/away-summary` BEFORE the next
+heartbeat overwrites the timestamp being measured against. The server decides
+whether to show it (`show`): the absence must be >= 30 minutes AND requests
+must have arrived — counted as requests created during the gap that are still
+`PENDING_PAYMENT`, i.e. actually waiting. `AwayDialog` reports e.g. "7 new
+requests while you were away … over the last 2 hours" with a button that
+opens the pending queue. Below the 30-minute threshold nothing pops, so
+flipping to Excel for a moment is not treated as being away.
+
+**Red dot.** `GET /requests/unseen` returns the ids whose latest activity is
+newer than this user's `request_views` row (or, when never opened, newer than
+their baseline). "Latest activity" spans the request row AND its tranches —
+a tranche edit does not always touch the parent, and that case is covered by
+a test. Compared in Python because `GREATEST` (Postgres) and two-argument
+`max` (SQLite) are not portable. The dot renders beside the request number in
+the pending queue, Processed / On Hold / Rejected / Cancelled, All Requests,
+and the mobile cards; opening the request fires `POST /requests/{id}/view`
+and clears it. Seen state is per user — one person reading a file does not
+clear it for a colleague.
+
+`tests/unit/test_presence_and_unseen.py` — 10 tests (arrival counting,
+absence threshold, first-ever visit, heartbeat, dot raised/cleared, tranche
+edit, roll-out baseline, per-user isolation). 333 backend tests green; tsc
+clean; production build compiles.
+
+Deploy: `alembic upgrade head` (0037), backend + frontend together.
