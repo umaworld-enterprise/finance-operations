@@ -218,15 +218,22 @@ class ReportService:
         result = await self._session.execute(stmt)
         snaps = list(result.scalars().all())
 
+        # Sunshine Invoice No. + Original ETD added 29 Sep 2026 (executive
+        # request): the invoice number is how the team identifies a file, and
+        # the original ETD is the date the Grace ETD is derived from — without
+        # it the overdue days cannot be checked against the source date.
         headers = [
-            "Request #", "Supplier", "Customer",
-            "Grace ETD", "ETD Grace Overdue Days", "Pay-to-Ship Days", "Status",
+            "Request #", "Sunshine Invoice No.", "Supplier", "Customer",
+            "Original ETD", "Grace ETD", "ETD Grace Overdue Days",
+            "Pay-to-Ship Days", "Status",
         ]
         rows = [
             [
                 s.deposit_request.request_number if s.deposit_request else "—",
+                (s.deposit_request.sunshine_invoice_number or "—") if s.deposit_request else "—",
                 s.deposit_request.supplier.name if (s.deposit_request and s.deposit_request.supplier) else "—",
                 s.deposit_request.customer.name if (s.deposit_request and s.deposit_request.customer) else "—",
+                s.deposit_request.estimated_etd if s.deposit_request else None,
                 s.grace_etd,
                 s.etd_grace_overdue_days,
                 s.payment_to_ship_days,
@@ -234,9 +241,10 @@ class ReportService:
             ]
             for s in snaps
         ]
-        # Req#, Supplier, Customer, GraceETD, OverdueDays, Pay2Ship, Status
+        # Req#, Sunshine#, Supplier, Customer, OrigETD, GraceETD, OverdueDays,
+        # Pay2Ship, Status — widths tuned so the PDF still fits landscape.
         return self._render("Delay Report", headers, rows, fmt,
-                            col_widths=[7, 11, 10, 7, 7, 7, 9])
+                            col_widths=[7, 10, 10, 9, 7, 7, 7, 7, 8])
 
     async def cost_of_fund_report(
         self, fmt: ReportFormat, date_from: str | None = None, date_to: str | None = None

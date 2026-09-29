@@ -32,6 +32,7 @@ const ACCESSORS: ColumnAccessors<BankLedgerEntry> = {
   supplier: (e) => e.supplier,
   proforma: (e) => e.supplier_invoice,
   file_nos: (e) => e.file_nos,
+  staff:    (e) => e.staff,
   customer: (e) => e.customer,
   curr:     (e) => e.curr,
   debit:    (e) => e.amount,
@@ -98,9 +99,9 @@ export function BankLedgerTable({
                   <SortableHead label="Supplier" sortKey="supplier" state={colSort} className="text-background" />
                   <SortableHead label="Supplier Proforma Invoice #" sortKey="proforma" state={colSort} className="text-background whitespace-nowrap" />
                   <SortableHead label="File Nos." sortKey="file_nos" state={colSort} className="text-background whitespace-nowrap" />
-                  {/* Staff (23 Sep 2026, executive request) — sits right after
-                      File Nos. and stays EMPTY for now; the data follows later. */}
-                  <TableHead className="text-background">Staff</TableHead>
+                  {/* Staff (23 Sep 2026) — the merchandiser who raised the
+                      file; data filled in 29 Sep 2026. */}
+                  <SortableHead label="Staff" sortKey="staff" state={colSort} className="text-background" />
                   <SortableHead label="Customer" sortKey="customer" state={colSort} className="text-background" />
                   <SortableHead label="Curr" sortKey="curr" state={colSort} className="text-background" />
                   {/* Kept empty for now (client decision, 4 Sep 2026). */}
@@ -125,8 +126,7 @@ export function BankLedgerTable({
                       <TableCell className="text-sm font-medium">{e.supplier}</TableCell>
                       <TableCell className="whitespace-nowrap text-sm">{e.supplier_invoice}</TableCell>
                       <TableCell className="whitespace-nowrap text-sm">{e.file_nos}</TableCell>
-                      {/* Staff — intentionally blank until the data lands. */}
-                      <TableCell />
+                      <TableCell className="text-sm">{e.staff}</TableCell>
                       <TableCell className="text-sm">{e.customer}</TableCell>
                       <TableCell className="text-sm">{e.curr}</TableCell>
                       <TableCell />

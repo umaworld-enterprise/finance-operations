@@ -63,6 +63,8 @@ export interface BankLedgerEntry {
   /** The "Supplier Proforma Invoice #" column (replaced Voucher No.). */
   supplier_invoice: string;
   file_nos: string;
+  /** "Staff" column (29 Sep 2026) — the merchandiser who raised the file. */
+  staff: string;
   customer: string;
   /** The "Curr" column — the request's currency code. */
   curr: string;
@@ -89,6 +91,7 @@ export function bankLedgerEntries(
         supplier: r.supplier?.name ?? "",
         supplier_invoice: r.supplier_invoice_number ?? "",
         file_nos: r.sunshine_invoice_number ?? "",
+        staff: r.creator?.full_name ?? "",
         customer: r.customer?.name ?? "",
         curr: r.currency ?? "",
         amount: Number(t.amount),
@@ -110,9 +113,8 @@ export async function exportBankLedgerToExcel(
       "Supplier": e.supplier,
       "Supplier Proforma Invoice #": e.supplier_invoice,
       "File Nos.": e.file_nos,
-      // Staff (23 Sep 2026) — column reserved right after File Nos., blank
-      // until the data is decided; mirrors the on-screen ledger.
-      "Staff": "",
+      // Staff (29 Sep 2026) — the merchandiser who raised the file.
+      "Staff": e.staff,
       "Customer": e.customer,
       "Curr": e.curr,
       "EURO/CNY": "",
