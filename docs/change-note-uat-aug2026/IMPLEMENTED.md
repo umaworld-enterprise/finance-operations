@@ -1914,3 +1914,40 @@ edit, roll-out baseline, per-user isolation). 333 backend tests green; tsc
 clean; production build compiles.
 
 Deploy: `alembic upgrade head` (0037), backend + frontend together.
+
+## Batch (29 Sep 2026) — ledger Staff data, sidebar "new" badges, delay report columns
+
+1. **Bank Ledger Staff column filled.** The column reserved on 23 Sep now
+   carries the merchandiser who raised the file (`creator.full_name`), on the
+   Accounts Workspace ledger tab and in the Bank Ledger Excel export. It is
+   sortable like the other data columns.
+
+2. **Sidebar "new since you last looked" badges** (confirmed choice; the
+   alternative was a persistent open-work count). A count sits on the right of
+   Accounts Workspace, Modify Request, HoM Workspace and Requests
+   (merchandiser); it hides at zero and shows `99+` above 99.
+   - **Migration 0038** adds `section_views(user_id, section, viewed_at)`,
+     unique per pair. No row yet falls back to `users.unseen_since` (0037), so
+     the roll-out does not badge the entire history.
+   - `GET /notifications/sidebar-counts` returns only the sections the caller's
+     role can actually open; `POST /notifications/section-view` stamps one.
+     Counting: Accounts = pending-payment requests created/changed since the
+     cutoff; HoM = the same for awaiting-approval; Modify Request = remarks
+     raised OR decided since (both directions matter — Accounts need new ones,
+     the raiser needs the verdict); Requests = all live requests changed since,
+     matching the all-merchandisers-see-everything rule from 11 Sep.
+   - The badge clears by NAVIGATION: `useMarkSectionViewed` stamps the section
+     when the user lands on it or any detail page under it (`/accounts/<id>`
+     counts as visiting Accounts), once per entry rather than per render.
+
+3. **Delay Report columns.** Added `Sunshine Invoice No.` (how the team
+   identifies a file) and `Original ETD` (the date Grace ETD derives from —
+   without it the overdue days cannot be checked against their source). The
+   frontend column preview on the Reports tab was updated to match, and PDF
+   column widths were retuned for nine columns.
+
+`tests/unit/test_sidebar_counts.py` (8) + `test_delay_report_columns.py` (2,
+including a render check in CSV/Excel/PDF). 343 backend tests green; tsc clean;
+production build compiles; 0038 verified up and down.
+
+Deploy: `alembic upgrade head` (0038), backend + frontend together.

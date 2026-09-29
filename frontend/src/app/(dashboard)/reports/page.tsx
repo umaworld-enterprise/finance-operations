@@ -43,7 +43,8 @@ const REPORT_TYPES = [
     value: "delays",
     label: "Delay Report",
     desc: "Overdue shipments and ETD breaches",
-    columns: ["Request #", "Supplier", "Grace ETD", "ETD Overdue (days)", "Payment Date", "Ship Date", "Pmt→Ship (days)", "Status"],
+    // Sunshine Invoice No. + Original ETD added 29 Sep 2026 (executive request).
+    columns: ["Request #", "Sunshine Invoice No.", "Supplier", "Customer", "Original ETD", "Grace ETD", "ETD Grace Overdue Days", "Pay-to-Ship Days", "Status"],
   },
   {
     value: "cost-of-fund",
