@@ -6,6 +6,11 @@ import { usePathname } from "next/navigation";
 import { useContext, useEffect } from "react";
 import { SidebarContext } from "@/components/layout/sidebar-context";
 import { useAuth } from "@/hooks/useAuth";
+import {
+  SECTION_BY_HREF,
+  useMarkSectionViewed,
+  useSidebarCounts,
+} from "@/hooks/useSidebarCounts";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -76,6 +81,11 @@ export function Sidebar() {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const { open, setOpen } = useContext(SidebarContext);
+  // "New since you last looked" badges (29 Sep 2026): the count is what
+  // arrived or changed in a section since the user last opened it, and
+  // landing on the section clears it.
+  const counts = useSidebarCounts();
+  useMarkSectionViewed(pathname);
 
   useEffect(() => {
     setOpen(false);
@@ -129,7 +139,25 @@ export function Sidebar() {
               active ? "text-white" : "text-blue-200/50 group-hover:text-white"
             )}
           />
-          {item.label}
+          <span className="flex-1 truncate">{item.label}</span>
+          {/* Count of what is new in this section; hidden at zero so the
+              sidebar stays quiet when there is nothing to look at. */}
+          {(() => {
+            const section = SECTION_BY_HREF[item.href];
+            const count = section ? counts[section as keyof typeof counts] ?? 0 : 0;
+            if (!count) return null;
+            return (
+              <span
+                aria-label={`${count} new since you last opened this`}
+                className={cn(
+                  "ml-auto shrink-0 min-w-5 px-1.5 py-0.5 rounded-full text-[11px] font-bold tabular-nums text-center",
+                  active ? "bg-white text-blue-950" : "bg-red-600 text-white",
+                )}
+              >
+                {count > 99 ? "99+" : count}
+              </span>
+            );
+          })()}
         </Link>
       );
     });

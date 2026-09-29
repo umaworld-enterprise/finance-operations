@@ -3,6 +3,13 @@ import type { NotificationList } from "@/types";
 
 /** What landed in the Accounts queue while the user was away (23 Sep 2026).
  * `show` is the server's verdict: a real absence with new work in it. */
+/** Per-section counts of what is new since the user last opened that
+ * section (29 Sep 2026). Sections the role cannot see are absent. */
+export type SidebarCounts = Partial<Record<
+  "accounts" | "hom" | "file_remarks" | "merchandiser",
+  number
+>>;
+
 export interface AwaySummary {
   since: string | null;
   away_minutes: number;
@@ -30,6 +37,16 @@ const notificationService = {
   awaySummary: async (): Promise<AwaySummary> => {
     const { data } = await api.get<AwaySummary>("/notifications/away-summary");
     return data;
+  },
+
+  // Sidebar "new since you last looked" badges (29 Sep 2026).
+  sidebarCounts: async (): Promise<SidebarCounts> => {
+    const { data } = await api.get<SidebarCounts>("/notifications/sidebar-counts");
+    return data;
+  },
+
+  markSectionViewed: async (section: string): Promise<void> => {
+    await api.post("/notifications/section-view", { section });
   },
 
   pushSubscribe: async (endpoint: string, p256dh: string, auth: string): Promise<void> => {

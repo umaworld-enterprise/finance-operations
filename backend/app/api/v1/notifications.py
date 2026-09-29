@@ -3,6 +3,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
@@ -60,6 +61,32 @@ async def away_summary(current_user: User, db: DB) -> dict:
     queue meanwhile. `show` is true only for a real absence with new work in
     it — the frontend pops the dialog on that."""
     return await PresenceService(db).away_summary(current_user.id)
+
+
+# ── Sidebar "new since you last looked" badges (29 Sep 2026) ────────────────
+
+
+@router.get("/sidebar-counts")
+async def sidebar_counts(current_user: User, db: DB) -> dict:
+    """Per-section counts of what arrived or changed since the user last
+    opened that section. Only sections the role can actually see are
+    returned; the frontend hides a badge showing 0."""
+    return await PresenceService(db).sidebar_counts(current_user.id, current_user.role)
+
+
+class SectionViewRequest(BaseModel):
+    section: str
+
+
+@router.post("/section-view", response_model=MessageResponse)
+async def mark_section_viewed(
+    payload: SectionViewRequest,
+    current_user: User,
+    db: DB,
+) -> MessageResponse:
+    """Clears one sidebar badge — sent when the user opens that section."""
+    await PresenceService(db).mark_section_viewed(current_user.id, payload.section)
+    return MessageResponse(message="ok")
 
 
 @router.post("/read", response_model=MessageResponse)
