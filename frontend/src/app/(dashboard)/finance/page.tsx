@@ -30,6 +30,12 @@ import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { Pagination } from "@/components/ui/Pagination";
 import { TableControls } from "@/components/ui/TableControls";
 import { byNumber, byString, useClientTable } from "@/hooks/useClientTable";
+import {
+  makeColumnCompare,
+  SortableHead,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import type { DefaultedSupplier } from "@/types";
 import { useDefaultedSuppliers, useFlagSupplier, useResolveDefault, useSuppliers } from "@/hooks/useMasters";
 import { formatDate } from "@/lib/utils";
@@ -69,10 +75,20 @@ export default function FinanceDashboard() {
     { value: "supplier", label: "Supplier (A–Z)", compare: byString<DefaultedSupplier>((d) => d.supplier_name) },
     { value: "amount", label: "Outstanding (high → low)", compare: byNumber<DefaultedSupplier>((d) => Number(d.outstanding_amount), true) },
   ];
+  // Column-header sorting (7 Oct 2026 audit).
+  const flagCols: ColumnAccessors<DefaultedSupplier> = {
+    supplier: (d) => d.supplier_name,
+    reason:   (d) => d.default_reason ?? "",
+    flagged:  (d) => d.flagged_date,
+    resolved: (d) => d.resolved_date ?? "",
+    status:   (d) => (d.is_active ? "active" : "resolved"),
+  };
+  const flagSort = useColumnSortState();
   const flagTable = useClientTable(defaulted, {
     searchHaystack: (d) => [d.supplier_name, d.default_reason, d.currency, d.is_active ? "active" : "resolved"],
     sortOptions: flagSorts,
     pageSize: 20,
+    overrideCompare: flagSort.sort ? makeColumnCompare(flagCols, flagSort.sort) : null,
   });
 
   const {
@@ -252,11 +268,11 @@ export default function FinanceDashboard() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Supplier</TableHead>
-                    <TableHead className="hidden md:table-cell">Reason</TableHead>
-                    <TableHead>Flagged</TableHead>
-                    <TableHead className="hidden md:table-cell">Resolved</TableHead>
-                    <TableHead>Status</TableHead>
+                    <SortableHead label="Supplier" sortKey="supplier" state={flagSort} />
+                    <SortableHead label="Reason" sortKey="reason" state={flagSort} className="hidden md:table-cell" />
+                    <SortableHead label="Flagged" sortKey="flagged" state={flagSort} />
+                    <SortableHead label="Resolved" sortKey="resolved" state={flagSort} className="hidden md:table-cell" />
+                    <SortableHead label="Status" sortKey="status" state={flagSort} />
                     <TableHead />
                   </TableRow>
                 </TableHeader>

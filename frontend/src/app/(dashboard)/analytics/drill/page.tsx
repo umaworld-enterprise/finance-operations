@@ -19,6 +19,12 @@ import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from "@/components/ui/table";
 import { SearchInput } from "@/components/ui/SearchInput";
+import {
+  SortableHead,
+  sortByColumn,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import { useRequests } from "@/hooks/useRequests";
 import { useAnalyticsSnapshots } from "@/hooks/useAnalytics";
 import { formatCurrency, formatDate, cn, requestMatchesSearch } from "@/lib/utils";
@@ -476,8 +482,27 @@ function DrillContent() {
   // Reset to page 1 whenever the filtered result set changes
   useEffect(() => { setPage(1); }, [displayRows.length, drillTerm, section, currency, filter, name, bucketLabel, statusFilter, appliedStaff]);
 
-  const totalPages = Math.max(1, Math.ceil(displayRows.length / PAGE_SIZE));
-  const pagedRows  = displayRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Column-header sorting (7 Oct 2026 audit) — applied to the whole result
+  // set before paging, so asc/desc runs across every page.
+  const drillCols: ColumnAccessors<(typeof displayRows)[number]> = {
+    request:      (r) => r.req.request_number,
+    supplier:     (r) => r.req.supplier?.name ?? "",
+    customer:     (r) => r.req.customer?.name ?? "",
+    vertical:     (r) => r.req.vertical?.name ?? "",
+    merchandiser: (r) => r.req.creator?.full_name ?? "",
+    currency:     (r) => r.req.currency ?? "",
+    deposit:      (r) => Number(r.req.deposit_amount),
+    grace_etd:    (r) => r.snap?.grace_etd ?? "",
+    overdue:      (r) => r.snap?.etd_grace_overdue_days ?? null,
+    cof:          (r) => Number(r.snap?.cost_of_fund_amount ?? 0),
+    status:       (r) => r.req.current_status,
+    submitted:    (r) => r.req.created_at,
+  };
+  const colSort = useColumnSortState();
+  const sortedRows = sortByColumn(displayRows, drillCols, colSort.sort);
+
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
+  const pagedRows  = sortedRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="space-y-6">
@@ -680,18 +705,18 @@ function DrillContent() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Request #</TableHead>
-                <TableHead>Supplier</TableHead>
-                {section !== "by_customer"     && <TableHead className="hidden md:table-cell">Customer</TableHead>}
-                {section !== "by_vertical"     && <TableHead className="hidden lg:table-cell">Vertical</TableHead>}
-                {section === "by_merchandiser" && <TableHead className="hidden lg:table-cell">Merchandiser</TableHead>}
-                <TableHead className="text-right">Currency</TableHead>
-                <TableHead className={cn("text-right", meta.sumColumn === "deposit_amount" && "font-bold text-foreground")}>Deposit Amount</TableHead>
-                <TableHead className="text-right hidden md:table-cell">Grace ETD</TableHead>
-                <TableHead className="text-right">Days Overdue</TableHead>
-                <TableHead className={cn("text-right hidden lg:table-cell", meta.sumColumn === "cost_of_fund" && "font-bold text-foreground")}>Cost of Fund</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="hidden lg:table-cell">Submitted</TableHead>
+                <SortableHead label="Request #" sortKey="request" state={colSort} />
+                <SortableHead label="Supplier" sortKey="supplier" state={colSort} />
+                {section !== "by_customer"     && <SortableHead label="Customer" sortKey="customer" state={colSort} className="hidden md:table-cell" />}
+                {section !== "by_vertical"     && <SortableHead label="Vertical" sortKey="vertical" state={colSort} className="hidden lg:table-cell" />}
+                {section === "by_merchandiser" && <SortableHead label="Merchandiser" sortKey="merchandiser" state={colSort} className="hidden lg:table-cell" />}
+                <SortableHead label="Currency" sortKey="currency" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Deposit Amount" sortKey="deposit" state={colSort} align="right" className={cn("text-right", meta.sumColumn === "deposit_amount" && "font-bold text-foreground")} />
+                <SortableHead label="Grace ETD" sortKey="grace_etd" state={colSort} align="right" className="text-right hidden md:table-cell" />
+                <SortableHead label="Days Overdue" sortKey="overdue" state={colSort} align="right" className="text-right" />
+                <SortableHead label="Cost of Fund" sortKey="cof" state={colSort} align="right" className={cn("text-right hidden lg:table-cell", meta.sumColumn === "cost_of_fund" && "font-bold text-foreground")} />
+                <SortableHead label="Status" sortKey="status" state={colSort} />
+                <SortableHead label="Submitted" sortKey="submitted" state={colSort} className="hidden lg:table-cell" />
                 {meta.isMonetary && <TableHead className="text-right hidden md:table-cell">Contribution</TableHead>}
               </TableRow>
             </TableHeader>

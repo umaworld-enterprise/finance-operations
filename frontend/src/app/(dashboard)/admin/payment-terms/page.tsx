@@ -22,6 +22,12 @@ import {
 import { Pagination } from "@/components/ui/Pagination";
 import { TableControls } from "@/components/ui/TableControls";
 import { byString, useClientTable } from "@/hooks/useClientTable";
+import {
+  makeColumnCompare,
+  SortableHead,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import type { PaymentTerm } from "@/types";
 
 export default function PaymentTermsAdminPage() {
@@ -39,7 +45,15 @@ export default function PaymentTermsAdminPage() {
     { value: "label", label: "Label (A–Z)", compare: byString<PaymentTerm>((t) => t.label) },
     { value: "status", label: "Active first", compare: (a: PaymentTerm, b: PaymentTerm) => Number(b.is_active) - Number(a.is_active) },
   ];
+  // Column-header sorting (7 Oct 2026 audit). The # column is the display
+  // order, so it is deliberately not sortable.
+  const colSort = useColumnSortState();
+  const termCols: ColumnAccessors<(typeof terms)[number]> = {
+    label:  (t) => t.label,
+    active: (t) => (t.is_active ? "active" : "inactive"),
+  };
   const termTable = useClientTable(terms, {
+    overrideCompare: colSort.sort ? makeColumnCompare(termCols, colSort.sort) : null,
     searchHaystack: (t) => [t.label, t.is_active ? "active" : "inactive"],
     sortOptions: termSorts,
     pageSize: 20,
@@ -150,8 +164,8 @@ export default function PaymentTermsAdminPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-8">#</TableHead>
-                        <TableHead>Label</TableHead>
-                        <TableHead className="w-24 text-center">Active</TableHead>
+                        <SortableHead label="Label" sortKey="label" state={colSort} />
+                        <SortableHead label="Active" sortKey="active" state={colSort} className="w-24 text-center" />
                         <TableHead className="w-24 text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>

@@ -29,6 +29,13 @@ import {
 } from "@/components/ui/table";
 import { useAuth } from "@/hooks/useAuth";
 import { useMerchandiserOptions, useVerticals } from "@/hooks/useMasters";
+import type { ProjectionDashboardRow } from "@/services/projectionService";
+import {
+  SortableHead,
+  sortByColumn,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import {
   useProjectionDashboard,
   useProjectionStatus,
@@ -96,7 +103,7 @@ function MyProjectionsForm() {
   const [draft, setDraft] = useState<Draft>({});
   const [seeded, setSeeded] = useState(false);
 
-  if (!status || !status.has_verticals) return null;
+  if (!status) return null;
 
   // Seed the draft once from the already-filled values.
   if (!seeded && status.verticals.length > 0) {
@@ -133,25 +140,31 @@ function MyProjectionsForm() {
         <div className="flex items-center gap-2">
           <CalendarClock className="h-4 w-4 text-muted-foreground" />
           <h2 className="font-semibold text-foreground text-sm">
-            My Projections — {monthLabel}
+            Projections — {monthLabel}
           </h2>
         </div>
-        {status.blocked && (
+        {/* Verticals are shared (7 Oct 2026): anyone may fill any of them,
+            and a vertical missing THIS month's figures takes no requests. */}
+        {status.locked_verticals.length > 0 && (
           <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg p-3">
-            {status.block_message}
+            No new requests can be raised for{" "}
+            <span className="font-medium">{status.locked_verticals.join(", ")}</span> — this
+            month&apos;s projection is missing. Filing it here unlocks the vertical for
+            everyone.
           </p>
         )}
         {status.window_open ? (
           <p className="text-xs text-muted-foreground">
-            The window closes on {formatDate(status.window_ends)}. Fill each vertical&apos;s
-            projected deposits — you can update them until the deadline.
+            The window closes on {formatDate(status.window_ends)}. Every vertical needs a
+            projection — any merchandiser can fill one, and you may update a colleague&apos;s
+            figures until the deadline.
             {status.missing_target.length > 0 &&
               ` Still missing: ${status.missing_target.join(", ")}.`}
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">
             The projection window opens on the 25th of the month. After the deadline only the
-            Super Admin can add values on your behalf.
+            Super Admin can add a missing month&apos;s figures.
           </p>
         )}
         <div className="space-y-3">
@@ -160,6 +173,13 @@ function MyProjectionsForm() {
               <span className="text-sm font-medium text-foreground sm:w-56">
                 {v.name}
                 {!v.filled && <span className="text-amber-700 text-xs ml-1.5">(pending)</span>}
+                {v.locked && <span className="text-red-700 text-xs ml-1.5">(locked)</span>}
+                {/* Anyone may overwrite, so name the last editor. */}
+                {v.filled && v.last_updated_by && (
+                  <span className="block text-[11px] font-normal text-muted-foreground">
+                    last by {v.last_updated_by}
+                  </span>
+                )}
               </span>
               <AmountInputs
                 value={draft[v.vertical_id] ?? { usd: "", eur: "", cny: "" }}
@@ -176,14 +196,12 @@ function MyProjectionsForm() {
   );
 }
 
-// ── Super Admin: on-behalf entry (the unblock path) ──────────────────────────
+// ── Super Admin: fill a missing period (the unlock path) ────────────────────
 
 function OnBehalfForm() {
   const today = new Date();
-  const { data: merchandisers = [] } = useMerchandiserOptions();
   const { data: verticals = [] } = useVerticals();
   const submit = useSubmitProjections();
-  const [userId, setUserId] = useState("");
   const [period, setPeriod] = useState("current");
   const [draft, setDraft] = useState<Draft>({});
 
@@ -194,21 +212,27 @@ function OnBehalfForm() {
       : { year: current.year, month: current.month + 1 };
   const target = period === "current" ? current : next;
 
-  const userVerticals = useMemo(
-    () => verticals.filter((v) => v.assigned_user_id === userId),
-    [verticals, userId],
-  );
-
   const doSubmit = async () => {
+    // Only the verticals actually typed into are submitted, so the Super
+    // Admin can fix one gap without overwriting everything else.
+    const touched = verticals.filter((v) => {
+      const d = draft[v.id];
+      return d && (d.usd || d.eur || d.cny);
+    });
+    if (touched.length === 0) {
+      toast.error("Enter an amount for at least one vertical.");
+      return;
+    }
     try {
       await submit.mutateAsync({
         year: target.year,
         month: target.month,
-        items: toItems(userVerticals.map((v) => v.id), draft),
+        items: toItems(touched.map((v) => v.id), draft),
       });
       toast.success(
-        `${MONTHS[target.month - 1]} ${target.year} projections saved on behalf of the merchandiser — they are unblocked once the current month is complete.`,
+        `${MONTHS[target.month - 1]} ${target.year} projections saved — those verticals are unlocked for new requests.`,
       );
+      setDraft({});
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to save the projections.");
     }
@@ -220,35 +244,25 @@ function OnBehalfForm() {
         <div className="flex items-center gap-2">
           <UserCog className="h-4 w-4 text-muted-foreground" />
           <h2 className="font-semibold text-foreground text-sm">
-            Add Projections on Behalf (Super Admin)
+            Fill Projections (Super Admin)
           </h2>
         </div>
         <p className="text-xs text-muted-foreground">
-          A merchandiser who missed the deadline is blocked from raising requests until the
-          CURRENT month&apos;s projections are complete — fill them here to unblock.
+          A vertical whose CURRENT month is missing takes no new requests from anyone.
+          Merchandisers can only file the next month once the window opens, so after the
+          deadline this is the way to unlock one. Leave a vertical blank to skip it.
         </p>
         <div className="flex flex-wrap gap-3">
-          <select value={userId} onChange={(e) => { setUserId(e.target.value); setDraft({}); }} className={selectCls}>
-            <option value="">Select merchandiser</option>
-            {merchandisers.map((m) => (
-              <option key={m.id} value={m.id}>{m.full_name}</option>
-            ))}
-          </select>
           <select value={period} onChange={(e) => setPeriod(e.target.value)} className={selectCls}>
             <option value="current">
-              {MONTHS[current.month - 1]} {current.year} (current — unblocks)
+              {MONTHS[current.month - 1]} {current.year} (current — unlocks)
             </option>
             <option value="next">
               {MONTHS[next.month - 1]} {next.year} (next month)
             </option>
           </select>
         </div>
-        {userId && userVerticals.length === 0 && (
-          <p className="text-xs text-amber-700">
-            No verticals are assigned to this merchandiser — assign them on the Team Members page first.
-          </p>
-        )}
-        {userVerticals.map((v) => (
+        {verticals.map((v) => (
           <div key={v.id} className="flex flex-col sm:flex-row sm:items-center gap-2">
             <span className="text-sm font-medium text-foreground sm:w-56">{v.name}</span>
             <AmountInputs
@@ -257,11 +271,9 @@ function OnBehalfForm() {
             />
           </div>
         ))}
-        {userVerticals.length > 0 && (
-          <Button onClick={doSubmit} disabled={submit.isPending}>
-            {submit.isPending ? "Saving…" : "Save Projections"}
-          </Button>
-        )}
+        <Button onClick={doSubmit} disabled={submit.isPending}>
+          {submit.isPending ? "Saving…" : "Save Projections"}
+        </Button>
       </CardContent>
     </Card>
   );
@@ -277,6 +289,20 @@ function ProjectionDashboard() {
   const [chartCurrency, setChartCurrency] = useState<"usd" | "eur" | "cny">("usd");
   const { data, isLoading } = useProjectionDashboard(year, month);
   const rows = data?.rows ?? [];
+  // Column-header sorting (7 Oct 2026 audit).
+  const colSort = useColumnSortState();
+  const dashCols: ColumnAccessors<ProjectionDashboardRow> = {
+    vertical:   (r) => r.vertical,
+    merch:      (r) => r.merchandiser ?? "",
+    status:     (r) => (r.filled ? "filled" : "pending"),
+    proj_usd:   (r) => r.proj_usd,
+    actual_usd: (r) => r.actual_usd,
+    proj_eur:   (r) => r.proj_eur,
+    actual_eur: (r) => r.actual_eur,
+    proj_cny:   (r) => r.proj_cny,
+    actual_cny: (r) => r.actual_cny,
+  };
+  const sortedRows = sortByColumn(rows, dashCols, colSort.sort);
 
   const totals = rows.reduce(
     (acc, r) => ({
@@ -360,15 +386,16 @@ function ProjectionDashboard() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Vertical</TableHead>
-              <TableHead>Merchandiser</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Proj USD</TableHead>
-              <TableHead className="text-right">Actual USD</TableHead>
-              <TableHead className="text-right hidden md:table-cell">Proj EUR</TableHead>
-              <TableHead className="text-right hidden md:table-cell">Actual EUR</TableHead>
-              <TableHead className="text-right hidden md:table-cell">Proj CNY</TableHead>
-              <TableHead className="text-right hidden md:table-cell">Actual CNY</TableHead>
+              <SortableHead label="Vertical" sortKey="vertical" state={colSort} />
+              {/* Whoever last filled the projection (7 Oct 2026). */}
+              <SortableHead label="Last updated by" sortKey="merch" state={colSort} />
+              <SortableHead label="Status" sortKey="status" state={colSort} />
+              <SortableHead label="Proj USD" sortKey="proj_usd" state={colSort} align="right" className="text-right" />
+              <SortableHead label="Actual USD" sortKey="actual_usd" state={colSort} align="right" className="text-right" />
+              <SortableHead label="Proj EUR" sortKey="proj_eur" state={colSort} align="right" className="text-right hidden md:table-cell" />
+              <SortableHead label="Actual EUR" sortKey="actual_eur" state={colSort} align="right" className="text-right hidden md:table-cell" />
+              <SortableHead label="Proj CNY" sortKey="proj_cny" state={colSort} align="right" className="text-right hidden md:table-cell" />
+              <SortableHead label="Actual CNY" sortKey="actual_cny" state={colSort} align="right" className="text-right hidden md:table-cell" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -386,7 +413,7 @@ function ProjectionDashboard() {
               </tr>
             ) : (
               <>
-                {rows.map((r) => (
+                {sortedRows.map((r) => (
                   <TableRow key={r.vertical_id}>
                     <TableCell className="font-medium text-sm">{r.vertical}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{r.merchandiser ?? "—"}</TableCell>
@@ -436,10 +463,14 @@ export default function ProjectionsPage() {
         subtitle="Monthly deposit projections per vertical — filled from the 25th for the coming month, compared against actual requests"
       />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6 max-w-6xl mx-auto w-full">
-        {isMerchandiser && status?.blocked && (
+        {(status?.locked_verticals.length ?? 0) > 0 && (
           <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-            {status.block_message}
+            <span>
+              Locked for new requests:{" "}
+              <span className="font-medium">{status!.locked_verticals.join(", ")}</span>. These
+              verticals have no projection for this month — filing it unlocks them for everyone.
+            </span>
           </p>
         )}
         {isMerchandiser && <MyProjectionsForm />}

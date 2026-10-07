@@ -61,7 +61,8 @@ _SECTION_ROLES: dict[str, set[UserRole]] = {
         UserRole.SUPER_ADMIN,
         UserRole.FINANCE_ADMIN,
     },
-    SECTION_MERCHANDISER: {UserRole.MERCHANDISER},
+    # HoM gained the Requests page on 7 Oct 2026, so it carries the badge too.
+    SECTION_MERCHANDISER: {UserRole.MERCHANDISER, UserRole.HEAD_OF_MERCHANDISER},
 }
 
 

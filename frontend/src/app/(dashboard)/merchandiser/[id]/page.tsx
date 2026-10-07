@@ -174,7 +174,7 @@ export default function MerchandiserRequestDetail() {
   );
 
   return (
-    <RoleGuard allowedRoles={["merchandiser", "super_admin"]}>
+    <RoleGuard allowedRoles={["merchandiser", "head_of_merchandiser", "super_admin"]}>
       <TopNav title={`Request ${req.request_number}`} />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6 max-w-4xl mx-auto w-full">
         <Link

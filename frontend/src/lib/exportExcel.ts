@@ -16,6 +16,17 @@ export function latestPaymentDate(req: DepositRequest): string | null {
   return dates[dates.length - 1] ?? null;
 }
 
+/** Earliest tentative payment date among the UNPAID tranches — the next
+ * money due to go out. Same rule the Accounts pending queue displays; shared
+ * here so the export and the screen can never drift apart. */
+export function nextTentativeDate(req: DepositRequest): string | null {
+  const dates = (req.tranches ?? [])
+    .filter((t) => t.status === "unpaid" && t.tentative_payment_date)
+    .map((t) => t.tentative_payment_date as string)
+    .sort();
+  return dates[0] ?? null;
+}
+
 function statusLabel(value: string): string {
   return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -43,6 +54,9 @@ export async function exportRequestsToExcel(
       "Deposit Amount": Number(r.deposit_amount),
       "Status": statusLabel(r.current_status),
       "Payment Date": latestPaymentDate(r) ? formatDateSheet(latestPaymentDate(r)) : "",
+      // Tentative Payment (7 Oct 2026, executive request) — the next unpaid
+      // tranche's due date, matching the Pending Payment queue's column.
+      "Tentative Payment": formatDateSheet(nextTentativeDate(r)),
     })),
     filename,
     "Requests",

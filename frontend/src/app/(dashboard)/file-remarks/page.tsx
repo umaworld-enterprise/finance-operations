@@ -28,6 +28,12 @@ import {
 import { Pagination } from "@/components/ui/Pagination";
 import { TableControls } from "@/components/ui/TableControls";
 import { byString, useClientTable } from "@/hooks/useClientTable";
+import {
+  makeColumnCompare,
+  SortableHead,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import { useAuth } from "@/hooks/useAuth";
 import {
   useApplyRevisedAmount,
@@ -38,6 +44,15 @@ import {
 } from "@/hooks/useFileRemarks";
 import { formatDate } from "@/lib/utils";
 import type { FileRemark, FileRemarkCategory } from "@/types";
+
+// Column-header sorting (7 Oct 2026 audit: every table in the app sorts).
+const REMARK_COLS: ColumnAccessors<FileRemark> = {
+  raised:   (r) => r.created_at,
+  request:  (r) => r.request_number ?? "",
+  category: (r) => r.category,
+  remark:   (r) => r.remark ?? "",
+  status:   (r) => r.status,
+};
 
 const CATEGORY_LABELS: Record<FileRemarkCategory, string> = {
   invoice_split: "Split Invoices",
@@ -338,11 +353,15 @@ export default function FileRemarksPage() {
     { value: "oldest", label: "Oldest first", compare: byString<FileRemark>((r) => r.created_at) },
     { value: "request", label: "Request #", compare: byString<FileRemark>((r) => r.request_number ?? "") },
   ];
+  const openSort = useColumnSortState();
+  const historySort = useColumnSortState();
   const openTable = useClientTable(openRemarks, {
     searchHaystack: remarkHaystack, sortOptions: remarkSorts, pageSize: 20,
+    overrideCompare: openSort.sort ? makeColumnCompare(REMARK_COLS, openSort.sort) : null,
   });
   const historyTable = useClientTable(remarks, {
     searchHaystack: remarkHaystack, sortOptions: remarkSorts, pageSize: 20,
+    overrideCompare: historySort.sort ? makeColumnCompare(REMARK_COLS, historySort.sort) : null,
   });
 
   // The old amount pre-populates from the selected file's LIVE amount and
@@ -749,11 +768,11 @@ export default function FileRemarksPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Raised</TableHead>
-                        <TableHead>Request #</TableHead>
-                        <TableHead>Category</TableHead>
+                        <SortableHead label="Raised" sortKey="raised" state={openSort} />
+                        <SortableHead label="Request #" sortKey="request" state={openSort} />
+                        <SortableHead label="Category" sortKey="category" state={openSort} />
                         <TableHead>Details</TableHead>
-                        <TableHead>Remark / By</TableHead>
+                        <SortableHead label="Remark / By" sortKey="remark" state={openSort} />
                         {isDecider && <TableHead />}
                       </TableRow>
                     </TableHeader>
@@ -852,12 +871,12 @@ export default function FileRemarksPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Raised</TableHead>
-                      <TableHead>Request #</TableHead>
-                      <TableHead>Category</TableHead>
+                      <SortableHead label="Raised" sortKey="raised" state={historySort} />
+                      <SortableHead label="Request #" sortKey="request" state={historySort} />
+                      <SortableHead label="Category" sortKey="category" state={historySort} />
                       <TableHead>Details</TableHead>
-                      <TableHead>Remark</TableHead>
-                      <TableHead>Status / Response</TableHead>
+                      <SortableHead label="Remark" sortKey="remark" state={historySort} />
+                      <SortableHead label="Status / Response" sortKey="status" state={historySort} />
                     </TableRow>
                   </TableHeader>
                   <TableBody>

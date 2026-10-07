@@ -146,17 +146,20 @@ export default function MerchandiserDashboard() {
   const stripItems = activity.slice(0, 5);
 
   return (
-    <RoleGuard allowedRoles={["merchandiser", "super_admin"]}>
+    <RoleGuard allowedRoles={["merchandiser", "head_of_merchandiser", "super_admin"]}>
       {/* All requests are visible to every merchandiser with full rights
           (11 Sep 2026, executive request). */}
       <TopNav title="Requests" subtitle="All Supplier Advance Payment Requests across every merchandiser" />
       <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
 
-        {/* Projections gate (4 Sep 2026): blocked merchandisers see the
-            formal notice; the backend refuses creation regardless. */}
-        {projStatus?.blocked && (
+        {/* Projections gate (4 Sep 2026; per-vertical since 7 Oct 2026): the
+            VERTICAL is locked, not the person — requests for anything else
+            carry on as normal. The backend refuses creation regardless. */}
+        {(projStatus?.locked_verticals.length ?? 0) > 0 && (
           <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg p-3">
-            {projStatus.block_message}{" "}
+            No new requests can be raised for{" "}
+            <span className="font-medium">{projStatus!.locked_verticals.join(", ")}</span> —
+            this month&apos;s projection is missing. Any merchandiser can add it.{" "}
             <Link href="/projections" className="underline underline-offset-2 font-medium">
               View projections
             </Link>
@@ -362,7 +365,7 @@ export default function MerchandiserDashboard() {
           }
         }}
         title="Monthly projections pending"
-        description={`Your projections for ${projStatus?.missing_target.join(", ") ?? ""} are still pending. Fill them before the end of the month — otherwise new request creation will be stopped until the Super Admin adds them on your behalf.`}
+        description={`Projections are still pending for ${projStatus?.missing_target.join(", ") ?? ""}. Any merchandiser can fill them — a vertical left unfilled stops taking new requests once the month starts.`}
         confirmLabel="Fill projections now"
         onConfirm={() => {
           setProjNagDismissed(true);

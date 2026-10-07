@@ -41,6 +41,11 @@ _DUPLICATE_EXEMPT_STATUSES = {
 
 # Terminal statuses on which a merchandiser may no longer edit the request
 # at all (UAT change note Aug 2026, item 18).
+# Roles whose requests follow the authoring gates (pending-only edits, the
+# accounts-untouched freeze, terminal-status lockout). HoM joined 7 Oct 2026
+# when it gained the ability to raise requests; Super Admin stays exempt.
+_AUTHOR_GATED_ROLES = {UserRole.MERCHANDISER, UserRole.HEAD_OF_MERCHANDISER}
+
 _MERCHANDISER_EDIT_BLOCKED_STATUSES = _DUPLICATE_EXEMPT_STATUSES
 
 _INVOICE_FIELDS = {
@@ -289,7 +294,7 @@ class DepositRequestService:
         # Rejected/cancelled requests are closed to the merchandiser entirely
         # (UAT Aug 2026, item 18) — remarks included.
         if (
-            role == UserRole.MERCHANDISER
+            role in _AUTHOR_GATED_ROLES
             and request.current_status in _MERCHANDISER_EDIT_BLOCKED_STATUSES
         ):
             raise BusinessRuleError(
@@ -332,7 +337,7 @@ class DepositRequestService:
         # Once a request is rejected or cancelled, the merchandiser can no
         # longer change anything on it (UAT Aug 2026, item 18).
         if (
-            role == UserRole.MERCHANDISER
+            role in _AUTHOR_GATED_ROLES
             and request.current_status in _MERCHANDISER_EDIT_BLOCKED_STATUSES
         ):
             raise BusinessRuleError(
@@ -345,7 +350,7 @@ class DepositRequestService:
         # payment queue) AND Accounts have not acted on it in any way — no
         # request-wide write and no tranche paid / TT'd / detailed. Super
         # admin keeps the pre-existing broader rights.
-        if role == UserRole.MERCHANDISER:
+        if role in _AUTHOR_GATED_ROLES:
             from app.models.enums import TrancheStatus
             from app.services.tranche_service import (
                 _MERCHANDISER_EDITABLE_STATUSES,

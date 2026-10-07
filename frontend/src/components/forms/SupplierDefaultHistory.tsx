@@ -22,6 +22,12 @@ import {
 import { useSupplierDefaultHistory, useSupplierExposure } from "@/hooks/useMasters";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { SupplierExposureRow } from "@/types";
+import {
+  SortableHead,
+  sortByColumn,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 
 interface Props {
   supplierId: string | null | undefined;
@@ -108,6 +114,19 @@ function ExposureSection({
   overdue: boolean;
   linkBase?: "/accounts" | "/hom";
 }) {
+  // Column-header sorting (7 Oct 2026 audit).
+  const colSort = useColumnSortState();
+  const cols: ColumnAccessors<SupplierExposureRow> = {
+    request:      (r) => r.request_number,
+    request_date: (r) => r.request_date ?? "",
+    invoice:      (r) => r.sunshine_invoice_number ?? "",
+    deposit:      (r) => Number(r.deposit_amount),
+    payment_date: (r) => r.payment_date ?? "",
+    status:       (r) => r.current_status,
+    grace_etd:    (r) => r.grace_etd ?? "",
+    overdue:      (r) => r.etd_grace_overdue_days ?? null,
+  };
+  const sorted = sortByColumn(rows, cols, colSort.sort);
   if (rows.length === 0) return null;
   return (
     <div className="mt-4">
@@ -117,17 +136,17 @@ function ExposureSection({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Request #</TableHead>
-              <TableHead>Request Date</TableHead>
-              {overdue && <TableHead>Sunshine Invoice #</TableHead>}
-              <TableHead className="text-right">Deposit</TableHead>
-              <TableHead>Payment Date</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Grace ETD</TableHead>
-              <TableHead>Overdue</TableHead>
+              <SortableHead label="Request #" sortKey="request" state={colSort} />
+              <SortableHead label="Request Date" sortKey="request_date" state={colSort} />
+              {overdue && <SortableHead label="Sunshine Invoice #" sortKey="invoice" state={colSort} />}
+              <SortableHead label="Deposit" sortKey="deposit" state={colSort} align="right" className="text-right" />
+              <SortableHead label="Payment Date" sortKey="payment_date" state={colSort} />
+              <SortableHead label="Status" sortKey="status" state={colSort} />
+              <SortableHead label="Grace ETD" sortKey="grace_etd" state={colSort} />
+              <SortableHead label="Overdue" sortKey="overdue" state={colSort} />
             </TableRow>
           </TableHeader>
-          <ExposureRows rows={rows} overdue={overdue} linkBase={linkBase} />
+          <ExposureRows rows={sorted} overdue={overdue} linkBase={linkBase} />
         </Table>
       </div>
     </div>

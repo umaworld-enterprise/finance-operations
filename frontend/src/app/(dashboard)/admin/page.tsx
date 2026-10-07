@@ -10,6 +10,12 @@ import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { Pagination } from "@/components/ui/Pagination";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  SortableHead,
+  sortByColumn,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
@@ -130,16 +136,28 @@ export default function AdminDashboard() {
     setPage(1);
   }
 
+  // Column-header sorting (7 Oct 2026 audit).
+  const colSort = useColumnSortState();
+  const adminCols: ColumnAccessors<DepositRequest> = {
+    request:   (r) => r.request_number,
+    invoice:   (r) => r.sunshine_invoice_number ?? "",
+    supplier:  (r) => r.supplier?.name ?? "",
+    customer:  (r) => r.customer?.name ?? "",
+    deposit:   (r) => Number(r.deposit_amount),
+    status:    (r) => r.current_status,
+    submitted: (r) => r.created_at,
+  };
+
   const TABLE_HEADER = (
     <TableHeader>
       <TableRow>
-        <TableHead>Request #</TableHead>
-        <TableHead>Invoice #</TableHead>
-        <TableHead>Supplier</TableHead>
-        <TableHead className="hidden md:table-cell">Customer</TableHead>
-        <TableHead className="text-right">Deposit</TableHead>
-        <TableHead>Status</TableHead>
-        <TableHead className="hidden lg:table-cell">Submitted</TableHead>
+        <SortableHead label="Request #" sortKey="request" state={colSort} />
+        <SortableHead label="Invoice #" sortKey="invoice" state={colSort} />
+        <SortableHead label="Supplier" sortKey="supplier" state={colSort} />
+        <SortableHead label="Customer" sortKey="customer" state={colSort} className="hidden md:table-cell" />
+        <SortableHead label="Deposit" sortKey="deposit" state={colSort} align="right" className="text-right" />
+        <SortableHead label="Status" sortKey="status" state={colSort} />
+        <SortableHead label="Submitted" sortKey="submitted" state={colSort} className="hidden lg:table-cell" />
         <TableHead />
       </TableRow>
     </TableHeader>
@@ -271,7 +289,7 @@ export default function AdminDashboard() {
                 <Table>
                   {TABLE_HEADER}
                   <TableBody>
-                    {items.map((req) => <RequestRow key={req.id} req={req} />)}
+                    {sortByColumn(items, adminCols, colSort.sort).map((req) => <RequestRow key={req.id} req={req} />)}
                   </TableBody>
                 </Table>
               )}

@@ -54,6 +54,9 @@ class Projection(UUIDPrimaryKeyMixin, Base):
 
     vertical: Mapped["Vertical"] = relationship()
     user: Mapped["User"] = relationship(foreign_keys=[user_id])
+    # Who last typed the figures (7 Oct 2026: any merchandiser may overwrite
+    # any vertical, so the table names the most recent editor).
+    submitter: Mapped["User"] = relationship(foreign_keys=[submitted_by])
 
     __table_args__ = (
         CheckConstraint("month BETWEEN 1 AND 12", name="ck_projections_month"),
