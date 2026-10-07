@@ -7,6 +7,12 @@ import { TopNav } from "@/components/layout/TopNav";
 import { RoleGuard } from "@/components/layout/RoleGuard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  SortableHead,
+  sortByColumn,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,6 +85,14 @@ async function toggleAccess({
   return res.data;
 }
 
+// Column-header sorting (7 Oct 2026 audit).
+const AI_COLS: ColumnAccessors<UserRow> = {
+  name:   (u) => u.full_name,
+  email:  (u) => u.email,
+  role:   (u) => u.role,
+  access: (u) => (u.ai_access_enabled ? "1" : "0"),
+};
+
 export default function AISettingsPage() {
   const qc = useQueryClient();
 
@@ -144,6 +158,8 @@ export default function AISettingsPage() {
   const nonAdmins = users.filter(
     (u) => u.role !== "super_admin" && u.is_active
   );
+  // Column-header sorting (7 Oct 2026 audit).
+  const aiSort = useColumnSortState();
 
   const placeholderModel =
     activeProvider === "groq"
@@ -305,14 +321,14 @@ export default function AISettingsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead className="hidden sm:table-cell">Email</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead className="text-right">AI Access</TableHead>
+                    <SortableHead label="Name" sortKey="name" state={aiSort} />
+                    <SortableHead label="Email" sortKey="email" state={aiSort} className="hidden sm:table-cell" />
+                    <SortableHead label="Role" sortKey="role" state={aiSort} />
+                    <SortableHead label="AI Access" sortKey="access" state={aiSort} align="right" className="text-right" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {nonAdmins.map((u) => (
+                  {sortByColumn(nonAdmins, AI_COLS, aiSort.sort).map((u) => (
                     <TableRow key={u.id}>
                       <TableCell className="font-medium">
                         {u.full_name}

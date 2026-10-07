@@ -27,6 +27,12 @@ import { SearchInput } from "@/components/ui/SearchInput";
 import { Pagination } from "@/components/ui/Pagination";
 import { byString, useClientTable } from "@/hooks/useClientTable";
 import {
+  makeColumnCompare,
+  SortableHead,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
+import {
   Table,
   TableHeader,
   TableBody,
@@ -34,11 +40,10 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
-import { useUsers, useCreateUser, useUpdateUser, useVerticals } from "@/hooks/useMasters";
-import { useAssignVerticals } from "@/hooks/useProjections";
+import { useUsers, useCreateUser, useUpdateUser } from "@/hooks/useMasters";
 import { formatDate, ROLE_LABELS } from "@/lib/utils";
 import type { AppUser, UserRole, Vertical } from "@/types";
-import { ArrowLeft, Plus, UserPlus, Copy, Check, Boxes } from "lucide-react";
+import { ArrowLeft, Plus, UserPlus, Copy, Check } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 
@@ -82,93 +87,8 @@ function InviteCard({ email, role, onClose }: { email: string; role: string; onC
   );
 }
 
-// Projections module (4 Sep 2026): bind verticals to ONE merchandiser —
-// multi-select per user; a vertical held by another user is disabled here
-// (single vertical → single user). Drives ONLY the projection form.
-function VerticalAssignDialog({
-  user,
-  verticals,
-  users,
-  onClose,
-}: {
-  user: AppUser | null;
-  verticals: Vertical[];
-  users: AppUser[];
-  onClose: () => void;
-}) {
-  const assign = useAssignVerticals();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [seededFor, setSeededFor] = useState<string | null>(null);
-  if (!user) return null;
-  if (seededFor !== user.id) {
-    setSeededFor(user.id);
-    setSelected(new Set(verticals.filter((v) => v.assigned_user_id === user.id).map((v) => v.id)));
-  }
-  const nameOf = (id: string | null | undefined) =>
-    users.find((u) => u.id === id)?.full_name ?? "another user";
-
-  const doSave = async () => {
-    try {
-      await assign.mutateAsync({ userId: user.id, verticalIds: [...selected] });
-      toast.success(`Verticals updated for ${user.full_name}.`);
-      onClose();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to assign verticals.");
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-card rounded-xl border border-border shadow-lg p-6 w-full max-w-md space-y-4">
-        <h3 className="font-semibold text-foreground">Assign Verticals — {user.full_name}</h3>
-        <p className="text-xs text-muted-foreground">
-          The selected verticals appear in this merchandiser&apos;s monthly projection form.
-          A vertical can belong to only one user; those held by someone else are disabled.
-        </p>
-        <div className="max-h-72 overflow-y-auto space-y-1.5 border border-border rounded-lg p-3">
-          {verticals.map((v) => {
-            const heldByOther = !!v.assigned_user_id && v.assigned_user_id !== user.id;
-            return (
-              <label
-                key={v.id}
-                className={`flex items-center gap-2 text-sm ${heldByOther ? "opacity-50" : ""}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.has(v.id)}
-                  disabled={heldByOther}
-                  onChange={(e) =>
-                    setSelected((prev) => {
-                      const nextSet = new Set(prev);
-                      if (e.target.checked) nextSet.add(v.id);
-                      else nextSet.delete(v.id);
-                      return nextSet;
-                    })
-                  }
-                />
-                <span className="text-foreground">{v.name}</span>
-                {heldByOther && (
-                  <span className="text-xs text-muted-foreground">— {nameOf(v.assigned_user_id)}</span>
-                )}
-              </label>
-            );
-          })}
-          {verticals.length === 0 && (
-            <p className="text-xs text-muted-foreground">No active verticals in the master.</p>
-          )}
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={assign.isPending}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={doSave} disabled={assign.isPending}>
-            {assign.isPending ? "Saving…" : "Save Assignment"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// Vertical assignment was REMOVED on 7 Oct 2026: projections are no longer
+// owned by a merchandiser — any merchandiser may fill any vertical.
 
 export default function UsersPage() {
   const { data: users = [], isLoading } = useUsers();
@@ -178,16 +98,23 @@ export default function UsersPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<{ id: string; name: string } | null>(null);
   const [lastInvited, setLastInvited] = useState<{ email: string; role: string } | null>(null);
-  // Projections module (4 Sep 2026): assign verticals to a merchandiser.
-  const { data: verticals = [] } = useVerticals();
-  const [assignTarget, setAssignTarget] = useState<AppUser | null>(null);
   // Search / sort / pagination (10 Aug 2026, app-wide table controls).
   const userSorts = [
     { value: "name", label: "Name (A–Z)", compare: byString<AppUser>((u) => u.full_name) },
     { value: "role", label: "Role", compare: byString<AppUser>((u) => u.role) },
     { value: "recent-login", label: "Recent login first", compare: byString<AppUser>((u) => u.last_login_at ?? "", true) },
   ];
+  // Column-header sorting (7 Oct 2026 audit).
+  const colSort = useColumnSortState();
+  const userCols: ColumnAccessors<(typeof users)[number]> = {
+    name:   (u) => u.full_name,
+    email:  (u) => u.email,
+    role:   (u) => ROLE_LABELS[u.role] ?? u.role,
+    status: (u) => (u.is_active ? "active" : "inactive"),
+    login:  (u) => u.last_login_at ?? "",
+  };
   const userTable = useClientTable(users, {
+    overrideCompare: colSort.sort ? makeColumnCompare(userCols, colSort.sort) : null,
     searchHaystack: (u) => [u.full_name, u.email, ROLE_LABELS[u.role]],
     sortOptions: userSorts,
     pageSize: 25,
@@ -351,22 +278,20 @@ export default function UsersPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead className="hidden md:table-cell">Email</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Status</TableHead>
-                {/* Projections module (4 Sep 2026). */}
-                <TableHead className="hidden md:table-cell">Verticals</TableHead>
-                <TableHead className="hidden lg:table-cell">Last Login</TableHead>
+                <SortableHead label="Name" sortKey="name" state={colSort} />
+                <SortableHead label="Email" sortKey="email" state={colSort} className="hidden md:table-cell" />
+                <SortableHead label="Role" sortKey="role" state={colSort} />
+                <SortableHead label="Status" sortKey="status" state={colSort} />
+                <SortableHead label="Last Login" sortKey="login" state={colSort} className="hidden lg:table-cell" />
                 <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
-                <TableSkeleton rows={6} cols={7} />
+                <TableSkeleton rows={6} cols={6} />
               ) : filteredUsers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-8">
+                  <TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-8">
                     {term ? `No users match "${search.trim()}".` : "No users yet."}
                   </TableCell>
                 </TableRow>
@@ -389,25 +314,6 @@ export default function UsersPage() {
                       <Badge variant={u.is_active ? "default" : "secondary"}>
                         {u.is_active ? "Active" : "Inactive"}
                       </Badge>
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      {u.role === "merchandiser" ? (
-                        <button
-                          type="button"
-                          onClick={() => setAssignTarget(u)}
-                          className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline underline-offset-2"
-                        >
-                          <Boxes className="h-3.5 w-3.5" />
-                          {(() => {
-                            const mine = verticals.filter((v) => v.assigned_user_id === u.id);
-                            return mine.length > 0
-                              ? `${mine.length} assigned`
-                              : "Assign verticals";
-                          })()}
-                        </button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
                     </TableCell>
                     <TableCell className="hidden lg:table-cell text-muted-foreground text-xs">
                       {u.last_login_at ? formatDate(u.last_login_at) : "Never"}
@@ -444,13 +350,6 @@ export default function UsersPage() {
           </div>
         </Card>
       </main>
-
-      <VerticalAssignDialog
-        user={assignTarget}
-        verticals={verticals}
-        users={users}
-        onClose={() => setAssignTarget(null)}
-      />
 
       <ConfirmDialog
         open={deactivateTarget !== null}

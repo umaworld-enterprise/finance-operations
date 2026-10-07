@@ -111,16 +111,13 @@ async def create_request(
     db: DB,
     background_tasks: BackgroundTasks,
 ) -> DepositRequestResponse:
-    # Projections gate (4 Sep 2026): a merchandiser whose assigned verticals
-    # are missing the CURRENT month's projections cannot raise new requests —
-    # only the Super Admin's on-behalf entry unblocks them.
-    if current_user.role == UserRole.MERCHANDISER:
-        from app.core.exceptions import BusinessRuleError
-        from app.services.projection_service import ProjectionService
+    # Projections gate (4 Sep 2026; reworked 7 Oct 2026): the VERTICAL is
+    # locked, not the person — a vertical missing the current month's
+    # projection takes no new requests from ANY role. Any merchandiser can
+    # unlock it by filing the projection.
+    from app.services.projection_service import ProjectionService
 
-        blocked, message = await ProjectionService(db).is_blocked(current_user.id)
-        if blocked:
-            raise BusinessRuleError(message or "Projections missing — contact the Super Admin.")
+    await ProjectionService(db).assert_vertical_open(data.vertical_id)
 
     svc = DepositRequestService(db)
     req = await svc.create(

@@ -8,15 +8,20 @@ transition TO, keyed by which role is allowed to perform that transition.
 from app.core.exceptions import InvalidStatusTransitionError
 from app.models.enums import RequestStatus, UserRole
 
+# HoM raises requests of its own since 7 Oct 2026 (executive request), so it
+# carries the same hold / resume / cancel rights the merchandiser has. The
+# Postgres trigger validates status PAIRS only — it is not role-aware — so
+# widening these sets needs no migration.
+
 # (current_status, new_status) -> frozenset of roles that may make this move
 _ALLOWED_TRANSITIONS: dict[tuple[RequestStatus, RequestStatus], frozenset[UserRole]] = {
     # Merchandiser places own request on hold
     (RequestStatus.PENDING_PAYMENT, RequestStatus.HOLD_BY_MERCHANDISER): frozenset({
-        UserRole.MERCHANDISER, UserRole.SUPER_ADMIN,
+        UserRole.MERCHANDISER, UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN,
     }),
     # Merchandiser cancels own request before payment
     (RequestStatus.PENDING_PAYMENT, RequestStatus.CANCELLED_BY_MERCHANDISER): frozenset({
-        UserRole.MERCHANDISER, UserRole.SUPER_ADMIN,
+        UserRole.MERCHANDISER, UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN,
     }),
     # Accounts places request on hold
     (RequestStatus.PENDING_PAYMENT, RequestStatus.HOLD_BY_ACCOUNTS): frozenset({
@@ -36,11 +41,11 @@ _ALLOWED_TRANSITIONS: dict[tuple[RequestStatus, RequestStatus], frozenset[UserRo
     }),
     # Merchandiser resumes from own hold
     (RequestStatus.HOLD_BY_MERCHANDISER, RequestStatus.PENDING_PAYMENT): frozenset({
-        UserRole.MERCHANDISER, UserRole.SUPER_ADMIN,
+        UserRole.MERCHANDISER, UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN,
     }),
     # Merchandiser cancels while on own hold
     (RequestStatus.HOLD_BY_MERCHANDISER, RequestStatus.CANCELLED_BY_MERCHANDISER): frozenset({
-        UserRole.MERCHANDISER, UserRole.SUPER_ADMIN,
+        UserRole.MERCHANDISER, UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN,
     }),
     # Accounts resumes from accounts hold
     (RequestStatus.HOLD_BY_ACCOUNTS, RequestStatus.PENDING_PAYMENT): frozenset({
@@ -63,7 +68,7 @@ _ALLOWED_TRANSITIONS: dict[tuple[RequestStatus, RequestStatus], frozenset[UserRo
     # to the invoice total) and completes again once the new tranches are
     # paid. Fired by TrancheService.add_tranche, not a standalone action.
     (RequestStatus.PAYMENT_PROCESSED, RequestStatus.PENDING_PAYMENT): frozenset({
-        UserRole.MERCHANDISER, UserRole.SUPER_ADMIN,
+        UserRole.MERCHANDISER, UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN,
     }),
     # HoM approves → request goes to Accounts normally
     (RequestStatus.PENDING_HOM_APPROVAL, RequestStatus.PENDING_PAYMENT): frozenset({
@@ -75,7 +80,7 @@ _ALLOWED_TRANSITIONS: dict[tuple[RequestStatus, RequestStatus], frozenset[UserRo
     }),
     # Merchandiser withdraws after choosing to continue on a flagged supplier
     (RequestStatus.PENDING_HOM_APPROVAL, RequestStatus.CANCELLED_BY_MERCHANDISER): frozenset({
-        UserRole.MERCHANDISER, UserRole.SUPER_ADMIN,
+        UserRole.MERCHANDISER, UserRole.HEAD_OF_MERCHANDISER, UserRole.SUPER_ADMIN,
     }),
 }
 

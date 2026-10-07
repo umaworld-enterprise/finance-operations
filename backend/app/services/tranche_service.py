@@ -49,6 +49,19 @@ _ACCOUNTS_ROLES = {UserRole.ACCOUNTS_TEAM, UserRole.SUPER_ADMIN}
 
 # Merchandisers may modify/add/delete tranches only while the request is
 # still pending (Aug 2026 batch, item 2.3) — i.e. before Accounts act on it.
+# Roles that AUTHOR requests and therefore manage their tranches. HoM joined
+# on 7 Oct 2026 when it gained the ability to raise requests of its own.
+_REQUEST_AUTHOR_ROLES = {
+    UserRole.MERCHANDISER,
+    UserRole.HEAD_OF_MERCHANDISER,
+    UserRole.SUPER_ADMIN,
+}
+
+# Author roles that the pending-only / accounts-untouched gates apply to.
+# Super Admin is deliberately excluded — it keeps the broader pre-existing
+# rights it has always had.
+_AUTHOR_GATED_ROLES = {UserRole.MERCHANDISER, UserRole.HEAD_OF_MERCHANDISER}
+
 _MERCHANDISER_EDITABLE_STATUSES = {
     RequestStatus.PENDING_PAYMENT,
     RequestStatus.PENDING_HOM_APPROVAL,
@@ -97,7 +110,7 @@ class TrancheService:
         """
         request = await self._get_request_or_404(request_id)
 
-        if role not in {UserRole.MERCHANDISER, UserRole.SUPER_ADMIN}:
+        if role not in _REQUEST_AUTHOR_ROLES:
             raise AuthorizationError("Only merchandisers can edit tranches.")
         # Ownership guard removed 11 Sep 2026 (executive request): every
         # merchandiser has full rights on every request.
@@ -118,7 +131,7 @@ class TrancheService:
                 f"{tranche.label} was rejected and is kept for record-keeping only — "
                 "add a replacement tranche instead."
             )
-        if role == UserRole.MERCHANDISER:
+        if role in _AUTHOR_GATED_ROLES:
             self._assert_tranche_untouched_by_accounts(tranche, "edited")
 
         changes = data.model_dump(exclude_unset=True, exclude_none=True)
@@ -165,7 +178,7 @@ class TrancheService:
         payment-processed (19 Aug 2026: adding to a completed file REOPENS
         it into the payment queue for the additional amount)."""
         request = await self._get_request_or_404(request_id)
-        if role not in {UserRole.MERCHANDISER, UserRole.SUPER_ADMIN}:
+        if role not in _REQUEST_AUTHOR_ROLES:
             raise AuthorizationError("Only merchandisers can add tranches.")
         # Ownership guard removed 11 Sep 2026 (executive request): every
         # merchandiser has full rights on every request.
@@ -266,7 +279,7 @@ class TrancheService:
         """Merchandiser releases a 'Yet to be Released' tranche (2 onwards)
         for payment (19 Aug 2026) — only then can Accounts mark it paid."""
         request = await self._get_request_or_404(request_id)
-        if role not in {UserRole.MERCHANDISER, UserRole.SUPER_ADMIN}:
+        if role not in _REQUEST_AUTHOR_ROLES:
             raise AuthorizationError("Only merchandisers can release tranches.")
         # Ownership guard removed 11 Sep 2026 (executive request): every
         # merchandiser has full rights on every request.
@@ -307,7 +320,7 @@ class TrancheService:
         untouched request. Returns the deleted tranche's label (for the
         Accounts notification — the row is gone afterwards)."""
         request = await self._get_request_or_404(request_id)
-        if role not in {UserRole.MERCHANDISER, UserRole.SUPER_ADMIN}:
+        if role not in _REQUEST_AUTHOR_ROLES:
             raise AuthorizationError("Only merchandisers can delete tranches.")
         # Ownership guard removed 11 Sep 2026 (executive request): every
         # merchandiser has full rights on every request.
@@ -323,7 +336,7 @@ class TrancheService:
             raise ConflictError(
                 f"{tranche.label} was rejected and is kept for record-keeping — it cannot be deleted."
             )
-        if role == UserRole.MERCHANDISER:
+        if role in _AUTHOR_GATED_ROLES:
             self._assert_tranche_untouched_by_accounts(tranche, "deleted")
         if len(await self._repo.list_for_request(request_id)) <= 1:
             raise ValidationError("A request must keep at least one tranche.")
@@ -823,7 +836,7 @@ class TrancheService:
         adjustment) still freeze everything, except ADDING replacement
         tranches while a REJECTED tranche exists (the rejection workflow's
         deadlock-breaker)."""
-        if role != UserRole.MERCHANDISER:
+        if role not in _AUTHOR_GATED_ROLES:
             return
         if request.current_status not in _MERCHANDISER_EDITABLE_STATUSES:
             raise ConflictError(

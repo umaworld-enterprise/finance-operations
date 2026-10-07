@@ -1951,3 +1951,77 @@ including a render check in CSV/Excel/PDF). 343 backend tests green; tsc clean;
 production build compiles; 0038 verified up and down.
 
 Deploy: `alembic upgrade head` (0038), backend + frontend together.
+
+## Batch (7 Oct 2026) — HoM raises requests, sorting audit, Waiting logic, projections rework
+
+**1. HoM can raise requests.** The Requests page (form + list) is now in the
+HoM sidebar and role-guarded for them; the create endpoint never had a role
+gate, so the work was in the authoring rules. HoM joined the merchandiser's
+hold / resume / cancel transitions in `status_transitions.py` (the Postgres
+trigger validates status PAIRS only — it is not role-aware — so **no
+migration**), and `_REQUEST_AUTHOR_ROLES` / `_AUTHOR_GATED_ROLES` now cover
+HoM in `tranche_service` and `deposit_request_service`, so HoM follows the
+SAME pending-only and accounts-untouched gates a merchandiser does rather
+than inheriting Super-Admin latitude. Defaulted suppliers already route to
+`PENDING_HOM_APPROVAL` and the approve endpoint has no self-approval block,
+so an HoM-raised flagged-supplier request comes back to them and they approve
+it themselves. The sidebar "new" badge covers their Requests item too.
+
+**2. Sorting audit — every live table now sorts.** 19 tables across 17 files
+gained ascending/descending column headers via the shared
+`SortableHead`/`useColumnSortState`/`sortByColumn` module: Modify Request
+(open + history), Supplier Risk, NPA panel (both), analytics drill, supplier
+drill, supplier exposure history, projections dashboard, bank statements,
+bank transactions, adjust-invoices (pending + history), admin overview,
+users, audit logs, masters, banks, payment terms, AI access, form links.
+Tables fed by `useClientTable` use its `overrideCompare` hook so a header
+click overrides the dropdown sort. Two files were deliberately left alone:
+`merchandiser/page.tsx` (loading skeleton only — its real table is
+`RequestsTable`, already sortable) and `components/tables/DataTable.tsx`
+(imported nowhere — dead code, flagged for separate removal).
+
+**3. Waiting column.** Now measured from the relevant tranche's TENTATIVE
+PAYMENT DATE instead of the request-created date. Past due counts up and
+darkens ("5d waiting"); not yet due reads "due in 5d" in neutral grey; no
+tentative date shows "—". Sorting uses the signed day count, so the most
+overdue sort to the top and undated rows always sink.
+
+**4. Projections reworked — the vertical is locked, not the person.**
+Vertical→user assignment is GONE: the service, the `PUT
+/masters/verticals/assignments/{user_id}` endpoint, the Super Admin's
+assign-verticals dialog and the Users page Verticals column were all removed
+(`verticals.assigned_user_id` is left in the schema, unused, so no data is
+destroyed). Now: every ACTIVE vertical needs a projection each month; any
+merchandiser may fill or overwrite any vertical and the row records who
+touched it last (new `Projection.submitter` relationship, surfaced as "Last
+updated by" in the dashboard and "last by X" on the form); reminders go to
+EVERY merchandiser naming the missing verticals. The block changed shape
+entirely — `assert_vertical_open()` replaces `is_blocked()`, so a vertical
+missing the CURRENT month's projection refuses new requests from ANY role
+(confirmed choice), and filing the projection unlocks it immediately. The
+Super Admin form dropped its merchandiser picker and now fills any vertical
+for any period — the post-deadline unlock path. `test_projections.py` was
+rewritten (10 tests) for the new model.
+
+348 backend tests green; tsc clean; production build compiles. No migration
+in this batch.
+
+## Tentative Payment in the requests export (7 Oct 2026)
+
+The standard Excel export (`exportRequestsToExcel`) gained a **Tentative
+Payment** column — the next UNPAID tranche's due date, the same value the
+Pending Payment queue shows on screen, formatted DD-Mon-YY like every other
+exported date. It is appended as the LAST column so existing column
+positions in the executives' sheets are undisturbed, and it sits beside
+Payment Date (expected next to actual).
+
+`nextTentativeDate()` moved out of the accounts page into `lib/exportExcel.ts`
+and is now shared by the screen and the export, so the two cannot drift.
+
+The column appears on every tab that uses this export (Pending, Processed, On
+Hold, Rejected, Cancelled, All, and the merchandiser's list); it is blank
+where nothing is unpaid, e.g. processed files. The Bank Ledger export is
+deliberately untouched — its column sequence mirrors the executives' ledger
+sheet exactly.
+
+348 backend tests green; tsc clean; production build compiles.

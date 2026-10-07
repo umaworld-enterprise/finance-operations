@@ -28,6 +28,12 @@ import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+import {
+  SortableHead,
+  sortByColumn,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 
 interface FormLink {
   id: string;
@@ -36,6 +42,13 @@ interface FormLink {
   is_active: boolean;
   created_at: string;
 }
+
+// Column-header sorting (7 Oct 2026 audit).
+const LINK_COLS: ColumnAccessors<FormLink> = {
+  label:  (l) => l.label,
+  url:    (l) => l.slug,
+  active: (l) => (l.is_active ? "1" : "0"),
+};
 
 const APP_URL =
   (typeof window !== "undefined" ? window.location.origin : null) ??
@@ -54,6 +67,7 @@ async function fetchLinks(): Promise<FormLink[]> {
 export default function FormLinksPage() {
   const qc = useQueryClient();
   const { data: links = [], isLoading } = useQuery({ queryKey: ["form-links"], queryFn: fetchLinks, staleTime: 5 * 60 * 1000 });
+  const colSort = useColumnSortState();
   const [newLabel, setNewLabel] = useState("");
   const [newSlug, setNewSlug] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -213,14 +227,14 @@ export default function FormLinksPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Label</TableHead>
-                      <TableHead>Full URL</TableHead>
-                      <TableHead className="text-center">Active</TableHead>
+                      <SortableHead label="Label" sortKey="label" state={colSort} />
+                      <SortableHead label="Full URL" sortKey="url" state={colSort} />
+                      <SortableHead label="Active" sortKey="active" state={colSort} className="text-center" />
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {links.map((link) => (
+                    {sortByColumn(links, LINK_COLS, colSort.sort).map((link) => (
                       <TableRow key={link.id}>
                         <TableCell className="font-medium">{link.label}</TableCell>
                         <TableCell>

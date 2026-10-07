@@ -4,6 +4,13 @@ import { useParams, useRouter } from "next/navigation";
 import { TopNav } from "@/components/layout/TopNav";
 import { RoleGuard } from "@/components/layout/RoleGuard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import type { DepositRequest } from "@/types";
+import {
+  SortableHead,
+  sortByColumn,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import { StatCard } from "@/components/ui/StatCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
@@ -23,6 +30,16 @@ import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 25;
 
+// Column-header sorting (7 Oct 2026 audit).
+const SUPPLIER_REQ_COLS: ColumnAccessors<DepositRequest> = {
+  request:   (r) => r.request_number,
+  customer:  (r) => r.customer?.name ?? "",
+  vertical:  (r) => r.vertical?.name ?? "",
+  deposit:   (r) => Number(r.deposit_amount),
+  status:    (r) => r.current_status,
+  submitted: (r) => r.created_at,
+};
+
 export default function SupplierDrillPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -37,6 +54,7 @@ export default function SupplierDrillPage() {
     { supplier_id: id },
   );
   const requests = requestsData?.items ?? [];
+  const colSort = useColumnSortState();
   const total = requestsData?.total ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -165,17 +183,17 @@ export default function SupplierDrillPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Request #</TableHead>
-                        <TableHead>Customer</TableHead>
-                        <TableHead>Vertical</TableHead>
-                        <TableHead className="text-right">Deposit</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="hidden lg:table-cell">Submitted</TableHead>
+                        <SortableHead label="Request #" sortKey="request" state={colSort} />
+                        <SortableHead label="Customer" sortKey="customer" state={colSort} />
+                        <SortableHead label="Vertical" sortKey="vertical" state={colSort} />
+                        <SortableHead label="Deposit" sortKey="deposit" state={colSort} align="right" className="text-right" />
+                        <SortableHead label="Status" sortKey="status" state={colSort} />
+                        <SortableHead label="Submitted" sortKey="submitted" state={colSort} className="hidden lg:table-cell" />
                         <TableHead />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {requests.map((req) => (
+                      {sortByColumn(requests, SUPPLIER_REQ_COLS, colSort.sort).map((req) => (
                         <TableRow key={req.id}>
                           <TableCell>
                             <Link

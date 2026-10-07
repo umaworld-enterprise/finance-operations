@@ -24,6 +24,12 @@ import {
 import { Pagination } from "@/components/ui/Pagination";
 import { TableControls } from "@/components/ui/TableControls";
 import { byString, useClientTable } from "@/hooks/useClientTable";
+import {
+  makeColumnCompare,
+  SortableHead,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import masterService from "@/services/masterService";
 
 const inputCls =
@@ -80,7 +86,16 @@ function MasterSection({
       ? [{ value: "code", label: "Code (A–Z)", compare: byString<MasterRow>((r) => r.supplier_code ?? "") }]
       : []),
   ];
+  // Column-header sorting (7 Oct 2026 audit).
+  const colSort = useColumnSortState();
+  const masterCols: ColumnAccessors<(typeof rows)[number]> = {
+    code:    (r) => ("supplier_code" in r ? String(r.supplier_code ?? "") : ""),
+    name:    (r) => r.name,
+    country: (r) => ("country" in r ? String(r.country ?? "") : ""),
+    status:  (r) => (r.is_active ? "active" : "inactive"),
+  };
   const table = useClientTable(rows, {
+    overrideCompare: colSort.sort ? makeColumnCompare(masterCols, colSort.sort) : null,
     searchHaystack: (r) => [r.name, r.supplier_code, r.country, r.is_active ? "active" : "inactive"],
     sortOptions: sorts,
     pageSize: 20,
@@ -212,10 +227,10 @@ function MasterSection({
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      {hasCode && <TableHead>Code</TableHead>}
-                      <TableHead>Name</TableHead>
-                      {hasCode && <TableHead>Country</TableHead>}
-                      <TableHead>Status</TableHead>
+                      {hasCode && <SortableHead label="Code" sortKey="code" state={colSort} />}
+                      <SortableHead label="Name" sortKey="name" state={colSort} />
+                      {hasCode && <SortableHead label="Country" sortKey="country" state={colSort} />}
+                      <SortableHead label="Status" sortKey="status" state={colSort} />
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
