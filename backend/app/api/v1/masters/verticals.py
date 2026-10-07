@@ -14,6 +14,8 @@ from app.repositories.base import BaseRepository
 from app.schemas.masters import VerticalCreate, VerticalResponse, VerticalUpdate
 from app.services.audit_service import AuditService
 
+# Vertical→user assignment was REMOVED on 7 Oct 2026: projections are no
+# longer owned by a merchandiser — any merchandiser may fill any vertical.
 router = APIRouter(prefix="/masters/verticals", tags=["masters-verticals"])
 
 DB = Annotated[AsyncSession, Depends(get_db_session)]
@@ -40,25 +42,6 @@ async def list_all_verticals(db: DB, _: FinanceAdmin) -> list[VerticalResponse]:
 
     result = await db.execute(select(Vertical).order_by(func.lower(Vertical.name)))
     return [VerticalResponse.model_validate(v) for v in result.scalars().all()]
-
-
-@router.put("/assignments/{user_id}", response_model=list[VerticalResponse])
-async def assign_verticals_to_user(
-    user_id: UUID,
-    vertical_ids: list[UUID],
-    current_user: User,
-    db: DB,
-) -> list[VerticalResponse]:
-    """Projections module (4 Sep 2026): bind verticals to ONE user — the list
-    becomes the user's full assignment set (removed ids are unassigned).
-    Single vertical → single user is enforced; Super Admin only. Assignments
-    drive ONLY the projection form's vertical list."""
-    from app.services.projection_service import ProjectionService
-
-    verticals = await ProjectionService(db).assign_verticals(
-        user_id, vertical_ids, current_user.role
-    )
-    return [VerticalResponse.model_validate(v) for v in verticals]
 
 
 @router.post("", response_model=VerticalResponse, status_code=status.HTTP_201_CREATED)

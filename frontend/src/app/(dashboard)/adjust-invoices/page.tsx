@@ -9,6 +9,13 @@ import { TopNav } from "@/components/layout/TopNav";
 import { RoleGuard } from "@/components/layout/RoleGuard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import type { InvoiceAdjustment } from "@/types";
+import {
+  SortableHead,
+  sortByColumn,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -53,6 +60,17 @@ function trancheOptionLabel(t: PaymentTranche, withBalance: boolean): string {
   return `${base} · ${withBalance ? `available ${amount}` : amount}`;
 }
 
+// Column-header sorting (7 Oct 2026 audit).
+const ADJ_COLS: ColumnAccessors<InvoiceAdjustment> = {
+  raised:   (a) => a.created_at,
+  supplier: (a) => a.supplier_name ?? "",
+  from:     (a) => a.source_request_number ?? "",
+  to:       (a) => a.destination_request_number ?? "",
+  amount:   (a) => Number(a.amount),
+  by:       (a) => a.performed_by_name ?? "",
+  status:   (a) => a.status,
+};
+
 function AdjustInvoicesPageImpl() {
   const { user } = useAuth();
   // Deciders record adjustments immediately and act on the pending queue;
@@ -86,6 +104,9 @@ function AdjustInvoicesPageImpl() {
     staleTime: 60_000,
   });
 
+  // Column-header sorting (7 Oct 2026 audit) — one state per table.
+  const pendingSort = useColumnSortState();
+  const historySort = useColumnSortState();
   const { data: pending = [], isLoading: pendingLoading } = useQuery({
     queryKey: [...ADJUSTMENTS_KEY, "pending"],
     queryFn: () => adjustmentService.pending(),
@@ -355,17 +376,17 @@ function AdjustInvoicesPageImpl() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Raised</TableHead>
-                        <TableHead>Supplier</TableHead>
-                        <TableHead>From</TableHead>
-                        <TableHead>To</TableHead>
-                        <TableHead className="text-right">Amount</TableHead>
-                        <TableHead>By / Reason</TableHead>
+                        <SortableHead label="Raised" sortKey="raised" state={pendingSort} />
+                        <SortableHead label="Supplier" sortKey="supplier" state={pendingSort} />
+                        <SortableHead label="From" sortKey="from" state={pendingSort} />
+                        <SortableHead label="To" sortKey="to" state={pendingSort} />
+                        <SortableHead label="Amount" sortKey="amount" state={pendingSort} align="right" className="text-right" />
+                        <SortableHead label="By / Reason" sortKey="by" state={pendingSort} />
                         {isDecider && <TableHead>Actions</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {pending.map((a) => (
+                      {sortByColumn(pending, ADJ_COLS, pendingSort.sort).map((a) => (
                         <TableRow key={a.id}>
                           <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                             {formatDate(a.created_at)}
@@ -448,17 +469,17 @@ function AdjustInvoicesPageImpl() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Supplier</TableHead>
-                      <TableHead>From</TableHead>
-                      <TableHead>To</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="hidden md:table-cell">By</TableHead>
+                      <SortableHead label="Date" sortKey="raised" state={historySort} />
+                      <SortableHead label="Supplier" sortKey="supplier" state={historySort} />
+                      <SortableHead label="From" sortKey="from" state={historySort} />
+                      <SortableHead label="To" sortKey="to" state={historySort} />
+                      <SortableHead label="Amount" sortKey="amount" state={historySort} align="right" className="text-right" />
+                      <SortableHead label="Status" sortKey="status" state={historySort} />
+                      <SortableHead label="By" sortKey="by" state={historySort} className="hidden md:table-cell" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {history.map((a) => (
+                    {sortByColumn(history, ADJ_COLS, historySort.sort).map((a) => (
                       <TableRow key={a.id}>
                         <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                           {formatDate(a.created_at)}

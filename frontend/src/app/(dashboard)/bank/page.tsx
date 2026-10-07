@@ -26,6 +26,12 @@ import {
   useUploadBankStatement,
 } from "@/hooks/useBankStatements";
 import { byString, useClientTable } from "@/hooks/useClientTable";
+import {
+  makeColumnCompare,
+  SortableHead,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { BankStatement } from "@/types";
 
@@ -64,7 +70,20 @@ export default function BankStatementsPage() {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<BankStatement | null>(null);
 
+  // Column-header sorting (7 Oct 2026 audit).
+  const colSort = useColumnSortState();
+  const stmtCols: ColumnAccessors<(typeof statements)[number]> = {
+    bank:     (s) => s.bank_name ?? "",
+    account:  (s) => s.account_number ?? "",
+    period:   (s) => s.period_start ?? "",
+    currency: (s) => s.currency ?? "",
+    opening:  (s) => Number(s.beginning_balance ?? 0),
+    closing:  (s) => Number(s.ending_balance ?? 0),
+    net:      (s) => Number(s.ending_balance ?? 0) - Number(s.beginning_balance ?? 0),
+    status:   (s) => s.status ?? "",
+  };
   const table = useClientTable(statements, {
+    overrideCompare: colSort.sort ? makeColumnCompare(stmtCols, colSort.sort) : null,
     searchHaystack: (s) => [
       s.bank_name, s.account_number, s.currency, s.original_filename, s.status,
     ],
@@ -178,14 +197,14 @@ export default function BankStatementsPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Bank</TableHead>
-                        <TableHead>Account</TableHead>
-                        <TableHead>Period</TableHead>
-                        <TableHead>Currency</TableHead>
-                        <TableHead className="text-right">Opening</TableHead>
-                        <TableHead className="text-right">Closing</TableHead>
-                        <TableHead className="text-right">Net Movement</TableHead>
-                        <TableHead>Status</TableHead>
+                        <SortableHead label="Bank" sortKey="bank" state={colSort} />
+                        <SortableHead label="Account" sortKey="account" state={colSort} />
+                        <SortableHead label="Period" sortKey="period" state={colSort} />
+                        <SortableHead label="Currency" sortKey="currency" state={colSort} />
+                        <SortableHead label="Opening" sortKey="opening" state={colSort} align="right" className="text-right" />
+                        <SortableHead label="Closing" sortKey="closing" state={colSort} align="right" className="text-right" />
+                        <SortableHead label="Net Movement" sortKey="net" state={colSort} align="right" className="text-right" />
+                        <SortableHead label="Status" sortKey="status" state={colSort} />
                         <TableHead />
                       </TableRow>
                     </TableHeader>

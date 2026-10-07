@@ -30,7 +30,9 @@ import { SortableHead, sortByColumn, useColumnSortState, type ColumnAccessors } 
 import { differenceInDays } from "date-fns";
 import { needsRelease } from "@/components/tranches/TrancheList";
 import { ExportButton } from "@/components/ui/ExportButton";
-import { bankLedgerEntries, exportBankLedgerToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
+// nextTentativeDate is shared with the Excel export (7 Oct 2026) so the
+// queue's Tentative Payment column and the exported one cannot drift.
+import { bankLedgerEntries, exportBankLedgerToExcel, exportRequestsToExcel, latestPaymentDate, nextTentativeDate } from "@/lib/exportExcel";
 import { BankLedgerTable } from "@/components/tables/BankLedgerTable";
 import { filterParams, matchesRequestFilters, RequestFilterBar, type RequestFilterValues } from "@/components/filters/RequestFilterBar";
 import { BulkPayDialog, nextPayableTranche } from "@/components/accounts/BulkPayDialog";
@@ -44,28 +46,37 @@ import type { DepositRequest } from "@/types";
 
 const PAGE_SIZE = 50;
 
-function agingBadge(createdAt: string) {
-  const days = differenceInDays(new Date(), new Date(createdAt));
+// Waiting (7 Oct 2026, executive request): measured from the TENTATIVE
+// PAYMENT DATE of the relevant tranche — the date money was due to go out —
+// not from when the request was raised. Past due counts up and darkens;
+// a payment not yet due reads "due in Nd" and stays neutral.
+function waitingDays(req: DepositRequest): number | null {
+  const tentative = nextTentativeDate(req);
+  if (!tentative) return null;
+  return differenceInDays(new Date(), new Date(tentative));
+}
+
+function waitingBadge(req: DepositRequest) {
+  const days = waitingDays(req);
+  if (days === null) {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+  if (days < 0) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border bg-muted/50 text-muted-foreground border-border whitespace-nowrap">
+        due in {Math.abs(days)}d
+      </span>
+    );
+  }
   const shade =
     days >= 7 ? "bg-foreground/10 text-foreground border-foreground/20" :
     days >= 3 ? "bg-foreground/5 text-foreground border-foreground/15" :
                 "bg-muted text-muted-foreground border-border";
   return (
-    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border", shade)}>
+    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border whitespace-nowrap", shade)}>
       {days}d waiting
     </span>
   );
-}
-
-// Earliest tentative payment date among a request's UNPAID tranches — the
-// next money actually going out. Basis for the 0–10 / >10 day split
-// (UAT Aug 2026, item 13); undated requests sort as "later".
-function nextTentativeDate(req: DepositRequest): string | null {
-  const dates = (req.tranches ?? [])
-    .filter((t) => t.status === "unpaid" && t.tentative_payment_date)
-    .map((t) => t.tentative_payment_date as string)
-    .sort();
-  return dates[0] ?? null;
 }
 
 // Amount Payable in the pending queue counts only the unpaid tranches whose
@@ -111,8 +122,9 @@ const PENDING_ACCESSORS: ColumnAccessors<DepositRequest> = {
   deposit:      (r) => Number(r.deposit_amount),
   currency:     (r) => r.currency,
   tentative:    (r) => nextTentativeDate(r),
-  // Waiting asc = fewest days waiting first (newest requests).
-  waiting:      (r) => -new Date(r.created_at).getTime(),
+  // Days past (or before) the tranche's tentative payment date — asc puts
+  // not-yet-due first, desc the most overdue; undated rows always sink.
+  waiting:      (r) => waitingDays(r),
 };
 
 const STATUS_ACCESSORS: ColumnAccessors<DepositRequest> = {
@@ -219,7 +231,7 @@ function PendingTable({
                   </span>
                 )}
               </span>
-              {agingBadge(req.created_at)}
+              {waitingBadge(req)}
             </div>
             <div className="text-xs text-muted-foreground font-mono">Invoice # {req.sunshine_invoice_number || "—"}</div>
             <div className="text-xs text-muted-foreground">Requested: {formatDateSheet(req.created_at) || "—"}</div>
@@ -333,7 +345,7 @@ function PendingTable({
                 <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDateSheet(nextTentativeDate(req)) || "—"}</TableCell>
                 {/* Process column removed (9 Sep 2026) — the Request # link
                     opens the request. */}
-                <TableCell>{agingBadge(req.created_at)}</TableCell>
+                <TableCell>{waitingBadge(req)}</TableCell>
               </TableRow>
             ))}
             {/* Total per currency (16 Sep 2026) — mirrors the Bank Ledger

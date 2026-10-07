@@ -32,16 +32,3 @@ export function useSubmitProjections() {
     onSuccess: () => qc.invalidateQueries({ queryKey: [...PROJECTIONS_KEY] }),
   });
 }
-
-export function useAssignVerticals() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ userId, verticalIds }: { userId: string; verticalIds: string[] }) =>
-      projectionService.assignVerticals(userId, verticalIds),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["verticals"] });
-      qc.invalidateQueries({ queryKey: ["masters"] });
-      qc.invalidateQueries({ queryKey: [...PROJECTIONS_KEY] });
-    },
-  });
-}

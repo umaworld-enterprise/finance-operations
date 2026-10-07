@@ -6,6 +6,12 @@ import { RoleGuard } from "@/components/layout/RoleGuard";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
+  SortableHead,
+  sortByColumn,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
+import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -208,6 +214,17 @@ export default function AuditLogsPage() {
   // narrows the visible 50 rows further.
   const [search, setSearch] = useState("");
   const term = search.trim().toLowerCase();
+  const colSort = useColumnSortState();
+  const auditCols: ColumnAccessors<NonNullable<typeof data>["items"][number]> = {
+    timestamp: (l) => l.changed_at,
+    action:    (l) => l.action,
+    entity:    (l) => l.entity_name,
+    field:     (l) => l.field_name ?? "",
+    old_value: (l) => l.old_value ?? "",
+    new_value: (l) => l.new_value ?? "",
+    user:      (l) => l.changed_by_name ?? "",
+    ip:        (l) => l.ip_address ?? "",
+  };
   const visibleLogs = (data?.items ?? []).filter(
     (log) =>
       !term ||
@@ -313,7 +330,7 @@ export default function AuditLogsPage() {
             ) : visibleLogs.length === 0 ? (
               <div className="p-4 text-sm text-muted-foreground text-center">No entries found.</div>
             ) : (
-              visibleLogs.map(log => (
+              sortByColumn(visibleLogs, auditCols, colSort.sort).map(log => (
                 <button
                   key={log.id}
                   type="button"
@@ -350,14 +367,14 @@ export default function AuditLogsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-36">Timestamp</TableHead>
-                  <TableHead className="w-32">Action</TableHead>
-                  <TableHead>Entity</TableHead>
-                  <TableHead className="hidden lg:table-cell">Field</TableHead>
-                  <TableHead className="hidden lg:table-cell">Old Value</TableHead>
-                  <TableHead>New Value</TableHead>
-                  <TableHead className="hidden xl:table-cell">User</TableHead>
-                  <TableHead className="hidden xl:table-cell">IP</TableHead>
+                  <SortableHead label="Timestamp" sortKey="timestamp" state={colSort} className="w-36" />
+                  <SortableHead label="Action" sortKey="action" state={colSort} className="w-32" />
+                  <SortableHead label="Entity" sortKey="entity" state={colSort} />
+                  <SortableHead label="Field" sortKey="field" state={colSort} className="hidden lg:table-cell" />
+                  <SortableHead label="Old Value" sortKey="old_value" state={colSort} className="hidden lg:table-cell" />
+                  <SortableHead label="New Value" sortKey="new_value" state={colSort} />
+                  <SortableHead label="User" sortKey="user" state={colSort} className="hidden xl:table-cell" />
+                  <SortableHead label="IP" sortKey="ip" state={colSort} className="hidden xl:table-cell" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -370,7 +387,7 @@ export default function AuditLogsPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  visibleLogs.map(log => (
+                  sortByColumn(visibleLogs, auditCols, colSort.sort).map(log => (
                     <TableRow
                       key={log.id}
                       onClick={() => setSelectedLog(log)}

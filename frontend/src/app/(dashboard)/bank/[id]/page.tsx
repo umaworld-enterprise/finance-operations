@@ -25,6 +25,12 @@ import {
 import { BalanceTrendChart } from "@/components/charts/BalanceTrendChart";
 import { useBankStatement } from "@/hooks/useBankStatements";
 import { byNumber, byString, useClientTable } from "@/hooks/useClientTable";
+import {
+  makeColumnCompare,
+  SortableHead,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { BankTransaction } from "@/types";
 
@@ -40,7 +46,18 @@ export default function BankStatementDashboard() {
   const { data: statement, isLoading } = useBankStatement(id);
 
   const transactions = statement?.transactions ?? [];
+  // Column-header sorting (7 Oct 2026 audit).
+  const colSort = useColumnSortState();
+  const txnCols: ColumnAccessors<(typeof transactions)[number]> = {
+    date:      (t) => t.txn_date ?? "",
+    type:      (t) => t.category ?? "",
+    reference: (t) => t.reference ?? "",
+    detail:    (t) => t.detail ?? "",
+    debit:     (t) => Number(t.debit ?? 0),
+    credit:    (t) => Number(t.credit ?? 0),
+  };
   const table = useClientTable(transactions, {
+    overrideCompare: colSort.sort ? makeColumnCompare(txnCols, colSort.sort) : null,
     searchHaystack: (t) => [t.category, t.reference, t.detail],
     sortOptions: TXN_SORTS,
     pageSize: 25,
@@ -223,12 +240,12 @@ export default function BankStatementDashboard() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Reference</TableHead>
-                    <TableHead>Detail</TableHead>
-                    <TableHead className="text-right">Debit</TableHead>
-                    <TableHead className="text-right">Credit</TableHead>
+                    <SortableHead label="Date" sortKey="date" state={colSort} />
+                    <SortableHead label="Type" sortKey="type" state={colSort} />
+                    <SortableHead label="Reference" sortKey="reference" state={colSort} />
+                    <SortableHead label="Detail" sortKey="detail" state={colSort} />
+                    <SortableHead label="Debit" sortKey="debit" state={colSort} align="right" className="text-right" />
+                    <SortableHead label="Credit" sortKey="credit" state={colSort} align="right" className="text-right" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>

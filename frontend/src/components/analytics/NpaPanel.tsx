@@ -8,6 +8,12 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Pagination } from "@/components/ui/Pagination";
 import { TableControls } from "@/components/ui/TableControls";
 import { byNumber, byString, useClientTable } from "@/hooks/useClientTable";
+import {
+  makeColumnCompare,
+  SortableHead,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import { useNpa } from "@/hooks/useAnalytics";
 import { formatDate } from "@/lib/utils";
 import { AlertTriangle, Bot, User, ArrowUpRight } from "lucide-react";
@@ -27,6 +33,24 @@ const MERCH_SORTS = [
   { value: "name", label: "Name (A–Z)", compare: byString<MerchandiserNpa>((m) => m.name) },
 ];
 
+// Column-header sorting (7 Oct 2026 audit).
+const SUPPLIER_COLS: ColumnAccessors<FlaggedSupplierNpa> = {
+  supplier: (s) => s.supplier_name,
+  max:      (s) => s.max_overdue_days,
+  count:    (s) => s.overdue_request_count,
+  // Formally flagged sorts above auto-detected, matching the Status pill.
+  status:   (s) => (s.is_formally_flagged ? "2" : s.is_auto_flagged ? "1" : "0"),
+  flagged:  (s) => s.flagged_date ?? "",
+  reason:   (s) => s.default_reason ?? "",
+};
+
+const MERCH_COLS: ColumnAccessors<MerchandiserNpa> = {
+  name:     (m) => m.name,
+  total:    (m) => m.total_requests,
+  overdue:  (m) => m.overdue_count,
+  avg:      (m) => m.avg_overdue_days,
+};
+
 export function NpaPanel() {
   const { data, isLoading } = useNpa();
 
@@ -34,15 +58,19 @@ export function NpaPanel() {
   const merchandisers = data?.merchandiser_performance ?? [];
 
   // Search / sort / pagination (10 Aug 2026, app-wide table controls).
+  const supplierSort = useColumnSortState();
+  const merchSort = useColumnSortState();
   const supplierTable = useClientTable(flaggedSuppliers, {
     searchHaystack: (s) => [s.supplier_name, s.default_reason],
     sortOptions: SUPPLIER_SORTS,
     pageSize: 10,
+    overrideCompare: supplierSort.sort ? makeColumnCompare(SUPPLIER_COLS, supplierSort.sort) : null,
   });
   const merchTable = useClientTable(merchandisers, {
     searchHaystack: (m) => [m.name, m.email],
     sortOptions: MERCH_SORTS,
     pageSize: 10,
+    overrideCompare: merchSort.sort ? makeColumnCompare(MERCH_COLS, merchSort.sort) : null,
   });
 
   if (isLoading) {
@@ -89,12 +117,12 @@ export function NpaPanel() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Supplier</TableHead>
-                      <TableHead className="text-right">Max Overdue</TableHead>
-                      <TableHead className="text-right">Overdue Requests</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Flagged On</TableHead>
-                      <TableHead>Reason</TableHead>
+                      <SortableHead label="Supplier" sortKey="supplier" state={supplierSort} />
+                      <SortableHead label="Max Overdue" sortKey="max" state={supplierSort} align="right" className="text-right" />
+                      <SortableHead label="Overdue Requests" sortKey="count" state={supplierSort} align="right" className="text-right" />
+                      <SortableHead label="Status" sortKey="status" state={supplierSort} />
+                      <SortableHead label="Flagged On" sortKey="flagged" state={supplierSort} />
+                      <SortableHead label="Reason" sortKey="reason" state={supplierSort} />
                       <TableHead />
                     </TableRow>
                   </TableHeader>
@@ -196,10 +224,10 @@ export function NpaPanel() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Merchandiser</TableHead>
-                      <TableHead className="text-right">Total Requests</TableHead>
-                      <TableHead className="text-right">Overdue</TableHead>
-                      <TableHead className="text-right">Avg Overdue Days</TableHead>
+                      <SortableHead label="Merchandiser" sortKey="name" state={merchSort} />
+                      <SortableHead label="Total Requests" sortKey="total" state={merchSort} align="right" className="text-right" />
+                      <SortableHead label="Overdue" sortKey="overdue" state={merchSort} align="right" className="text-right" />
+                      <SortableHead label="Avg Overdue Days" sortKey="avg" state={merchSort} align="right" className="text-right" />
                       <TableHead />
                     </TableRow>
                   </TableHeader>

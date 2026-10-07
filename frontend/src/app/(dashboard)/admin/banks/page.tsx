@@ -21,6 +21,12 @@ import {
 import { Pagination } from "@/components/ui/Pagination";
 import { TableControls } from "@/components/ui/TableControls";
 import { byString, useClientTable } from "@/hooks/useClientTable";
+import {
+  makeColumnCompare,
+  SortableHead,
+  useColumnSortState,
+  type ColumnAccessors,
+} from "@/components/ui/SortableHead";
 import type { Bank } from "@/types";
 import masterService from "@/services/masterService";
 
@@ -57,7 +63,14 @@ export default function BanksAdminPage() {
     { value: "name", label: "Name (A–Z)", compare: byString<Bank>((b) => b.name) },
     { value: "status", label: "Active first", compare: (a: Bank, b: Bank) => Number(b.is_active) - Number(a.is_active) },
   ];
+  // Column-header sorting (7 Oct 2026 audit).
+  const colSort = useColumnSortState();
+  const bankCols: ColumnAccessors<(typeof banks)[number]> = {
+    bank:   (b) => b.name,
+    status: (b) => (b.is_active ? "active" : "inactive"),
+  };
   const bankTable = useClientTable(banks, {
+    overrideCompare: colSort.sort ? makeColumnCompare(bankCols, colSort.sort) : null,
     searchHaystack: (b) => [b.name, b.is_active ? "active" : "inactive"],
     sortOptions: bankSorts,
     pageSize: 20,
@@ -159,8 +172,8 @@ export default function BanksAdminPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Bank</TableHead>
-                    <TableHead>Status</TableHead>
+                    <SortableHead label="Bank" sortKey="bank" state={colSort} />
+                    <SortableHead label="Status" sortKey="status" state={colSort} />
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
