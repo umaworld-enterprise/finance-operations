@@ -22,6 +22,7 @@ import { TopNav } from "@/components/layout/TopNav";
 import { RoleGuard } from "@/components/layout/RoleGuard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import {
@@ -30,6 +31,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { useMerchandiserOptions, useVerticals } from "@/hooks/useMasters";
 import type { ProjectionDashboardRow } from "@/services/projectionService";
+import { useProjectionSettings, useSetProjectionLock } from "@/hooks/useProjections";
 import {
   SortableHead,
   sortByColumn,
@@ -191,6 +193,55 @@ function MyProjectionsForm() {
         <Button onClick={doSubmit} disabled={!status.window_open || submit.isPending}>
           {submit.isPending ? "Saving…" : `Save ${monthLabel} Projections`}
         </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Super Admin: the request-lock switch (9 Oct 2026) ───────────────────────
+// The per-vertical lock shipped ON and stopped management raising requests.
+// It is opt-in now and OFF by default: projections are still collected and
+// reported, but nobody is blocked until a Super Admin arms this.
+
+function LockSwitchCard() {
+  const { data } = useProjectionSettings();
+  const setLock = useSetProjectionLock();
+  const enabled = data?.lock_enabled ?? false;
+
+  const toggle = async (next: boolean) => {
+    try {
+      await setLock.mutateAsync(next);
+      toast.success(
+        next
+          ? "Projection lock ON — a vertical with no projection this month will refuse new requests."
+          : "Projection lock OFF — requests can be raised for any vertical.",
+      );
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Could not change the setting.");
+    }
+  };
+
+  return (
+    <Card>
+      <CardContent className="p-5 md:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-semibold text-foreground text-sm">
+              Block requests for verticals with no projection
+            </h2>
+            <p className="text-xs text-muted-foreground mt-1 max-w-3xl">
+              {enabled
+                ? "ON — a vertical whose projection for the current month is missing will not accept new requests from anyone, until someone files it."
+                : "OFF — projections are still collected and reported, but a missing one never stops a request being raised. This is the default."}
+            </p>
+          </div>
+          <Switch
+            checked={enabled}
+            onCheckedChange={toggle}
+            disabled={setLock.isPending}
+            aria-label="Block requests for verticals with no projection"
+          />
+        </div>
       </CardContent>
     </Card>
   );
@@ -474,6 +525,7 @@ export default function ProjectionsPage() {
           </p>
         )}
         {isMerchandiser && <MyProjectionsForm />}
+        {isSuperAdmin && <LockSwitchCard />}
         {isSuperAdmin && <OnBehalfForm />}
         <ProjectionDashboard />
       </main>

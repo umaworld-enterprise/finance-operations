@@ -32,3 +32,19 @@ export function useSubmitProjections() {
     onSuccess: () => qc.invalidateQueries({ queryKey: [...PROJECTIONS_KEY] }),
   });
 }
+
+export function useProjectionSettings() {
+  return useQuery({
+    queryKey: [...PROJECTIONS_KEY, "settings"],
+    queryFn: projectionService.settings,
+    staleTime: 60_000,
+  });
+}
+
+export function useSetProjectionLock() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => projectionService.setLockEnabled(enabled),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...PROJECTIONS_KEY] }),
+  });
+}

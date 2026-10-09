@@ -2025,3 +2025,60 @@ deliberately untouched — its column sequence mirrors the executives' ledger
 sheet exactly.
 
 348 backend tests green; tsc clean; production build compiles.
+
+## Payment Delay bands on the pending lists (9 Oct 2026)
+
+A new last column, **Payment Delay**, puts each pending file into a 15-day
+ageing band — the SAME ranges and the same boundary rule as the analytics
+Delay Buckets (`low < days <= high`), so the two read alike:
+`0-15 Days`, `15-30 Days`, `30-45 Days` … `>150 Days`. The difference is what
+is measured: these count days past the relevant tranche's TENTATIVE PAYMENT
+DATE (the Waiting metric), not the shipment ETD. A payment not yet due reads
+`Not due`; a file with no dated unpaid tranche reads `—`. The pill darkens as
+the band grows, and the column sorts by the underlying day count so the bands
+fall in order and undated rows sink.
+
+Added to BOTH pending lists (confirmed choice): Accounts Workspace → Pending
+(after Waiting, desktop table + mobile cards) and the Requests page → Pending
+tab for merchandisers/HoM. On the Requests page it is opt-in
+(`showPaymentDelay`) and switched on only for the Pending tab, since ageing
+means nothing on processed or cancelled files.
+
+`nextTentativeDate` moved from `lib/exportExcel.ts` into `lib/utils.ts`
+alongside the new `paymentDelayDays` / `paymentDelayBucket`, so the queue, the
+ageing bands, the Waiting badge and the Excel export all derive a file's age
+from one place. The day count now compares LOCAL calendar midnights rather
+than timestamps — parsing a bare `YYYY-MM-DD` as UTC read a day out in the
+early hours for anyone east of UTC.
+
+348 backend tests green; tsc clean; production build compiles. Frontend only.
+
+## Projection lock becomes an opt-in switch, default OFF (9 Oct 2026)
+
+**Why:** the per-vertical lock shipped ON (7 Oct) and stopped management
+raising requests for verticals with no projection. It is now a feature
+switch, **off by default**, so nobody is blocked.
+
+* `projection_lock_enabled` in `system_config`. **No row = OFF**, so the
+  existing databases are unblocked by the deploy alone — no migration, no
+  data change.
+* `assert_vertical_open()` and `locked_vertical_ids()` return immediately
+  while the switch is off, so request creation passes through for every role
+  and the UI's locked-vertical banners disappear on their own (they key off
+  `locked_verticals`, which is then empty).
+* The daily reminder job respects it too: the "Verticals locked" notice is
+  skipped entirely while off, and the 25th→EOM reminder drops its "cannot
+  take new requests" sentence — it would be untrue.
+* `GET /projections/settings` (any role, so the UI knows) and
+  `PUT /projections/settings` (Super Admin). The switch is a card at the top
+  of the Projections page for Super Admins, with copy stating what each
+  position means.
+* `set_lock_enabled` generates the row id in Python rather than with
+  `gen_random_uuid()`, so the same statement runs on Postgres and on the
+  SQLite test database.
+
+Projections themselves are unchanged — still collected monthly, still
+reported on the dashboard. Only the blocking behaviour is now opt-in.
+`test_projections.py` gained `test_lock_is_off_by_default` and
+`test_lock_can_be_disarmed_again`; the two blocking tests now arm the switch
+first. 350 backend tests green; tsc clean; production build compiles.

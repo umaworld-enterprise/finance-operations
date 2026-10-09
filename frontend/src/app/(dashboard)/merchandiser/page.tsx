@@ -339,7 +339,12 @@ export default function MerchandiserDashboard() {
                 )
               ) : (
                 <div className={isFetching ? "opacity-70 transition-opacity" : ""}>
-                  <RequestsTable requests={requests} basePath="/merchandiser" showMerchandiser />
+                  <RequestsTable
+                    requests={requests}
+                    basePath="/merchandiser"
+                    showMerchandiser
+                    showPaymentDelay={tab === "pending"}
+                  />
                   <Pagination
                     page={page}
                     totalPages={totalPages}

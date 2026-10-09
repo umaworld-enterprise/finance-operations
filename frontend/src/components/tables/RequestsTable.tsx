@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { amountPayable, formatCurrency, formatDate, hasHighPriorityUnpaid, requestDisplayNumber } from "@/lib/utils";
+import { amountPayable, cn, formatCurrency, formatDate, hasHighPriorityUnpaid, paymentDelayBucket, paymentDelayDays, requestDisplayNumber } from "@/lib/utils";
 import { latestPaymentDate } from "@/lib/exportExcel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -32,7 +32,28 @@ const ACCESSORS: ColumnAccessors<DepositRequest> = {
   status:       (r) => r.current_status,
   payment_date: (r) => latestPaymentDate(r),
   submitted:    (r) => r.created_at,
+  // Payment-delay band (9 Oct 2026) — sorted by the underlying day count so
+  // the bands fall in order and undated rows sink.
+  delay_bucket: (r) => paymentDelayDays(r),
 };
+
+// Same 15-day ranges as the analytics Delay Buckets, measured against the
+// tentative payment date instead of the shipment ETD.
+function DelayBucket({ req }: { req: DepositRequest }) {
+  const label = paymentDelayBucket(req);
+  if (label === "\u2014") return <span className="text-xs text-muted-foreground">\u2014</span>;
+  const days = paymentDelayDays(req) ?? 0;
+  const shade =
+    days < 0   ? "bg-muted/50 text-muted-foreground border-border" :
+    days <= 15 ? "bg-muted text-muted-foreground border-border" :
+    days <= 45 ? "bg-foreground/5 text-foreground border-foreground/15" :
+                 "bg-foreground/10 text-foreground border-foreground/20";
+  return (
+    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border whitespace-nowrap", shade)}>
+      {label}
+    </span>
+  );
+}
 
 interface RequestsTableProps {
   requests: DepositRequest[];
@@ -41,6 +62,9 @@ interface RequestsTableProps {
   /** Show WHO raised each request — used since all requests became visible
    * to every merchandiser (11 Sep 2026). */
   showMerchandiser?: boolean;
+  /** Payment-delay band column (9 Oct 2026) — only meaningful where money is
+   * still outstanding, so the Pending tab switches it on. */
+  showPaymentDelay?: boolean;
 }
 
 export function RequestsTable({
@@ -48,6 +72,7 @@ export function RequestsTable({
   basePath = "/merchandiser",
   emptyMessage = "Requests you submit will appear here.",
   showMerchandiser = false,
+  showPaymentDelay = false,
 }: RequestsTableProps) {
   // Column-header sorting (16 Sep 2026) — client-side over the loaded rows.
   const colSort = useColumnSortState();
@@ -80,6 +105,9 @@ export function RequestsTable({
             <SortableHead label="Status" sortKey="status" state={colSort} />
             <SortableHead label="Payment Date" sortKey="payment_date" state={colSort} className="hidden md:table-cell" />
             <SortableHead label="Submitted" sortKey="submitted" state={colSort} className="hidden lg:table-cell" />
+            {showPaymentDelay && (
+              <SortableHead label="Payment Delay" sortKey="delay_bucket" state={colSort} />
+            )}
             <TableHead />
           </TableRow>
         </TableHeader>
@@ -131,6 +159,9 @@ export function RequestsTable({
               <TableCell className="hidden lg:table-cell text-muted-foreground text-xs">
                 {formatDate(req.created_at)}
               </TableCell>
+              {showPaymentDelay && (
+                <TableCell><DelayBucket req={req} /></TableCell>
+              )}
               <TableCell>
                 <Button size="sm" variant="ghost" asChild>
                   <Link href={`${basePath}/${req.id}`} aria-label={`View request ${requestDisplayNumber(req)}`}>
