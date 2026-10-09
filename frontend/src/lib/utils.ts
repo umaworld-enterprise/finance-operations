@@ -119,6 +119,66 @@ export function requestDisplayNumber(req: { request_number: string }): string {
 // Priority of Tranche Payment (5 Sep 2026): a request carries the High
 // Priority badge while any UNPAID tranche is marked high — display only,
 // never changes list ordering.
+// Payment-delay ageing (9 Oct 2026, executive request). Mirrors the
+// analytics Delay Buckets exactly — 15-day bands, each one exclusive at the
+// low end and inclusive at the high end (low < days <= high) — but measured
+// against the TENTATIVE PAYMENT DATE rather than the shipment ETD.
+
+type TrancheLike = { status: string; tentative_payment_date?: string | null };
+
+/** Earliest tentative payment date among the UNPAID tranches — the next
+ * money due out. Shared by the queue, the ageing column and the export. */
+export function nextTentativeDate(req: {
+  tranches?: TrancheLike[] | null;
+}): string | null {
+  const dates = (req.tranches ?? [])
+    .filter((t) => t.status === "unpaid" && t.tentative_payment_date)
+    .map((t) => t.tentative_payment_date as string)
+    .sort();
+  return dates[0] ?? null;
+}
+
+/** Days past that date — negative while the payment is not yet due, null
+ * when no unpaid tranche carries a date. */
+export function paymentDelayDays(req: { tranches?: TrancheLike[] | null }): number | null {
+  const due = nextTentativeDate(req);
+  if (!due) return null;
+  // Compare LOCAL calendar midnights. Parsing "YYYY-MM-DD" directly would
+  // give UTC midnight, which reads a day out in the early hours for anyone
+  // east of UTC.
+  const dueMidnight = new Date(`${due.slice(0, 10)}T00:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((today.getTime() - dueMidnight.getTime()) / 86_400_000);
+}
+
+const DELAY_BANDS: [string, number | null, number | null][] = [
+  ["0-15 Days", null, 15],
+  ["15-30 Days", 15, 30],
+  ["30-45 Days", 30, 45],
+  ["45-60 Days", 45, 60],
+  ["60-75 Days", 60, 75],
+  ["75-90 Days", 75, 90],
+  ["90-105 Days", 90, 105],
+  ["105-120 Days", 105, 120],
+  ["120-135 Days", 120, 135],
+  ["135-150 Days", 135, 150],
+  [">150 Days", 150, null],
+];
+
+/** The band label for a payment delay: "—" with no date, "Not due" while the
+ * date is still ahead, else the matching 15-day band. */
+export function paymentDelayBucket(req: { tranches?: TrancheLike[] | null }): string {
+  const days = paymentDelayDays(req);
+  if (days === null) return "\u2014";
+  if (days < 0) return "Not due";
+  for (const [label, low, high] of DELAY_BANDS) {
+    if (low !== null && days <= low) continue;
+    if (high === null || days <= high) return label;
+  }
+  return ">150 Days";
+}
+
 export function hasHighPriorityUnpaid(req: {
   tranches?: { status: string; priority?: string }[] | null;
 }): boolean {
