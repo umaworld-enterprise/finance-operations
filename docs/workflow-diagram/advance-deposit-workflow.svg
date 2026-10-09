@@ -1,0 +1,180 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1900" height="1270" viewBox="0 0 1900 1270" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+<defs><marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/></marker></defs>
+<rect width="1900" height="1270" fill="#ffffff"/>
+<rect x="0" y="0" width="1900" height="92" fill="#122744"/>
+<text x="40" y="42" font-size="25" font-weight="700" fill="#ffffff">Supplier Advance Deposit — End-to-End Workflow</text>
+<text x="40" y="70" font-size="13" fill="#9fb3cd">From request to shipment: who acts at each step, the control gates, and where cost of fund accrues</text>
+<circle cx="1790.8" cy="46" r="5.5" fill="#b91c1c"/>
+<text x="1802.8" y="50" font-size="11" fill="#cfdcea">Terminal</text>
+<circle cx="1688.0" cy="46" r="5.5" fill="#b45309"/>
+<text x="1700.0" y="50" font-size="11" fill="#cfdcea">Control gate</text>
+<circle cx="1578.8" cy="46" r="5.5" fill="#0f766e"/>
+<text x="1590.8" y="50" font-size="11" fill="#cfdcea">Accounts Team</text>
+<circle cx="1424.8" cy="46" r="5.5" fill="#7c3aed"/>
+<text x="1436.8" y="50" font-size="11" fill="#cfdcea">Head of Merchandiser</text>
+<circle cx="1283.6" cy="46" r="5.5" fill="#2563eb"/>
+<text x="1295.6" y="50" font-size="11" fill="#cfdcea">Merchandiser / HoM</text>
+<rect x="40" y="112" width="1820" height="190" rx="10" fill="#f6f9ff"/>
+<rect x="40" y="112" width="6" height="190" rx="3" fill="#2563eb"/>
+<text x="64" y="142" font-size="13.5" font-weight="700" fill="#1f2937">Merchandiser / HoM</text>
+<text x="64" y="161" font-size="10.5" fill="#64748b">Raises the request</text>
+<rect x="40" y="310" width="1820" height="160" rx="10" fill="#faf7ff"/>
+<rect x="40" y="310" width="6" height="160" rx="3" fill="#7c3aed"/>
+<text x="64" y="340" font-size="13.5" font-weight="700" fill="#1f2937">Head of Merchandiser</text>
+<text x="64" y="359" font-size="10.5" fill="#64748b">Gate for flagged suppliers only</text>
+<rect x="40" y="478" width="1820" height="236" rx="10" fill="#f3fbfa"/>
+<rect x="40" y="478" width="6" height="236" rx="3" fill="#0f766e"/>
+<text x="64" y="508" font-size="13.5" font-weight="700" fill="#1f2937">Accounts Team</text>
+<text x="64" y="527" font-size="10.5" fill="#64748b">Pays and closes the file</text>
+<rect x="40" y="722" width="1820" height="150" rx="10" fill="#f8fafc"/>
+<rect x="40" y="722" width="6" height="150" rx="3" fill="#64748b"/>
+<text x="64" y="752" font-size="13.5" font-weight="700" fill="#1f2937">System — automatic</text>
+<text x="64" y="771" font-size="10.5" fill="#64748b">No human action needed</text>
+<rect x="250" y="160" width="220" height="96" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="1.6"/>
+<rect x="250" y="160" width="5" height="96" rx="2.5" fill="#2563eb"/>
+<circle cx="276" cy="184" r="11" fill="#2563eb"/>
+<text x="276" y="188.5" font-size="12.5" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+<text x="296" y="185" font-size="13.5" font-weight="700" fill="#1f2937">Raise Request</text>
+<text x="268" y="204" font-size="11" fill="#64748b">Supplier, customer, vertical,</text>
+<text x="268" y="218.5" font-size="11" fill="#64748b">invoice total, tranches with</text>
+<text x="268" y="233.0" font-size="11" fill="#64748b">dates + priority</text>
+<rect x="528" y="160" width="220" height="96" rx="9" fill="#fffbeb" stroke="#b45309" stroke-width="1.6"/>
+<rect x="528" y="160" width="5" height="96" rx="2.5" fill="#b45309"/>
+<text x="546" y="185" font-size="13.5" font-weight="700" fill="#1f2937">Projection gate</text>
+<text x="546" y="204" font-size="11" fill="#64748b">The vertical must have this</text>
+<text x="546" y="218.5" font-size="11" fill="#64748b">month's projection filed —</text>
+<text x="546" y="233.0" font-size="11" fill="#64748b">otherwise no request is taken</text>
+<rect x="806" y="160" width="220" height="96" rx="9" fill="#fffbeb" stroke="#b45309" stroke-width="1.6"/>
+<rect x="806" y="160" width="5" height="96" rx="2.5" fill="#b45309"/>
+<text x="824" y="185" font-size="13.5" font-weight="700" fill="#1f2937">Supplier flagged</text>
+<text x="824" y="204" font-size="11" fill="#64748b">Is the supplier a defaulter?</text>
+<text x="824" y="218.5" font-size="11" fill="#64748b">Decides whether the file</text>
+<text x="824" y="233.0" font-size="11" fill="#64748b">needs HoM sign-off</text>
+<path d="M 470 208 L 522 208" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arw)" stroke-linejoin="round"/>
+<path d="M 748 208 L 800 208" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arw)" stroke-linejoin="round"/>
+<rect x="806" y="352" width="220" height="82" rx="9" fill="#ffffff" stroke="#7c3aed" stroke-width="1.6"/>
+<rect x="806" y="352" width="5" height="82" rx="2.5" fill="#7c3aed"/>
+<circle cx="832" cy="376" r="11" fill="#7c3aed"/>
+<text x="832" y="380.5" font-size="12.5" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+<text x="852" y="377" font-size="13.5" font-weight="700" fill="#1f2937">HoM approval</text>
+<text x="824" y="396" font-size="11" fill="#64748b">Reviews supplier exposure</text>
+<text x="824" y="410.5" font-size="11" fill="#64748b">and past decisions</text>
+<rect x="528" y="352" width="220" height="82" rx="9" fill="#fef2f2" stroke="#b91c1c" stroke-width="1.6"/>
+<rect x="528" y="352" width="5" height="82" rx="2.5" fill="#b91c1c"/>
+<text x="546" y="377" font-size="13.5" font-weight="700" fill="#1f2937">Rejected</text>
+<text x="546" y="396" font-size="11" fill="#64748b">Terminal — invoice numbers</text>
+<text x="546" y="410.5" font-size="11" fill="#64748b">are released for reuse</text>
+<path d="M 916.0 256 L 916.0 346" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arw)" stroke-linejoin="round"/>
+<rect x="870.0" y="285.0" width="92" height="18" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="916.0" y="298.0" font-size="10.5" font-weight="600" fill="#475569" text-anchor="middle">Yes — flagged</text>
+<path d="M 800 393 L 754 393" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arw)" stroke-linejoin="round"/>
+<rect x="731.0" y="375.0" width="92" height="18" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="777.0" y="388.0" font-size="10.5" font-weight="600" fill="#475569" text-anchor="middle">Reject</text>
+<rect x="1084" y="512" width="220" height="96" rx="9" fill="#ffffff" stroke="#0f766e" stroke-width="1.6"/>
+<rect x="1084" y="512" width="5" height="96" rx="2.5" fill="#0f766e"/>
+<circle cx="1110" cy="536" r="11" fill="#0f766e"/>
+<text x="1110" y="540.5" font-size="12.5" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+<text x="1130" y="537" font-size="13.5" font-weight="700" fill="#1f2937">Pending Payment queue</text>
+<text x="1102" y="556" font-size="11" fill="#64748b">Oldest first, high-priority</text>
+<text x="1102" y="570.5" font-size="11" fill="#64748b">tranches badged. Waiting is</text>
+<text x="1102" y="585.0" font-size="11" fill="#64748b">counted from the due date</text>
+<rect x="1362" y="512" width="220" height="96" rx="9" fill="#ffffff" stroke="#0f766e" stroke-width="1.6"/>
+<rect x="1362" y="512" width="5" height="96" rx="2.5" fill="#0f766e"/>
+<circle cx="1388" cy="536" r="11" fill="#0f766e"/>
+<text x="1388" y="540.5" font-size="12.5" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+<text x="1408" y="537" font-size="13.5" font-weight="700" fill="#1f2937">Pay the tranche</text>
+<text x="1380" y="556" font-size="11" fill="#64748b">Payment details + TT copy.</text>
+<text x="1380" y="570.5" font-size="11" fill="#64748b">One at a time, or several</text>
+<text x="1380" y="585.0" font-size="11" fill="#64748b">same-supplier files at once</text>
+<rect x="1640" y="512" width="220" height="96" rx="9" fill="#f0fdf4" stroke="#15803d" stroke-width="1.6"/>
+<rect x="1640" y="512" width="5" height="96" rx="2.5" fill="#15803d"/>
+<circle cx="1666" cy="536" r="11" fill="#15803d"/>
+<text x="1666" y="540.5" font-size="12.5" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+<text x="1686" y="537" font-size="13.5" font-weight="700" fill="#1f2937">Payment Processed</text>
+<text x="1658" y="556" font-size="11" fill="#64748b">Every tranche paid — the</text>
+<text x="1658" y="570.5" font-size="11" fill="#64748b">file locks for editing</text>
+<rect x="1362" y="626" width="220" height="68" rx="9" fill="#fffbeb" stroke="#b45309" stroke-width="1.6"/>
+<rect x="1362" y="626" width="5" height="68" rx="2.5" fill="#b45309"/>
+<text x="1380" y="651" font-size="12" font-weight="700" fill="#1f2937">Release gate</text>
+<text x="1380" y="670" font-size="11" fill="#64748b">Tranche 2 onwards is paid only</text>
+<text x="1380" y="684.5" font-size="11" fill="#64748b">after the merchandiser releases it</text>
+<rect x="1640" y="626" width="220" height="68" rx="9" fill="#ffffff" stroke="#0f766e" stroke-width="1.6"/>
+<rect x="1640" y="626" width="5" height="68" rx="2.5" fill="#0f766e"/>
+<text x="1658" y="651" font-size="12" font-weight="700" fill="#1f2937">Record Ship Date</text>
+<text x="1658" y="670" font-size="11" fill="#64748b">Goods shipped — this is what</text>
+<text x="1658" y="684.5" font-size="11" fill="#64748b">stops cost of fund accruing</text>
+<path d="M 1026 208 L 1234 208 L 1234 506" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arw)" stroke-linejoin="round"/>
+<rect x="1052" y="187" width="92" height="18" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="1098" y="200" font-size="10.5" font-weight="600" fill="#475569" text-anchor="middle">No — not flagged</text>
+<path d="M 1026 393 L 1154 393 L 1154 506" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arw)" stroke-linejoin="round"/>
+<rect x="1108" y="371" width="92" height="18" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="1154" y="384" font-size="10.5" font-weight="600" fill="#475569" text-anchor="middle">Approved</text>
+<path d="M 1304 560 L 1356 560" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arw)" stroke-linejoin="round"/>
+<path d="M 1582 560 L 1634 560" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arw)" stroke-linejoin="round"/>
+<path d="M 1472.0 626 L 1472.0 612" fill="none" stroke="#b45309" stroke-width="2" marker-end="url(#arw)" stroke-linejoin="round"/>
+<path d="M 1750.0 608 L 1750.0 620" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arw)" stroke-linejoin="round"/>
+<rect x="250" y="752" width="498" height="90" rx="9" fill="#ffffff" stroke="#64748b" stroke-width="1.6"/>
+<rect x="250" y="752" width="5" height="90" rx="2.5" fill="#64748b"/>
+<text x="268" y="777" font-size="13.5" font-weight="700" fill="#1f2937">Everyone is kept informed</text>
+<text x="268" y="796" font-size="11" fill="#64748b">In-app bell, push and email at every step — plus a red dot on any file that changed,</text>
+<text x="268" y="810.5" font-size="11" fill="#64748b">and a pop-up telling Accounts what arrived while they were away</text>
+<rect x="1084" y="752" width="498" height="90" rx="9" fill="#ffffff" stroke="#64748b" stroke-width="1.6"/>
+<rect x="1084" y="752" width="5" height="90" rx="2.5" fill="#64748b"/>
+<text x="1102" y="777" font-size="13.5" font-weight="700" fill="#1f2937">Analytics refreshed automatically</text>
+<text x="1102" y="796" font-size="11" fill="#64748b">Every 30 minutes the system recomputes Grace ETD, overdue days and cost of fund,</text>
+<text x="1102" y="810.5" font-size="11" fill="#64748b">feeding the dashboards, the delay report and supplier risk</text>
+<rect x="1640" y="752" width="220" height="90" rx="9" fill="#ffffff" stroke="#64748b" stroke-width="1.6"/>
+<rect x="1640" y="752" width="5" height="90" rx="2.5" fill="#64748b"/>
+<text x="1658" y="777" font-size="13.5" font-weight="700" fill="#1f2937">Supplier risk</text>
+<text x="1658" y="796" font-size="11" fill="#64748b">Repeated overdue shipments</text>
+<text x="1658" y="810.5" font-size="11" fill="#64748b">flag the supplier — which</text>
+<text x="1658" y="825.0" font-size="11" fill="#64748b">sends future files to HoM</text>
+<path d="M 1750.0 694 L 1750.0 746" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arw)" stroke-linejoin="round"/>
+<path d="M 1860 797 L 1878 797 L 1878 134 L 956.0 134 L 956.0 154" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arw)" stroke-linejoin="round"/>
+<rect x="1300" y="121" width="330" height="20" rx="10" fill="#ffffff"/>
+<text x="1465" y="135" font-size="10.5" fill="#94a3b8" text-anchor="middle">repeat defaults re-route that supplier’s future files to HoM</text>
+<rect x="40" y="896" width="1820" height="196" rx="10" fill="#fcfcfd" stroke="#cbd5e1" stroke-dasharray="7 5"/>
+<text x="64" y="926" font-size="13.5" font-weight="700" fill="#1f2937">Can happen at any point in the flow</text>
+<text x="340" y="926" font-size="11" fill="#64748b">These run alongside the main path — every one of them is recorded in the audit trail</text>
+<rect x="250" y="944" width="220" height="128" rx="9" fill="#ffffff" stroke="#0f766e" stroke-width="1.6"/>
+<rect x="250" y="944" width="5" height="128" rx="2.5" fill="#0f766e"/>
+<text x="268" y="969" font-size="12.5" font-weight="700" fill="#1f2937">Hold / Resume</text>
+<text x="268" y="988" font-size="11" fill="#64748b">Merchandiser or Accounts can</text>
+<text x="268" y="1002.5" font-size="11" fill="#64748b">pause a file and resume it later</text>
+<rect x="528" y="944" width="220" height="128" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="1.6"/>
+<rect x="528" y="944" width="5" height="128" rx="2.5" fill="#2563eb"/>
+<text x="546" y="969" font-size="12.5" font-weight="700" fill="#1f2937">Modify Request</text>
+<text x="546" y="988" font-size="11" fill="#64748b">File Change, Invoice Value Change</text>
+<text x="546" y="1002.5" font-size="11" fill="#64748b">or Split — Accounts approve,</text>
+<text x="546" y="1017.0" font-size="11" fill="#64748b">then apply the new figures</text>
+<rect x="806" y="944" width="220" height="128" rx="9" fill="#ffffff" stroke="#b91c1c" stroke-width="1.6"/>
+<rect x="806" y="944" width="5" height="128" rx="2.5" fill="#b91c1c"/>
+<text x="824" y="969" font-size="12.5" font-weight="700" fill="#1f2937">Cancel / Reject</text>
+<text x="824" y="988" font-size="11" fill="#64748b">Terminal. The invoice numbers</text>
+<text x="824" y="1002.5" font-size="11" fill="#64748b">become reusable</text>
+<rect x="1084" y="944" width="220" height="128" rx="9" fill="#ffffff" stroke="#0f766e" stroke-width="1.6"/>
+<rect x="1084" y="944" width="5" height="128" rx="2.5" fill="#0f766e"/>
+<text x="1102" y="969" font-size="12.5" font-weight="700" fill="#1f2937">Add a tranche later</text>
+<text x="1102" y="988" font-size="11" fill="#64748b">Adding one to a completed file</text>
+<text x="1102" y="1002.5" font-size="11" fill="#64748b">reopens it into the queue</text>
+<rect x="1362" y="944" width="220" height="128" rx="9" fill="#ffffff" stroke="#0f766e" stroke-width="1.6"/>
+<rect x="1362" y="944" width="5" height="128" rx="2.5" fill="#0f766e"/>
+<text x="1380" y="969" font-size="12.5" font-weight="700" fill="#1f2937">Bulk payment</text>
+<text x="1380" y="988" font-size="11" fill="#64748b">Several files of the SAME supplier</text>
+<text x="1380" y="1002.5" font-size="11" fill="#64748b">paid together on one TT copy</text>
+<rect x="1640" y="944" width="220" height="128" rx="9" fill="#ffffff" stroke="#b45309" stroke-width="1.6"/>
+<rect x="1640" y="944" width="5" height="128" rx="2.5" fill="#b45309"/>
+<text x="1658" y="969" font-size="12.5" font-weight="700" fill="#1f2937">Monthly projections</text>
+<text x="1658" y="988" font-size="11" fill="#64748b">Every vertical, filed 25th → month</text>
+<text x="1658" y="1002.5" font-size="11" fill="#64748b">end, by any merchandiser</text>
+<path d="M 1082 1008 L 1046 1008 L 1046 560 L 1076 560" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arw)" stroke-linejoin="round"/>
+<rect x="1000" y="748" width="92" height="18" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="1046" y="761" font-size="10.5" font-weight="600" fill="#94a3b8" text-anchor="middle">reopens</text>
+<text x="40" y="1130" font-size="12.5" font-weight="700" fill="#1f2937">How the two headline numbers are worked out</text>
+<rect x="40" y="1152" width="1820" height="42" rx="7" fill="#f8fafc" stroke="#cbd5e1"/>
+<text x="60" y="1178" font-size="12" font-weight="700" fill="#b45309">Grace ETD</text>
+<text x="144.39999999999998" y="1178" font-size="11.5" fill="#1f2937">Estimated ETD + the grace period (7 days by default). A shipment is only “overdue” once this date passes.</text>
+<rect x="40" y="1202" width="1820" height="42" rx="7" fill="#f8fafc" stroke="#cbd5e1"/>
+<text x="60" y="1228" font-size="12" font-weight="700" fill="#b45309">Cost of Fund</text>
+<text x="167.2" y="1228" font-size="11.5" fill="#1f2937">Deposit × annual rate ÷ 365, counted for every day from the Grace ETD to the ship date — or to today while the goods are still unshipped.</text>
+</svg>

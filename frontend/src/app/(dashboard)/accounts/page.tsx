@@ -25,14 +25,14 @@ import { ShipmentsTable } from "@/components/analytics/ShipmentsTable";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
-import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, formatDateSheet, cn, hasHighPriorityUnpaid, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
+// nextTentativeDate / paymentDelay* are shared with the export and the
+// merchandiser list, so every surface ages a file identically.
+import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, formatDateSheet, cn, hasHighPriorityUnpaid, nextTentativeDate, paymentDelayBucket, paymentDelayDays, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
 import { SortableHead, sortByColumn, useColumnSortState, type ColumnAccessors } from "@/components/ui/SortableHead";
 import { differenceInDays } from "date-fns";
 import { needsRelease } from "@/components/tranches/TrancheList";
 import { ExportButton } from "@/components/ui/ExportButton";
-// nextTentativeDate is shared with the Excel export (7 Oct 2026) so the
-// queue's Tentative Payment column and the exported one cannot drift.
-import { bankLedgerEntries, exportBankLedgerToExcel, exportRequestsToExcel, latestPaymentDate, nextTentativeDate } from "@/lib/exportExcel";
+import { bankLedgerEntries, exportBankLedgerToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
 import { BankLedgerTable } from "@/components/tables/BankLedgerTable";
 import { filterParams, matchesRequestFilters, RequestFilterBar, type RequestFilterValues } from "@/components/filters/RequestFilterBar";
 import { BulkPayDialog, nextPayableTranche } from "@/components/accounts/BulkPayDialog";
@@ -50,11 +50,7 @@ const PAGE_SIZE = 50;
 // PAYMENT DATE of the relevant tranche — the date money was due to go out —
 // not from when the request was raised. Past due counts up and darkens;
 // a payment not yet due reads "due in Nd" and stays neutral.
-function waitingDays(req: DepositRequest): number | null {
-  const tentative = nextTentativeDate(req);
-  if (!tentative) return null;
-  return differenceInDays(new Date(), new Date(tentative));
-}
+const waitingDays = paymentDelayDays;
 
 function waitingBadge(req: DepositRequest) {
   const days = waitingDays(req);
@@ -125,6 +121,7 @@ const PENDING_ACCESSORS: ColumnAccessors<DepositRequest> = {
   // Days past (or before) the tranche's tentative payment date — asc puts
   // not-yet-due first, desc the most overdue; undated rows always sink.
   waiting:      (r) => waitingDays(r),
+  delay_bucket: (r) => waitingDays(r),
 };
 
 const STATUS_ACCESSORS: ColumnAccessors<DepositRequest> = {
@@ -139,6 +136,24 @@ const STATUS_ACCESSORS: ColumnAccessors<DepositRequest> = {
   by:           (r) => r.last_status_change_by,
   submitted:    (r) => r.created_at,
 };
+
+// Payment-delay band (9 Oct 2026) — the same 15-day ranges as the analytics
+// Delay Buckets, measured against the tentative payment date.
+function delayBucketCell(req: DepositRequest) {
+  const label = paymentDelayBucket(req);
+  if (label === "\u2014") return <span className="text-xs text-muted-foreground">\u2014</span>;
+  const days = paymentDelayDays(req) ?? 0;
+  const shade =
+    days < 0   ? "bg-muted/50 text-muted-foreground border-border" :
+    days <= 15 ? "bg-muted text-muted-foreground border-border" :
+    days <= 45 ? "bg-foreground/5 text-foreground border-foreground/15" :
+                 "bg-foreground/10 text-foreground border-foreground/20";
+  return (
+    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border whitespace-nowrap", shade)}>
+      {label}
+    </span>
+  );
+}
 
 function PendingTable({
   rows: allRows,
@@ -249,6 +264,9 @@ function PendingTable({
             <div className="text-xs text-muted-foreground">
               Deposit %: <span className="font-semibold text-foreground">{depositPct(req)}</span>
             </div>
+            <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+              Payment delay: {delayBucketCell(req)}
+            </div>
             <div className="flex items-center justify-between">
               <span className="font-bold text-foreground">{formatCurrency(req.deposit_amount, req.currency)}</span>
               <Button size="sm" asChild>
@@ -294,13 +312,14 @@ function PendingTable({
               <SortableHead label="Currency" sortKey="currency" state={colSort} />
               <SortableHead label="Tentative Payment" sortKey="tentative" state={colSort} />
               <SortableHead label="Waiting" sortKey="waiting" state={colSort} />
+              <SortableHead label="Payment Delay" sortKey="delay_bucket" state={colSort} />
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableSkeleton rows={5} cols={selectable ? 15 : 14} />
+              <TableSkeleton rows={5} cols={selectable ? 16 : 15} />
             ) : rows.length === 0 ? (
-              <tr><td colSpan={selectable ? 15 : 14}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
+              <tr><td colSpan={selectable ? 16 : 15}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id}>
                 {selectable && (
@@ -346,6 +365,7 @@ function PendingTable({
                 {/* Process column removed (9 Sep 2026) — the Request # link
                     opens the request. */}
                 <TableCell>{waitingBadge(req)}</TableCell>
+                <TableCell>{delayBucketCell(req)}</TableCell>
               </TableRow>
             ))}
             {/* Total per currency (16 Sep 2026) — mirrors the Bank Ledger
@@ -365,6 +385,7 @@ function PendingTable({
                     {formatCurrency(t.deposit, cur === "—" ? null : cur)}
                   </TableCell>
                   <TableCell className="text-xs">{cur}</TableCell>
+                  <TableCell />
                   <TableCell />
                   <TableCell />
                 </TableRow>

@@ -4,7 +4,7 @@
 // Dates export as DD-Mon-YY (e.g. 27-Apr-26) since 16 Sep 2026 — the
 // executives' sheet format, so copy-paste needs no reformatting.
 
-import { formatDateSheet } from "@/lib/utils";
+import { formatDateSheet, nextTentativeDate } from "@/lib/utils";
 import type { DepositRequest, PendingReleaseRow } from "@/types";
 
 /** Latest paid tranche's payment date — the request row's "paid on". */
@@ -14,17 +14,6 @@ export function latestPaymentDate(req: DepositRequest): string | null {
     .map((t) => t.payment_date as string)
     .sort();
   return dates[dates.length - 1] ?? null;
-}
-
-/** Earliest tentative payment date among the UNPAID tranches — the next
- * money due to go out. Same rule the Accounts pending queue displays; shared
- * here so the export and the screen can never drift apart. */
-export function nextTentativeDate(req: DepositRequest): string | null {
-  const dates = (req.tranches ?? [])
-    .filter((t) => t.status === "unpaid" && t.tentative_payment_date)
-    .map((t) => t.tentative_payment_date as string)
-    .sort();
-  return dates[0] ?? null;
 }
 
 function statusLabel(value: string): string {

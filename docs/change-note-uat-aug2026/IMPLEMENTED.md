@@ -2025,3 +2025,30 @@ deliberately untouched — its column sequence mirrors the executives' ledger
 sheet exactly.
 
 348 backend tests green; tsc clean; production build compiles.
+
+## Payment Delay bands on the pending lists (9 Oct 2026)
+
+A new last column, **Payment Delay**, puts each pending file into a 15-day
+ageing band — the SAME ranges and the same boundary rule as the analytics
+Delay Buckets (`low < days <= high`), so the two read alike:
+`0-15 Days`, `15-30 Days`, `30-45 Days` … `>150 Days`. The difference is what
+is measured: these count days past the relevant tranche's TENTATIVE PAYMENT
+DATE (the Waiting metric), not the shipment ETD. A payment not yet due reads
+`Not due`; a file with no dated unpaid tranche reads `—`. The pill darkens as
+the band grows, and the column sorts by the underlying day count so the bands
+fall in order and undated rows sink.
+
+Added to BOTH pending lists (confirmed choice): Accounts Workspace → Pending
+(after Waiting, desktop table + mobile cards) and the Requests page → Pending
+tab for merchandisers/HoM. On the Requests page it is opt-in
+(`showPaymentDelay`) and switched on only for the Pending tab, since ageing
+means nothing on processed or cancelled files.
+
+`nextTentativeDate` moved from `lib/exportExcel.ts` into `lib/utils.ts`
+alongside the new `paymentDelayDays` / `paymentDelayBucket`, so the queue, the
+ageing bands, the Waiting badge and the Excel export all derive a file's age
+from one place. The day count now compares LOCAL calendar midnights rather
+than timestamps — parsing a bare `YYYY-MM-DD` as UTC read a day out in the
+early hours for anyone east of UTC.
+
+348 backend tests green; tsc clean; production build compiles. Frontend only.
