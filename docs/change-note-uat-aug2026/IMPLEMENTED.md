@@ -2052,3 +2052,33 @@ than timestamps — parsing a bare `YYYY-MM-DD` as UTC read a day out in the
 early hours for anyone east of UTC.
 
 348 backend tests green; tsc clean; production build compiles. Frontend only.
+
+## Projection lock becomes an opt-in switch, default OFF (9 Oct 2026)
+
+**Why:** the per-vertical lock shipped ON (7 Oct) and stopped management
+raising requests for verticals with no projection. It is now a feature
+switch, **off by default**, so nobody is blocked.
+
+* `projection_lock_enabled` in `system_config`. **No row = OFF**, so the
+  existing databases are unblocked by the deploy alone — no migration, no
+  data change.
+* `assert_vertical_open()` and `locked_vertical_ids()` return immediately
+  while the switch is off, so request creation passes through for every role
+  and the UI's locked-vertical banners disappear on their own (they key off
+  `locked_verticals`, which is then empty).
+* The daily reminder job respects it too: the "Verticals locked" notice is
+  skipped entirely while off, and the 25th→EOM reminder drops its "cannot
+  take new requests" sentence — it would be untrue.
+* `GET /projections/settings` (any role, so the UI knows) and
+  `PUT /projections/settings` (Super Admin). The switch is a card at the top
+  of the Projections page for Super Admins, with copy stating what each
+  position means.
+* `set_lock_enabled` generates the row id in Python rather than with
+  `gen_random_uuid()`, so the same statement runs on Postgres and on the
+  SQLite test database.
+
+Projections themselves are unchanged — still collected monthly, still
+reported on the dashboard. Only the blocking behaviour is now opt-in.
+`test_projections.py` gained `test_lock_is_off_by_default` and
+`test_lock_can_be_disarmed_again`; the two blocking tests now arm the switch
+first. 350 backend tests green; tsc clean; production build compiles.

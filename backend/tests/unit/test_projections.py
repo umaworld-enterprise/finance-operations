@@ -15,7 +15,9 @@ from app.core.exceptions import BusinessRuleError
 from app.models.enums import CurrencyCode, RequestStatus, UserRole
 from app.services.projection_service import (
     ProjectionService,
+    lock_enabled,
     next_period,
+    set_lock_enabled,
     window_open,
 )
 from tests.factories import (
@@ -119,19 +121,45 @@ async def test_merchandiser_is_held_to_next_month_inside_the_window(db_session):
 # ── Per-vertical lock ────────────────────────────────────────────────────────
 
 
-async def test_unprojected_vertical_is_locked_for_request_creation(db_session):
+async def test_lock_is_off_by_default(db_session):
+    """9 Oct 2026: the lock shipped ON and stopped management raising
+    requests. With no config row nobody is blocked."""
     _merch, _other, _admin, v1, _v2 = await _setup(db_session)
     svc = ProjectionService(db_session)
     today = date(2026, 10, 3)  # October started, nothing filed
 
+    assert await lock_enabled(db_session) is False
+    await svc.assert_vertical_open(v1.id, today=today)  # no raise
+    assert await svc.locked_vertical_ids(today) == set()
+
+
+async def test_unprojected_vertical_is_locked_once_armed(db_session):
+    _merch, _other, _admin, v1, _v2 = await _setup(db_session)
+    svc = ProjectionService(db_session)
+    today = date(2026, 10, 3)
+    await set_lock_enabled(db_session, True)
+
     with pytest.raises(BusinessRuleError, match=v1.name):
         await svc.assert_vertical_open(v1.id, today=today)
+
+
+async def test_lock_can_be_disarmed_again(db_session):
+    _merch, _other, _admin, v1, _v2 = await _setup(db_session)
+    svc = ProjectionService(db_session)
+    today = date(2026, 10, 3)
+    await set_lock_enabled(db_session, True)
+    with pytest.raises(BusinessRuleError):
+        await svc.assert_vertical_open(v1.id, today=today)
+
+    await set_lock_enabled(db_session, False)
+    await svc.assert_vertical_open(v1.id, today=today)  # no raise
 
 
 async def test_filing_the_projection_unlocks_the_vertical(db_session):
     merch, _other, admin, v1, _v2 = await _setup(db_session)
     svc = ProjectionService(db_session)
     today = date(2026, 10, 3)
+    await set_lock_enabled(db_session, True)
 
     # Super Admin can file for the current month — the post-deadline fix.
     await svc.submit(admin.id, UserRole.SUPER_ADMIN, 2026, 10, [_amounts(v1)], today=today)
@@ -143,6 +171,7 @@ async def test_lock_is_per_vertical_not_per_person(db_session):
     merch, _other, admin, v1, v2 = await _setup(db_session)
     svc = ProjectionService(db_session)
     today = date(2026, 10, 3)
+    await set_lock_enabled(db_session, True)
     await svc.submit(admin.id, UserRole.SUPER_ADMIN, 2026, 10, [_amounts(v1)], today=today)
 
     await svc.assert_vertical_open(v1.id, today=today)  # filled → open

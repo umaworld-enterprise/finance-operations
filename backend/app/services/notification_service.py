@@ -1454,6 +1454,7 @@ async def send_projection_reminders(session_factory: async_sessionmaker) -> int:
 
     from app.services.projection_service import (
         ProjectionService,
+        lock_enabled,
         next_period,
         window_open,
     )
@@ -1475,12 +1476,18 @@ async def send_projection_reminders(session_factory: async_sessionmaker) -> int:
                 days_left = calendar.monthrange(today.year, today.month)[1] - today.day
                 month_label = date_cls(t_year, t_month, 1).strftime("%B %Y")
                 when = "due TODAY" if days_left == 0 else f"{days_left} day(s) left"
+                armed = await lock_enabled(session)
                 message = {
                     "title": f"{month_label} projections pending — {when}",
                     "body": (
                         f"Still missing: {', '.join(v.name for v in missing)}. "
-                        "Any merchandiser can fill these. A vertical left unfilled "
-                        "cannot take new requests once the month starts."
+                        "Any merchandiser can fill these."
+                        + (
+                            " A vertical left unfilled cannot take new requests "
+                            "once the month starts."
+                            if armed
+                            else ""
+                        )
                     ),
                     "url": "/projections",
                     "attachment_url": None,
@@ -1490,6 +1497,8 @@ async def send_projection_reminders(session_factory: async_sessionmaker) -> int:
                 )
                 sent += len(merchandisers)
             else:
+                if not await lock_enabled(session):
+                    return 0  # nothing is locked, so there is nothing to warn about
                 locked = await svc.missing_verticals(today.year, today.month)
                 if not locked:
                     return 0

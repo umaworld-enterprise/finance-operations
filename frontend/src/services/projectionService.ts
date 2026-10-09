@@ -52,7 +52,25 @@ export interface ProjectionDashboardRow {
   actual_cny: number;
 }
 
+/** The per-vertical request lock (9 Oct 2026). Opt-in: off unless a Super
+ * Admin arms it, so a missing projection never blocks request creation. */
+export interface ProjectionLockSetting {
+  lock_enabled: boolean;
+}
+
 const projectionService = {
+  settings: async (): Promise<ProjectionLockSetting> => {
+    const { data } = await api.get<ProjectionLockSetting>("/projections/settings");
+    return data;
+  },
+
+  setLockEnabled: async (lockEnabled: boolean): Promise<ProjectionLockSetting> => {
+    const { data } = await api.put<ProjectionLockSetting>("/projections/settings", {
+      lock_enabled: lockEnabled,
+    });
+    return data;
+  },
+
   status: async (): Promise<ProjectionStatus> => {
     const { data } = await api.get<ProjectionStatus>("/projections/status");
     return data;
