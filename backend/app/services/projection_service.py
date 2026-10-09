@@ -21,7 +21,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -54,6 +54,50 @@ def month_bounds(year: int, month: int) -> tuple[date, date]:
     return date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
 
 
+# ── Feature switch: the per-vertical request lock (9 Oct 2026) ───────────────
+# The lock shipped ON and stopped management raising requests for verticals
+# with no projection. It is now OPT-IN and defaults to OFF: with no stored
+# config row, nobody is blocked and projections are collected for reporting
+# only. A Super Admin turns it on when the team is ready.
+LOCK_CONFIG_KEY = "projection_lock_enabled"
+
+
+async def lock_enabled(session: AsyncSession) -> bool:
+    """Is the per-vertical request lock switched on? Defaults to False."""
+    row = await session.execute(
+        text("SELECT config_value FROM system_config WHERE config_key = :key"),
+        {"key": LOCK_CONFIG_KEY},
+    )
+    val = row.scalar_one_or_none()
+    return str(val).strip().lower() in {"true", "1", "yes", "on"} if val is not None else False
+
+
+async def set_lock_enabled(session: AsyncSession, enabled: bool) -> None:
+    """Upsert the switch. Postgres and SQLite both support this ON CONFLICT."""
+    # The id is generated in Python rather than with gen_random_uuid() so the
+    # same statement runs on Postgres and on the SQLite test database.
+    import uuid as _uuid
+    from datetime import datetime as _dt, timezone as _tz
+
+    await session.execute(
+        text("""
+            INSERT INTO system_config (id, config_key, config_value, description, updated_at)
+            VALUES (:id, :key, :val,
+                    'Block new requests for verticals with no projection this month', :now)
+            ON CONFLICT (config_key) DO UPDATE
+              SET config_value = EXCLUDED.config_value,
+                  updated_at   = EXCLUDED.updated_at
+        """),
+        {
+            "id": str(_uuid.uuid4()),
+            "key": LOCK_CONFIG_KEY,
+            "val": "true" if enabled else "false",
+            "now": _dt.now(_tz.utc),
+        },
+    )
+    await session.flush()
+
+
 class ProjectionService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -84,6 +128,8 @@ class ProjectionService:
         """Verticals that cannot take a new request: the CURRENT month has
         started and their projection is still missing."""
         today = today or date.today()
+        if not await lock_enabled(self._session):
+            return set()
         return {v.id for v in await self.missing_verticals(today.year, today.month)}
 
     async def assert_vertical_open(
@@ -93,6 +139,8 @@ class ProjectionService:
         no projection for the current month. Applies to EVERY role (7 Oct
         2026): the vertical is locked, not the person."""
         if vertical_id is None:
+            return
+        if not await lock_enabled(self._session):
             return
         today = today or date.today()
         missing = await self.missing_verticals(today.year, today.month)
