@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # ---- build stage ----
-FROM node:20-slim AS builder
+FROM node:24-slim AS builder
 WORKDIR /app
 
 # NEXT_PUBLIC_* are compiled INTO the browser bundle, so they must be present at
@@ -23,7 +23,7 @@ COPY . .
 RUN npm run build
 
 # ---- runtime stage ----
-FROM node:20-slim AS runner
+FROM node:24-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
