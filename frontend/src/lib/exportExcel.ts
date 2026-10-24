@@ -20,6 +20,12 @@ function statusLabel(value: string): string {
   return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// Security exception (24 Oct 2026): npm's `xlsx` stops at 0.18.5, which carries
+// GHSA-4r6h-8v6p-xvw6 (prototype pollution) and GHSA-5pgg-2g8v-p4x9 (ReDoS).
+// Both are in SheetJS's file *reading*; this app only writes sheets it builds
+// itself, which the advisory states is unaffected. Before adding XLSX.read /
+// readFile (any import or upload of a spreadsheet), move to SheetJS >= 0.20.2
+// from https://cdn.sheetjs.com — the fixed builds are not published to npm.
 async function writeSheet(data: Record<string, unknown>[], filename: string, sheet: string) {
   const XLSX = await import("xlsx");
   const ws = XLSX.utils.json_to_sheet(data);
