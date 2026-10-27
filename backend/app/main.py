@@ -215,6 +215,10 @@ def create_app() -> FastAPI:
         docs_url="/docs" if not settings.is_production else None,
         redoc_url="/redoc" if not settings.is_production else None,
         lifespan=lifespan,
+        # fastapi >= 0.132 refuses a JSON body sent without a Content-Type
+        # header (422). Keep accepting it, as 0.115 did, so scripted callers
+        # that omit the header keep working.
+        strict_content_type=False,
     )
 
     app.state.limiter = limiter

@@ -34,7 +34,7 @@ def _ip(req: Request) -> str | None:
 async def google_login(
     request: Request,
     data: GoogleLoginRequest,
-    db: Annotated[AsyncSession, Depends(get_db_session)],
+    db: Annotated[AsyncSession, Depends(get_db_session, scope="function")],
 ) -> LoginResponse:
     """Exchange a Google sign-in auth code for an app-issued JWT.
 
@@ -75,7 +75,7 @@ async def google_login(
 async def get_me(
     request: Request,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db_session)],
+    db: Annotated[AsyncSession, Depends(get_db_session, scope="function")],
 ) -> CurrentUserResponse:
     """Return the current authenticated user's profile."""
     svc = UserService(db)
@@ -103,7 +103,7 @@ async def update_preferences(
     request: Request,
     data: PreferencesUpdate,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db_session)],
+    db: Annotated[AsyncSession, Depends(get_db_session, scope="function")],
 ) -> CurrentUserResponse:
     """Update display preferences — unlike /profile, touches nothing else."""
     from app.repositories.user_repo import UserRepository
@@ -134,7 +134,7 @@ async def complete_profile(
     request: Request,
     data: ProfileUpdate,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db_session)],
+    db: Annotated[AsyncSession, Depends(get_db_session, scope="function")],
 ) -> CurrentUserResponse:
     """Complete onboarding profile — sets full_name, secondary_email, department."""
     from app.repositories.user_repo import UserRepository

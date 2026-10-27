@@ -26,7 +26,7 @@ from app.services.bi_service import run_bi_query
 router = APIRouter(prefix="/ai", tags=["ai"])
 settings = get_settings()
 
-DB = Annotated[AsyncSession, Depends(get_db_session)]
+DB = Annotated[AsyncSession, Depends(get_db_session, scope="function")]
 
 
 # ── Permission dependency ─────────────────────────────────────────────────────

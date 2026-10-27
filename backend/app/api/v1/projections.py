@@ -22,7 +22,7 @@ from app.services.projection_service import ProjectionService
 
 router = APIRouter(prefix="/projections", tags=["projections"])
 
-DB = Annotated[AsyncSession, Depends(get_db_session)]
+DB = Annotated[AsyncSession, Depends(get_db_session, scope="function")]
 User = Annotated[CurrentUser, Depends(get_current_user)]
 
 
