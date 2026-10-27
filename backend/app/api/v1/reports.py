@@ -12,7 +12,7 @@ from app.services.report_service import ReportService
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
-DB = Annotated[AsyncSession, Depends(get_db_session)]
+DB = Annotated[AsyncSession, Depends(get_db_session, scope="function")]
 User = Annotated[CurrentUser, Depends(get_current_user)]
 
 _EXTENSIONS = {"excel": "xlsx", "csv": "csv", "pdf": "pdf"}

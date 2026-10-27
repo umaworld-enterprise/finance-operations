@@ -48,7 +48,7 @@ from app.services.tranche_service import _MERCHANDISER_EDITABLE_STATUSES, Tranch
 
 router = APIRouter(prefix="/requests/{request_id}/tranches", tags=["tranches"])
 
-DB = Annotated[AsyncSession, Depends(get_db_session)]
+DB = Annotated[AsyncSession, Depends(get_db_session, scope="function")]
 User = Annotated[CurrentUser, Depends(get_current_user)]
 
 
