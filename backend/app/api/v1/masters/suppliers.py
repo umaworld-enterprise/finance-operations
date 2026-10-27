@@ -30,7 +30,7 @@ from app.services.audit_service import AuditService
 
 router = APIRouter(prefix="/masters/suppliers", tags=["masters-suppliers"])
 
-DB = Annotated[AsyncSession, Depends(get_db_session)]
+DB = Annotated[AsyncSession, Depends(get_db_session, scope="function")]
 User = Annotated[CurrentUser, Depends(get_current_user)]
 FinanceAdmin = Annotated[CurrentUser, RequireFinanceAdmin]
 

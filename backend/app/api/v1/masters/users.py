@@ -13,7 +13,7 @@ from app.services.user_service import UserService
 
 router = APIRouter(prefix="/masters/users", tags=["masters-users"])
 
-DB = Annotated[AsyncSession, Depends(get_db_session)]
+DB = Annotated[AsyncSession, Depends(get_db_session, scope="function")]
 SuperAdmin = Annotated[CurrentUser, RequireSuperAdmin]
 AnyUser = Annotated[CurrentUser, Depends(get_current_user)]
 

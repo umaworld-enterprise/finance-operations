@@ -25,7 +25,7 @@ from app.services.analytics_service import (
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
-DB = Annotated[AsyncSession, Depends(get_db_session)]
+DB = Annotated[AsyncSession, Depends(get_db_session, scope="function")]
 User = Annotated[CurrentUser, Depends(get_current_user)]
 
 

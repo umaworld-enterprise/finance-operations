@@ -111,7 +111,7 @@ async def _get_or_create_dev_user(db: AsyncSession) -> CurrentUser:
 
 async def get_current_user(
     authorization: Annotated[str | None, Header()] = None,
-    db: Annotated[AsyncSession, Depends(get_db_session)] = None,
+    db: Annotated[AsyncSession, Depends(get_db_session, scope="function")] = None,
 ) -> CurrentUser:
     """Resolve app-issued JWT → application user record. Bypassed in development."""
     settings = get_settings()
