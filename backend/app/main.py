@@ -67,6 +67,89 @@ class JSONErrorEnvelopeMiddleware:
             await response(scope, receive, send)
 
 
+MAX_REQUEST_BODY_BYTES = 100 * 1024 * 1024
+
+
+class BodySizeLimitMiddleware:
+    """Refuse request bodies over MAX_REQUEST_BODY_BYTES with a 413 (27 Oct 2026, security).
+
+    FastAPI parses a route's form body before it resolves dependencies, so on
+    the upload endpoints an anonymous caller's file was received in full and
+    spooled to disk before the auth check answered 401 — with no size limit
+    here or at the proxy. This runs before any parsing or auth:
+
+    - a declared Content-Length over the limit is refused at once, without
+      reading the body;
+    - a body without one (chunked) is counted as it arrives and cut off with
+      a 413 at the limit; the app then sees a disconnect and its own reply is
+      dropped.
+
+    The per-file rules still apply after auth (TT copy 10 MB, bank PDF 15 MB);
+    this is only the ceiling. Sits inside CORS and NoStoreCache so the 413
+    carries their headers, outside SlowAPI and the app so it runs first.
+    """
+
+    def __init__(self, app, max_body_bytes: int = MAX_REQUEST_BODY_BYTES) -> None:  # type: ignore[no-untyped-def]
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    async def _refuse(self, scope, receive, send) -> None:  # type: ignore[no-untyped-def]
+        limit_mb = self.max_body_bytes // (1024 * 1024)
+        response = JSONResponse(
+            status_code=413,
+            content={
+                "error_code": "PAYLOAD_TOO_LARGE",
+                "message": f"The request is larger than the {limit_mb} MB limit.",
+            },
+            headers={"Connection": "close"},
+        )
+        await response(scope, receive, send)
+
+    async def __call__(self, scope, receive, send) -> None:  # type: ignore[no-untyped-def]
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        for name, value in scope.get("headers", []):
+            if name == b"content-length":
+                try:
+                    declared = int(value)
+                except ValueError:
+                    break  # malformed — the server rejects it before we get here
+                if declared > self.max_body_bytes:
+                    await self._refuse(scope, receive, send)
+                    return
+                break
+
+        received = 0
+        cut_off = False
+        response_started = False
+
+        async def limited_receive():  # type: ignore[no-untyped-def]
+            nonlocal received, cut_off
+            if cut_off:
+                return {"type": "http.disconnect"}
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_body_bytes:
+                    cut_off = True
+                    if not response_started:
+                        await self._refuse(scope, receive, send)
+                    return {"type": "http.disconnect"}
+            return message
+
+        async def guarded_send(message) -> None:  # type: ignore[no-untyped-def]
+            nonlocal response_started
+            if cut_off:
+                return  # the 413 has been sent; drop the app's own reply
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        await self.app(scope, limited_receive, guarded_send)
+
+
 class NoStoreCacheMiddleware:
     """Stamp every API response as uncacheable (23 Sep 2026, executive bug:
     "requests are only visible after a refresh").
@@ -230,6 +313,9 @@ def create_app() -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(JSONErrorEnvelopeMiddleware)
     app.add_middleware(SlowAPIMiddleware)
+    # Outside SlowAPI and the app, so an oversized body is refused before any
+    # parsing or auth; inside NoStoreCache and CORS, so the 413 gets their headers.
+    app.add_middleware(BodySizeLimitMiddleware)
     # Added after SlowAPI so it sits OUTSIDE it — rate-limit 429s get the
     # no-store headers too — and before CORS so CORS stays outermost.
     app.add_middleware(NoStoreCacheMiddleware)

@@ -12,8 +12,9 @@ bad request; before, it was parsed in full and only then answered 401.
 Both tests run with real authentication: the suite's default ``app_env`` is
 "development", where ``get_current_user`` signs everyone in as a dev user.
 
-Not covered, and still open: multipart FILE parts have no size cap before
-auth, so an anonymous upload is still spooled to disk before the 401.
+File parts are not limited here: the whole request body is capped at
+100 MB by BodySizeLimitMiddleware (test_body_size_limit.py), and an
+anonymous upload under that is still spooled to disk before the 401.
 """
 
 import pytest
