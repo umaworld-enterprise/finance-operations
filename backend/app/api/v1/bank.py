@@ -27,7 +27,7 @@ from app.services.bank_statement_service import MAX_PAGES, extract_statement
 
 router = APIRouter(prefix="/bank/statements", tags=["bank"])
 
-DB = Annotated[AsyncSession, Depends(get_db_session)]
+DB = Annotated[AsyncSession, Depends(get_db_session, scope="function")]
 BankUser = Annotated[CurrentUser, RequireAccounts]
 
 _MAX_PDF_BYTES = 15 * 1024 * 1024

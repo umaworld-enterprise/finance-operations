@@ -18,7 +18,7 @@ from app.services.audit_service import AuditService
 # longer owned by a merchandiser — any merchandiser may fill any vertical.
 router = APIRouter(prefix="/masters/verticals", tags=["masters-verticals"])
 
-DB = Annotated[AsyncSession, Depends(get_db_session)]
+DB = Annotated[AsyncSession, Depends(get_db_session, scope="function")]
 User = Annotated[CurrentUser, Depends(get_current_user)]
 FinanceAdmin = Annotated[CurrentUser, RequireFinanceAdmin]
 

@@ -18,7 +18,7 @@ from app.services.audit_service import AuditService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-DB = Annotated[AsyncSession, Depends(get_db_session)]
+DB = Annotated[AsyncSession, Depends(get_db_session, scope="function")]
 SuperAdmin = Annotated[CurrentUser, RequireSuperAdmin]
 FinanceAdmin = Annotated[CurrentUser, RequireFinanceAdmin]
 
