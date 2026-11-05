@@ -305,6 +305,33 @@ async def reject_tranche(
     return _tranche_response(tranche, req.total_supplier_invoice_amount)
 
 
+@router.post("/{tranche_id}/cancel", response_model=TrancheResponse)
+async def cancel_tranche(
+    request_id: UUID,
+    tranche_id: UUID,
+    body: TrancheRejectRequest,
+    current_user: User,
+    request: Request,
+    db: DB,
+    background_tasks: BackgroundTasks,
+) -> TrancheResponse:
+    """Merchandiser cancels an unpaid tranche with a mandatory reason
+    (5 Nov 2026). The row stays on the file as a cancelled record, its
+    amount stops counting toward the request total, and Accounts are
+    notified so the payment queue stays truthful."""
+    svc = TrancheService(db)
+    tranche = await svc.cancel_tranche(
+        request_id, tranche_id, body.reason, current_user.id, current_user.role,
+        ip_address=_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    req = await DepositRequestRepository(db).get_for_validation(request_id)
+    # deposit_amount changed — keep the analytics snapshot in step.
+    background_tasks.add_task(seed_snapshot_for_request, request_id)
+    background_tasks.add_task(notify_tranche_removed, request_id, tranche.label)
+    return _tranche_response(tranche, req.total_supplier_invoice_amount)
+
+
 @router.post("/{tranche_id}/tt-copy", response_model=TrancheResponse)
 async def upload_tranche_tt_copy(
     request_id: UUID,

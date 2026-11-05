@@ -368,7 +368,8 @@ class DepositRequestService:
                 live = [
                     t
                     for t in await svc_t.list_for_request(request_id)
-                    if t.status != TrancheStatus.REJECTED
+                    if t.status
+                    not in (TrancheStatus.REJECTED, TrancheStatus.CANCELLED)
                 ]
                 if any(
                     t.status == TrancheStatus.PAID

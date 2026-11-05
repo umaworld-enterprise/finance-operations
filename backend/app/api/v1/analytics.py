@@ -224,6 +224,42 @@ async def get_by_customer(
     )
 
 
+@router.get("/monthly-requests")
+async def get_monthly_requests_raised(
+    current_user: User, db: DB,
+    currency: str = Query("USD", pattern="^[A-Z]{3}$"),
+    months: int = Query(12, ge=3, le=36),
+) -> list[dict]:
+    """Value of requests raised per month in one currency, month over month,
+    with a trailing 3-month average (5 Nov 2026). Sits on the Overview tab,
+    which is ungated like the rest of that tab."""
+    svc = AnalyticsService(db)
+    return await svc.get_monthly_requests_raised(currency=currency, months=months)
+
+
+@router.get("/ageing")
+async def get_ageing(
+    current_user: User, db: DB,
+    basis: str = Query("shipment", pattern="^(shipment|payment)$"),
+    cut: str = Query("currency", pattern="^(currency|customer)$"),
+    date_from: str | None = Query(None), date_to: str | None = Query(None),
+    staff_id: UUID | None = Query(None),
+    vertical_id: UUID | None = Query(None),
+    customer_id: UUID | None = Query(None),
+) -> dict:
+    """Ageing grid (5 Nov 2026): deposit value by age band as a currency
+    matrix. `cut` picks the rows — delay bands or customers; `basis` picks
+    what ages the money — shipment delay (paid, unshipped, past ETD) or
+    payment delay (unpaid tranches past their tentative date)."""
+    await _check_section_access("ageing", current_user, db)
+    svc = AnalyticsService(db)
+    return await svc.get_ageing(
+        basis=basis, cut=cut,
+        date_from=_parse_d(date_from), date_to=_parse_d(date_to),
+        staff_id=staff_id, vertical_id=vertical_id, customer_id=customer_id,
+    )
+
+
 @router.get("/outstanding")
 async def get_outstanding_tracker(
     current_user: User, db: DB,

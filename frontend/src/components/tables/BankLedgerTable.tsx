@@ -6,7 +6,7 @@
 // Voucher No., Rate, Credit and BALANCE are maintained manually in Excel
 // (no such data in the system) and render empty here, like the export.
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BookOpen } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -44,6 +44,83 @@ function num(value: number | null): string {
     : value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Column widths the user drags are remembered per person, per device
+// (5 Nov 2026, executive request). localStorage rather than the server:
+// a layout preference should not travel between colleagues.
+const WIDTH_STORAGE_KEY = "bank-ledger-column-widths";
+const MIN_COL_WIDTH = 70;
+
+function useColumnWidths() {
+  const [widths, setWidths] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(WIDTH_STORAGE_KEY);
+      if (raw) setWidths(JSON.parse(raw));
+    } catch {
+      // A blocked or corrupt store just means default widths.
+    }
+  }, []);
+
+  const persist = useCallback((next: Record<string, number>) => {
+    setWidths(next);
+    try {
+      localStorage.setItem(WIDTH_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Non-fatal: the drag still applies for this session.
+    }
+  }, []);
+
+  const reset = useCallback(() => {
+    setWidths({});
+    try { localStorage.removeItem(WIDTH_STORAGE_KEY); } catch {}
+  }, []);
+
+  return { widths, persist, reset };
+}
+
+/** The drag handle living on a header's right edge. */
+function ColumnResizer({
+  colKey,
+  widths,
+  persist,
+}: {
+  colKey: string;
+  widths: Record<string, number>;
+  persist: (next: Record<string, number>) => void;
+}) {
+  const start = useRef<{ x: number; w: number } | null>(null);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLSpanElement>) => {
+    e.preventDefault();
+    e.stopPropagation();                     // never triggers the header sort
+    const th = (e.currentTarget.closest("th") as HTMLElement | null);
+    start.current = { x: e.clientX, w: widths[colKey] ?? th?.offsetWidth ?? 120 };
+    const onMove = (ev: PointerEvent) => {
+      if (!start.current) return;
+      const next = Math.max(MIN_COL_WIDTH, start.current.w + (ev.clientX - start.current.x));
+      persist({ ...widths, [colKey]: next });
+    };
+    const onUp = () => {
+      start.current = null;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  return (
+    <span
+      role="separator"
+      aria-label="Resize column"
+      onPointerDown={onPointerDown}
+      onClick={(e) => e.stopPropagation()}
+      className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none hover:bg-background/40"
+    />
+  );
+}
+
 export function BankLedgerTable({
   entries,
   loading,
@@ -55,6 +132,10 @@ export function BankLedgerTable({
   // Column-header sorting (16 Sep 2026) — applied to the WHOLE ledger before
   // pagination, so asc/desc runs across every page.
   const colSort = useColumnSortState();
+  // Drag-to-resize column widths, remembered per user (5 Nov 2026).
+  const { widths, persist, reset } = useColumnWidths();
+  const w = (key: string) => (widths[key] ? { width: widths[key] } : undefined);
+  const hasCustomWidths = Object.keys(widths).length > 0;
   const sortedEntries = sortByColumn(entries, ACCESSORS, colSort.sort);
   const totalPages = Math.max(1, Math.ceil(sortedEntries.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -76,8 +157,18 @@ export function BankLedgerTable({
         <p className="text-xs text-muted-foreground mt-0.5">
           One row per UNPAID tranche (amounts still to be paid), oldest first — the amount sits
           in Debit, dated by the request date. EURO/CNY, Rate, Credit and BALANCE are maintained
-          in Excel and stay empty here.
+          in Excel and stay empty here. Drag any column edge to resize \u2014 your widths
+          are remembered on this device.
         </p>
+        {hasCustomWidths && (
+          <button
+            type="button"
+            onClick={reset}
+            className="mt-2 text-xs text-primary hover:underline underline-offset-2"
+          >
+            Reset column widths
+          </button>
+        )}
       </div>
       {!loading && entries.length === 0 ? (
         <div className="p-6">
@@ -90,26 +181,54 @@ export function BankLedgerTable({
       ) : (
         <>
           <div className="overflow-x-auto">
-            <Table>
+            <Table style={hasCustomWidths ? { tableLayout: "fixed" } : undefined}>
               <TableHeader>
                 {/* Dark header band, like the executives' Excel ledger. */}
                 <TableRow className="bg-foreground hover:bg-foreground">
                   {/* Asc/desc on every data-bearing header (16 Sep 2026). */}
-                  <SortableHead label="Date" sortKey="date" state={colSort} className="text-background whitespace-nowrap" />
-                  <SortableHead label="Supplier" sortKey="supplier" state={colSort} className="text-background" />
-                  <SortableHead label="Supplier Proforma Invoice #" sortKey="proforma" state={colSort} className="text-background whitespace-nowrap" />
-                  <SortableHead label="File Nos." sortKey="file_nos" state={colSort} className="text-background whitespace-nowrap" />
+                  <SortableHead label="Date" sortKey="date" state={colSort} className="text-background whitespace-nowrap" style={w("date")}>
+                    <ColumnResizer colKey="date" widths={widths} persist={persist} />
+                  </SortableHead>
+                  <SortableHead label="Supplier" sortKey="supplier" state={colSort} className="text-background" style={w("supplier")}>
+                    <ColumnResizer colKey="supplier" widths={widths} persist={persist} />
+                  </SortableHead>
+                  <SortableHead label="Supplier Proforma Invoice #" sortKey="proforma" state={colSort} className="text-background whitespace-nowrap" style={w("proforma")}>
+                    <ColumnResizer colKey="proforma" widths={widths} persist={persist} />
+                  </SortableHead>
+                  <SortableHead label="File Nos." sortKey="file_nos" state={colSort} className="text-background whitespace-nowrap" style={w("file_nos")}>
+                    <ColumnResizer colKey="file_nos" widths={widths} persist={persist} />
+                  </SortableHead>
                   {/* Staff (23 Sep 2026) — the merchandiser who raised the
                       file; data filled in 29 Sep 2026. */}
-                  <SortableHead label="Staff" sortKey="staff" state={colSort} className="text-background" />
-                  <SortableHead label="Customer" sortKey="customer" state={colSort} className="text-background" />
-                  <SortableHead label="Curr" sortKey="curr" state={colSort} className="text-background" />
+                  <SortableHead label="Staff" sortKey="staff" state={colSort} className="text-background" style={w("staff")}>
+                    <ColumnResizer colKey="staff" widths={widths} persist={persist} />
+                  </SortableHead>
+                  <SortableHead label="Customer" sortKey="customer" state={colSort} className="text-background" style={w("customer")}>
+                    <ColumnResizer colKey="customer" widths={widths} persist={persist} />
+                  </SortableHead>
+                  <SortableHead label="Curr" sortKey="curr" state={colSort} className="text-background" style={w("curr")}>
+                    <ColumnResizer colKey="curr" widths={widths} persist={persist} />
+                  </SortableHead>
                   {/* Kept empty for now (client decision, 4 Sep 2026). */}
-                  <TableHead className="text-background text-right whitespace-nowrap">EURO/CNY</TableHead>
-                  <TableHead className="text-background text-right">Rate</TableHead>
-                  <SortableHead label="Debit" sortKey="debit" state={colSort} align="right" className="text-background text-right" />
-                  <TableHead className="text-background text-right">Credit</TableHead>
-                  <TableHead className="text-background text-right">BALANCE</TableHead>
+                  <TableHead className="text-background text-right whitespace-nowrap relative" style={w("euro_cny")}>
+                    EURO/CNY
+                    <ColumnResizer colKey="euro_cny" widths={widths} persist={persist} />
+                  </TableHead>
+                  <TableHead className="text-background text-right relative" style={w("rate")}>
+                    Rate
+                    <ColumnResizer colKey="rate" widths={widths} persist={persist} />
+                  </TableHead>
+                  <SortableHead label="Debit" sortKey="debit" state={colSort} align="right" className="text-background text-right" style={w("debit")}>
+                    <ColumnResizer colKey="debit" widths={widths} persist={persist} />
+                  </SortableHead>
+                  <TableHead className="text-background text-right relative" style={w("credit")}>
+                    Credit
+                    <ColumnResizer colKey="credit" widths={widths} persist={persist} />
+                  </TableHead>
+                  <TableHead className="text-background text-right relative" style={w("balance")}>
+                    BALANCE
+                    <ColumnResizer colKey="balance" widths={widths} persist={persist} />
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

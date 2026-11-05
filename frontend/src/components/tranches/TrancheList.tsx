@@ -2,12 +2,13 @@
 
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, Circle, ExternalLink, Lock, Pencil, Plus, Trash2 } from "lucide-react";
+import { CheckCircle2, Circle, ExternalLink, Lock, Pencil, Plus, Trash2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DecisionDialog } from "@/components/hom/DecisionDialog";
 import {
   useAddTranche,
+  useCancelTranche,
   useDeleteTranche,
   useDeleteTrancheTtCopy,
   usePayTranche,
@@ -210,6 +211,13 @@ function TrancheStatusPill({ status }: { status: PaymentTranche["status"] }) {
       </span>
     );
   }
+  if (status === "cancelled") {
+    return (
+      <span className="inline-flex items-center text-xs font-medium text-muted-foreground bg-muted border border-border px-2 py-0.5 rounded-full">
+        Cancelled
+      </span>
+    );
+  }
   if (status === "rejected") {
     return (
       <span className="inline-flex items-center text-xs font-medium text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
@@ -238,6 +246,8 @@ export function TrancheList({
   const uploadTt = useUploadTrancheTtCopy(requestId);
   const addTranche = useAddTranche(requestId);
   const deleteTranche = useDeleteTranche(requestId);
+  // Merchandiser cancellation (5 Nov 2026) — keeps the row, needs a reason.
+  const cancelTranche = useCancelTranche(requestId);
   const payTranche = usePayTranche(requestId);
   const rejectTranche = useRejectTranche(requestId);
   const releaseTranche = useReleaseTranche(requestId);
@@ -245,6 +255,7 @@ export function TrancheList({
   const deleteTtCopy = useDeleteTrancheTtCopy(requestId);
   const [payConfirmId, setPayConfirmId] = useState<string | null>(null);
   const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
+  const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
   const [releaseConfirmId, setReleaseConfirmId] = useState<string | null>(null);
   // Delete TT copy confirmation (4 Sep 2026).
   const [deleteTtConfirmId, setDeleteTtConfirmId] = useState<string | null>(null);
@@ -349,6 +360,18 @@ export function TrancheList({
       toast.success(`${t.label} deleted — the Accounts team has been notified.`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to delete tranche.");
+    }
+  };
+
+  const doCancel = async (reason: string) => {
+    if (!cancelTargetId) return;
+    const t = tranches.find((x) => x.id === cancelTargetId);
+    try {
+      await cancelTranche.mutateAsync({ trancheId: cancelTargetId, reason });
+      toast.success(`${t?.label ?? "Tranche"} cancelled — the Accounts team has been notified.`);
+      setCancelTargetId(null);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to cancel tranche.");
     }
   };
 
@@ -709,6 +732,22 @@ export function TrancheList({
                 </div>
               )}
 
+              {/* Cancel (5 Nov 2026) stands apart from Delete: it keeps the
+                  tranche on the file as a cancelled record with a reason, so
+                  it still works once Accounts have started on it and on the
+                  file's last remaining tranche. */}
+              {mode === "merchandiser" && t.status === "unpaid" && !isEditing && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCancelTargetId(t.id)}
+                  disabled={cancelTranche.isPending}
+                  className="text-destructive hover:text-destructive"
+                >
+                  <XCircle className="h-3.5 w-3.5 mr-1.5" /> Cancel tranche
+                </Button>
+              )}
+
               {/* Accounts: an unreleased tranche is not theirs to act on yet
                   (19 Aug 2026) — the payment form appears only once the
                   merchandiser releases it. The backend refuses pay anyway. */}
@@ -916,6 +955,18 @@ export function TrancheList({
         description="The payment details you filled will be saved and the tranche marked paid in one step. The merchandiser will be notified and the tranche will be locked against edits. Paying the final unpaid tranche completes the request and locks the record."
         confirmLabel="Yes, mark paid"
         onConfirm={() => payConfirmId && doPay(payConfirmId)}
+      />
+
+      <DecisionDialog
+        open={cancelTargetId !== null}
+        title="Cancel Tranche"
+        description="The tranche stays on the file as a cancelled record and its amount stops counting toward the request total, so you can add a replacement. The Accounts team will be notified with your reason."
+        placeholder="Reason for cancelling (e.g. supplier withdrew the shipment)"
+        confirmLabel="Confirm Cancel"
+        destructive
+        busy={cancelTranche.isPending}
+        onClose={() => setCancelTargetId(null)}
+        onConfirm={doCancel}
       />
 
       <DecisionDialog

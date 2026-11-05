@@ -99,6 +99,47 @@ async def supplier_report(
     )
 
 
+@router.get("/pending-payments")
+async def pending_payments_report(
+    current_user: User,
+    db: DB,
+    fmt: str = Depends(_fmt),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+) -> Response:
+    """Every column the Accounts Pending tab shows, with per-tranche raised
+    dates and a tranche-level ageing band (5 Nov 2026)."""
+    svc = ReportService(db)
+    data, content_type = await svc.pending_payments_report(fmt, date_from=date_from, date_to=date_to)
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="pending-payments.{_EXTENSIONS[fmt]}"'},
+    )
+
+
+@router.get("/ageing")
+async def ageing_report(
+    current_user: User,
+    db: DB,
+    fmt: str = Depends(_fmt),
+    basis: str = Query("shipment", pattern="^(shipment|payment)$"),
+    cut: str = Query("currency", pattern="^(currency|customer)$"),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+) -> Response:
+    """The Analytics Ageing grid as a download (5 Nov 2026)."""
+    svc = ReportService(db)
+    data, content_type = await svc.ageing_report(
+        fmt, basis=basis, cut=cut, date_from=date_from, date_to=date_to
+    )
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="ageing-{basis}-{cut}.{_EXTENSIONS[fmt]}"'},
+    )
+
+
 @router.get("/delays")
 async def delay_report(
     current_user: User,

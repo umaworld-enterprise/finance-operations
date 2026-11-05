@@ -2,18 +2,32 @@ import { type NextRequest, NextResponse } from "next/server";
 
 const AUTH_COOKIE_NAME = "fo_token";
 
-/** Cheap local check: token present and its `exp` claim not in the past.
- *  No signature verification here — that happens in the backend on every API
- *  call. The middleware only needs an "is there a plausible session" gate. */
+// A browser clock running slightly ahead of the server made freshly issued
+// tokens look already expired here, bouncing the user straight back to
+// /login after a successful sign-in (5 Nov 2026).
+const CLOCK_SKEW_MS = 2 * 60 * 1000;
+
+/** Cheap local check: is there a plausible session?
+ *
+ *  No signature verification — the backend authorises every API call and is
+ *  the only authority. This gate therefore errs towards LETTING THROUGH: a
+ *  cookie that is present but unreadable means the API will answer 401 and
+ *  the app will clear it, which is far better than a login loop caused by a
+ *  parsing quirk. Only an absent cookie, or one demonstrably expired beyond
+ *  the skew allowance, is turned away. */
 function hasLiveSession(request: NextRequest): boolean {
   const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
   if (!token) return false;
   try {
-    const payloadB64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    const payload = JSON.parse(atob(payloadB64));
-    return typeof payload.exp === "number" && payload.exp * 1000 > Date.now();
+    const raw = token.split(".")[1];
+    if (!raw) return true;                       // not a JWT we can read — let the API judge
+    // base64url → base64, restoring the padding atob needs.
+    const b64 = raw.replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(b64.padEnd(Math.ceil(b64.length / 4) * 4, "=")));
+    if (typeof payload.exp !== "number") return true;
+    return payload.exp * 1000 + CLOCK_SKEW_MS > Date.now();
   } catch {
-    return false;
+    return true;                                  // unreadable ≠ unauthenticated
   }
 }
 

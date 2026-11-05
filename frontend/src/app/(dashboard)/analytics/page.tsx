@@ -327,6 +327,69 @@ function useOutstandingTracker(enabled: boolean, groupBy: string, dateFrom?: str
   });
 }
 
+// Ageing grid (5 Nov 2026): deposit value by age band as a currency matrix.
+interface AgeingGrid {
+  basis: string;
+  cut: string;
+  currencies: string[];
+  rows: { label: string; amounts: Record<string, number> }[];
+  totals: Record<string, number>;
+}
+
+function useAgeing(
+  enabled: boolean,
+  basis: string,
+  cut: string,
+  filters: TabFilters,
+) {
+  return useQuery<AgeingGrid>({
+    queryKey: ["analytics-ageing", basis, cut, filters],
+    queryFn: async () => {
+      const r = await api.get(
+        `/analytics/ageing${buildQs({
+          basis,
+          cut,
+          date_from: filters.dateFrom,
+          date_to: filters.dateTo,
+          staff_id: filters.staffId,
+          vertical_id: filters.verticalId,
+          customer_id: filters.customerId,
+        })}`,
+      );
+      return r.data;
+    },
+    enabled,
+    staleTime: ANALYTICS_STALE,
+    gcTime: ANALYTICS_GC,
+    placeholderData: keepPreviousData,
+  });
+}
+
+// Requests raised per month in one currency, with a 3-month average
+// (5 Nov 2026, executive request).
+interface MonthlyRaisedPoint {
+  label: string;
+  currency: string;
+  total: number;
+  requests: number;
+  avg_3m: number | null;
+  mom_change: number | null;
+  mom_pct: number | null;
+}
+
+function useMonthlyRequestsRaised(currency: string, months = 12) {
+  return useQuery<MonthlyRaisedPoint[]>({
+    queryKey: ["analytics-monthly-requests", currency, months],
+    queryFn: async () => {
+      const r = await api.get(`/analytics/monthly-requests?currency=${currency}&months=${months}`);
+      return r.data;
+    },
+    staleTime: ANALYTICS_STALE,
+    gcTime: ANALYTICS_GC,
+    placeholderData: keepPreviousData,
+  });
+}
+
 function useMonthlyTrends(year: number) {
   return useQuery<MonthlyTrendPoint[]>({
     queryKey: ["analytics-monthly-trends", year],
@@ -348,6 +411,8 @@ const ALL_TABS = [
   { key: "by_vertical",     label: "By Vertical",     permKey: "by_vertical" },
   { key: "by_customer",     label: "By Customer",     permKey: "by_customer" },
   { key: "outstanding_tracker", label: "Outstanding", permKey: "outstanding_tracker" },
+  // Ageing grid (5 Nov 2026) — deposit value by age band, currency columns.
+  { key: "ageing",          label: "Ageing",          permKey: "ageing" },
   // Weekly Deposit Tracker (Aug 2026, item 4.1) — same permission section as
   // Outstanding: identical data domain, different cut.
   { key: "weekly_tracker",  label: "Weekly Tracker",  permKey: "outstanding_tracker" },
@@ -804,6 +869,226 @@ function ByCustomerTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: strin
                     <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{fmtCurrency(row.notional_eur ?? 0, "EUR")}</TableCell>
                   </TableRow>
                 ))}
+            </TableBody>
+          </Table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ── Requests raised, month over month (5 Nov 2026) ──────────────────────────
+
+function RequestsRaisedCard() {
+  const [currency, setCurrency] = useState("USD");
+  const { data = [], isLoading } = useMonthlyRequestsRaised(currency, 12);
+  const latest = data[data.length - 1];
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="px-6 py-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-foreground text-sm">
+            Requests Raised — month on month
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Value raised each month, with the trailing 3-month average. Cancelled and
+            rejected files are excluded.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {latest && (
+            <span className="text-xs text-muted-foreground">
+              This month:{" "}
+              <span className="font-semibold text-foreground tabular-nums">
+                {fmtCurrency(latest.total, currency)}
+              </span>
+            </span>
+          )}
+          <select
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value)}
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            {["USD", "CNY", "EUR"].map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Month</TableHead>
+              <TableHead className="text-right">Requests</TableHead>
+              <TableHead className="text-right">Raised ({currency})</TableHead>
+              <TableHead className="text-right">vs last month</TableHead>
+              <TableHead className="text-right">3-month average</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? <TableSkeleton rows={6} cols={5} />
+              : data.map((p) => (
+                <TableRow key={p.label}>
+                  <TableCell className="font-medium text-sm whitespace-nowrap">{p.label}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{p.requests || "—"}</TableCell>
+                  <TableCell className="text-right tabular-nums font-semibold">
+                    {p.total ? fmtCurrency(p.total, currency) : "—"}
+                  </TableCell>
+                  <TableCell className={cn(
+                    "text-right tabular-nums text-xs",
+                    p.mom_pct == null ? "text-muted-foreground"
+                      : p.mom_pct >= 0 ? "text-emerald-700" : "text-red-700",
+                  )}>
+                    {p.mom_pct == null ? "—" : `${p.mom_pct > 0 ? "+" : ""}${p.mom_pct}%`}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {/* Blank until three whole months exist — a partial
+                        window would read as a dip that never happened. */}
+                    {p.avg_3m == null ? "—" : fmtCurrency(p.avg_3m, currency)}
+                  </TableCell>
+                </TableRow>
+              ))}
+          </TableBody>
+        </Table>
+      </div>
+    </Card>
+  );
+}
+
+// ── Ageing (5 Nov 2026, executive request) ───────────────────────────────────
+// One grid, two cuts and two bases. Currencies are always the columns because
+// they can never be added together; the bottom row totals each column.
+
+const AGEING_BASES = [
+  { key: "shipment", label: "Shipment delay",
+    hint: "Deposits already PAID OUT whose goods have not shipped, aged from the original Est ETD. Same population as Delay Buckets." },
+  { key: "payment", label: "Payment delay",
+    hint: "Unpaid tranches aged from their tentative payment date \u2014 money still owed, and how late it is." },
+] as const;
+
+const AGEING_CUTS = [
+  { key: "currency", label: "Currency-wise (delay buckets \u00d7 currency)" },
+  { key: "customer", label: "Customer-wise (customers \u00d7 currency)" },
+] as const;
+
+function AgeingTab({ dateFrom, dateTo }: { dateFrom?: string; dateTo?: string }) {
+  const [basis, setBasis] = useState<string>("shipment");
+  const [cut, setCut] = useState<string>("currency");
+  const [staffId, setStaffId] = useState("");
+  const [verticalId, setVerticalId] = useState("");
+  const [customerId, setCustomerId] = useState("");
+
+  const filters: TabFilters = {
+    dateFrom, dateTo,
+    staffId: staffId || undefined,
+    verticalId: verticalId || undefined,
+    customerId: customerId || undefined,
+  };
+  const { data, isLoading } = useAgeing(true, basis, cut, filters);
+  const colSort = useColumnSortState();
+
+  const currencies = data?.currencies ?? [];
+  const rows = data?.rows ?? [];
+  const cols = 1 + Math.max(currencies.length, 1);
+  const basisHint = AGEING_BASES.find((b) => b.key === basis)?.hint ?? "";
+  const rowHeading = cut === "customer" ? "Customer" : "Delay bucket";
+
+  // Column-header sorting. Band rows are a ladder, so sorting them by value
+  // would scramble the sequence — only the customer cut sorts by label.
+  const ageingCols: ColumnAccessors<(typeof rows)[number]> = {
+    label: (r) => r.label,
+    ...Object.fromEntries(
+      currencies.map((c) => [c, (r: (typeof rows)[number]) => r.amounts[c] ?? 0]),
+    ),
+  };
+  const sorted = sortByColumn(rows, ageingCols, colSort.sort);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">View:</span>
+        <select
+          value={cut}
+          onChange={(e) => setCut(e.target.value)}
+          className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          {AGEING_CUTS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+        </select>
+        <span className="text-xs text-muted-foreground ml-2">Aged by:</span>
+        <select
+          value={basis}
+          onChange={(e) => setBasis(e.target.value)}
+          className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          {AGEING_BASES.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+        </select>
+      </div>
+      <p className="text-xs text-muted-foreground">{basisHint}</p>
+
+      <TabFilterBar
+        showStaff showVertical showCustomer
+        staffId={staffId} verticalId={verticalId} customerId={customerId} bucketVal=""
+        onStaff={setStaffId} onVertical={setVerticalId} onCustomer={setCustomerId} onBucket={() => {}}
+        onClear={() => { setStaffId(""); setVerticalId(""); setCustomerId(""); }}
+      />
+
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <SortableHead label={rowHeading} sortKey="label" state={colSort} className="min-w-44" />
+                {currencies.length === 0 ? (
+                  <TableHead className="text-right">Amount</TableHead>
+                ) : (
+                  currencies.map((c) => (
+                    <SortableHead
+                      key={c}
+                      label={currencyDisplayLabel(c)}
+                      sortKey={c}
+                      state={colSort}
+                      align="right"
+                      className="text-right"
+                    />
+                  ))
+                )}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? <TableSkeleton rows={9} cols={cols} />
+                : rows.length === 0 ? <EmptyTable cols={cols} />
+                : (
+                  <>
+                    {sorted.map((row) => (
+                      <TableRow key={row.label}>
+                        <TableCell className="font-medium text-sm whitespace-nowrap">{row.label}</TableCell>
+                        {currencies.length === 0 ? (
+                          <TableCell className="text-right tabular-nums">—</TableCell>
+                        ) : (
+                          currencies.map((c) => (
+                            <TableCell key={c} className="text-right tabular-nums">
+                              {row.amounts[c] ? fmtCurrency(row.amounts[c], c) : "—"}
+                            </TableCell>
+                          ))
+                        )}
+                      </TableRow>
+                    ))}
+                    {/* Per-currency column totals — currencies are never added
+                        together, so there is no single grand total. */}
+                    <TableRow className="bg-muted/60 hover:bg-muted/60 font-semibold">
+                      <TableCell className="text-sm">Total</TableCell>
+                      {currencies.length === 0 ? (
+                        <TableCell className="text-right tabular-nums">—</TableCell>
+                      ) : (
+                        currencies.map((c) => (
+                          <TableCell key={c} className="text-right tabular-nums">
+                            {data?.totals[c] ? fmtCurrency(data.totals[c], c) : "—"}
+                          </TableCell>
+                        ))
+                      )}
+                    </TableRow>
+                  </>
+                )}
             </TableBody>
           </Table>
         </div>
@@ -1276,6 +1561,9 @@ function OverviewTab({ filters, draftFilters, setDraft, applyFilters, clearFilte
         </Card>
       </div>
 
+      {/* Requests raised MoM + 3-month average (5 Nov 2026). */}
+      <RequestsRaisedCard />
+
       {/* Per-request table */}
       <Card className="overflow-hidden">
         <div className="px-6 py-4 border-b border-border">
@@ -1517,6 +1805,7 @@ export default function AnalyticsPage() {
         {activeTab === "by_customer" && <ByCustomerTab dateFrom={globalFrom} dateTo={globalTo} />}
         {activeTab === "outstanding_tracker" && <OutstandingTrackerTab dateFrom={globalFrom} dateTo={globalTo} />}
         {activeTab === "weekly_tracker" && <WeeklyTrackerTab />}
+        {activeTab === "ageing" && <AgeingTab dateFrom={globalFrom} dateTo={globalTo} />}
 
         {/* Fallback: user landed on a tab they can't access */}
         {activeTab !== "overview" && !isSuperAdmin && !permsLoading && permissions &&
