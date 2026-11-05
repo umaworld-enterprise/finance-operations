@@ -17,8 +17,11 @@ from app.services.projection_service import (
     ProjectionService,
     lock_enabled,
     next_period,
+    period_editable,
+    reminder_period,
     set_lock_enabled,
     window_open,
+    window_opens_for,
 )
 from tests.factories import (
     make_customer,
@@ -101,21 +104,48 @@ async def test_status_lists_every_active_vertical(db_session):
     assert v1.name not in status["missing_target"]
 
 
-async def test_merchandiser_is_held_to_next_month_inside_the_window(db_session):
+async def test_merchandiser_edit_window_runs_to_the_end_of_the_month(db_session):
+    """5 Nov 2026: the window for October opens 25 Sep and now stays open to
+    31 Oct, so a figure can still be corrected while October is running."""
     merch, _other, _admin, v1, _v2 = await _setup(db_session)
     svc = ProjectionService(db_session)
-    outside = date(2026, 9, 10)
-    year, month = next_period(outside)
-    with pytest.raises(BusinessRuleError, match="window opens"):
+
+    # Before the 25th of September, October is not yet open.
+    with pytest.raises(BusinessRuleError, match="can be filed or edited"):
         await svc.submit(
-            merch.id, UserRole.MERCHANDISER, year, month, [_amounts(v1)], today=outside
+            merch.id, UserRole.MERCHANDISER, 2026, 10, [_amounts(v1)],
+            today=date(2026, 9, 10),
         )
 
-    inside = date(2026, 9, 26)
-    with pytest.raises(BusinessRuleError, match="NEXT month"):
+    # From the 25th it is.
+    assert await svc.submit(
+        merch.id, UserRole.MERCHANDISER, 2026, 10, [_amounts(v1)],
+        today=date(2026, 9, 26),
+    ) == 1
+
+    # And it is STILL editable late in October itself — the new edit option.
+    assert await svc.submit(
+        merch.id, UserRole.MERCHANDISER, 2026, 10, [_amounts(v1)],
+        today=date(2026, 10, 31),
+    ) == 1
+
+    # Once October has closed, only the Super Admin may change it.
+    with pytest.raises(BusinessRuleError, match="can be filed or edited"):
         await svc.submit(
-            merch.id, UserRole.MERCHANDISER, 2026, 9, [_amounts(v1)], today=inside
+            merch.id, UserRole.MERCHANDISER, 2026, 10, [_amounts(v1)],
+            today=date(2026, 11, 1),
         )
+
+
+async def test_period_math_for_the_window_and_the_reminder():
+    assert window_opens_for(2026, 10) == date(2026, 9, 25)
+    assert window_opens_for(2026, 1) == date(2025, 12, 25)      # year wrap
+    assert period_editable(2026, 10, date(2026, 10, 31)) is True
+    assert period_editable(2026, 10, date(2026, 11, 1)) is False
+    # One continuous October reminder from 25 Sep through 31 Oct.
+    assert reminder_period(date(2026, 9, 25)) == (2026, 10)
+    assert reminder_period(date(2026, 10, 5)) == (2026, 10)
+    assert reminder_period(date(2026, 10, 31)) == (2026, 11)
 
 
 # ── Per-vertical lock ────────────────────────────────────────────────────────
@@ -212,3 +242,135 @@ async def test_dashboard_compares_projection_to_actuals(db_session):
     assert row["actual_usd"] == 1200.0
     # The merchandiser shown is whoever last filed the projection.
     assert row["merchandiser"] == admin.full_name
+
+
+# ── Confirmation form: 3-month trend (5 Nov 2026) ────────────────────────────
+
+
+async def _raise_for(db_session, vertical, merch, when, amount):
+    """One live request against a vertical, dated `when`."""
+    supplier = await make_supplier(db_session)
+    customer = await make_customer(db_session)
+    req = await make_request(
+        db_session, supplier=supplier, customer=customer, created_by=merch,
+        currency=CurrencyCode.USD, deposit_amount=Decimal(str(amount)),
+        status=RequestStatus.PENDING_PAYMENT,
+    )
+    req.vertical_id = vertical.id
+    req.created_at = when
+    await db_session.flush()
+    return req
+
+
+async def test_trend_compares_projection_to_actuals_and_suggests_the_average(db_session):
+    """The client's sheet: three months of proposed vs actually requested,
+    the gap between them, and November anchored on the average of ACTUALS."""
+    from datetime import datetime, timezone
+
+    merch, _other, _admin, v1, _v2 = await _setup(db_session)
+    svc = ProjectionService(db_session)
+
+    # Proposed, per the sheet: Aug 275k, Sep 250k, Oct 300k.
+    for (y, m), amount in (((2026, 8), 275000), ((2026, 9), 250000), ((2026, 10), 300000)):
+        await svc.submit(
+            merch.id, UserRole.SUPER_ADMIN, y, m, [_amounts(v1, usd=amount)],
+        )
+    # Actually requested: Aug 250k, Sep 300k, Oct 250k.
+    for (y, m), amount in (((2026, 8), 250000), ((2026, 9), 300000), ((2026, 10), 250000)):
+        await _raise_for(
+            db_session, v1, merch, datetime(y, m, 15, tzinfo=timezone.utc), amount
+        )
+
+    trend = await svc.trend(v1.id, 2026, 11)
+    by_label = {r["label"]: r for r in trend["rows"]}
+
+    assert trend["rows"][0]["label"] == "Oct 2026"       # newest month first
+    assert by_label["Oct 2026"]["proposed_usd"] == 300000
+    assert by_label["Oct 2026"]["actual_usd"] == 250000
+    assert by_label["Oct 2026"]["variance_usd"] == 50000        # over-estimated
+    assert by_label["Sep 2026"]["variance_usd"] == -50000       # under-estimated
+    assert by_label["Aug 2026"]["variance_usd"] == 25000
+
+    # (250000 + 300000 + 250000) / 3 — the actuals, not the projections.
+    assert trend["suggested_usd"] == 266666.67
+    assert trend["confirmed"] is False
+
+
+async def test_trend_reports_the_confirmed_figure_once_filed(db_session):
+    merch, _other, _admin, v1, _v2 = await _setup(db_session)
+    svc = ProjectionService(db_session)
+    await svc.submit(merch.id, UserRole.SUPER_ADMIN, 2026, 11, [_amounts(v1, usd=270000)])
+
+    trend = await svc.trend(v1.id, 2026, 11)
+    assert trend["confirmed"] is True
+    assert trend["confirmed_usd"] == 270000             # edited, not the average
+    assert trend["editable_until"] == "2026-11-30"
+
+
+# ── Reminder (advisory only) ─────────────────────────────────────────────────
+
+
+async def test_reminder_names_the_period_and_deadline(db_session):
+    _merch, _other, _admin, v1, v2 = await _setup(db_session)
+    svc = ProjectionService(db_session)
+    out = await svc.reminders(today=date(2026, 9, 25))
+
+    assert out["period_label"] == "October 2026"
+    assert out["deadline_label"] == "31 October 2026"
+    names = {p["name"] for p in out["pending"]}
+    assert {v1.name, v2.name} <= names
+
+
+async def test_reminder_clears_for_a_vertical_once_it_is_filed(db_session):
+    merch, _other, _admin, v1, v2 = await _setup(db_session)
+    svc = ProjectionService(db_session)
+    await svc.submit(
+        merch.id, UserRole.MERCHANDISER, 2026, 10, [_amounts(v1)],
+        today=date(2026, 9, 26),
+    )
+    out = await svc.reminders(today=date(2026, 9, 26))
+    names = {p["name"] for p in out["pending"]}
+    assert v1.name not in names        # filed — no nag
+    assert v2.name in names            # still owing
+
+
+async def test_reminder_never_blocks_a_request(db_session):
+    """Bullet 4: 'no blockers in creating requests as it hampers work.' The
+    reminder is advisory; with the lock off nothing is ever refused."""
+    _merch, _other, _admin, v1, _v2 = await _setup(db_session)
+    svc = ProjectionService(db_session)
+    out = await svc.reminders(today=date(2026, 9, 26))
+
+    assert v1.name in {p["name"] for p in out["pending"]}
+    assert await lock_enabled(db_session) is False
+    await svc.assert_vertical_open(v1.id, today=date(2026, 10, 2))   # no raise
+
+
+# ── Audit trail ──────────────────────────────────────────────────────────────
+
+
+async def test_every_projection_change_is_audit_logged(db_session):
+    """'All changes should be audit logged' (5 Nov 2026)."""
+    from sqlalchemy import select as _select
+
+    from app.models.audit import AuditLog
+
+    merch, _other, _admin, v1, _v2 = await _setup(db_session)
+    svc = ProjectionService(db_session)
+
+    await svc.submit(merch.id, UserRole.SUPER_ADMIN, 2026, 11, [_amounts(v1, usd=1000)])
+    await svc.submit(merch.id, UserRole.SUPER_ADMIN, 2026, 11, [_amounts(v1, usd=2500)])
+
+    logs = (
+        await db_session.execute(
+            _select(AuditLog).where(AuditLog.entity_name == "projection")
+        )
+    ).scalars().all()
+
+    actions = [log.action.value for log in logs]
+    assert "CREATE" in actions
+    updates = [log for log in logs if log.action.value == "UPDATE"]
+    usd = next(log for log in updates if "amount_usd" in (log.field_name or ""))
+    assert usd.old_value.startswith("1000")
+    assert usd.new_value.startswith("2500")
+    assert usd.changed_by == merch.id

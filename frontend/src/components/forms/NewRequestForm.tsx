@@ -11,6 +11,7 @@ import { z } from "zod";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 import { SupplierDefaultAlert } from "@/components/forms/SupplierDefaultAlert";
+import { ProjectionReminderAlert } from "@/components/forms/ProjectionReminderAlert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
@@ -139,6 +140,7 @@ export function NewRequestForm({ onSuccess, onCancel }: Props) {
 
   const isBlocked = defaultStatus?.is_defaulted === true && !overrideFlaggedSupplier;
 
+  const selectedVerticalId = watch("vertical_id");
   const currency = watch("currency");
   const totalInvoiceAmount = Number(watch("total_supplier_invoice_amount")) || 0;
   const watchedTranches = watch("tranches");
@@ -263,6 +265,9 @@ export function NewRequestForm({ onSuccess, onCancel }: Props) {
                   <option key={v.id} value={v.id}>{v.name}</option>
                 ))}
               </Field>
+
+              {/* Projection reminder (5 Nov 2026) — advisory, never blocks. */}
+              <ProjectionReminderAlert verticalId={selectedVerticalId} />
 
               <Field
                 label="Currency"
