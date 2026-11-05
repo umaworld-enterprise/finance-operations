@@ -6,15 +6,17 @@ team needs the tranche's own dates.
 """
 
 import io
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import openpyxl
 import pytest
+from sqlalchemy import select
 
 from app.models.analytics import AnalyticsSnapshot
 from app.models.enums import CurrencyCode, RequestStatus, TrancheStatus, UserRole
 from app.models.payment import PaymentDetails
+from app.models.tranche import PaymentTranche
 from app.services.report_service import ReportService
 from tests.factories import (
     make_customer,
@@ -79,21 +81,37 @@ async def test_header_is_styled_and_frozen(db_session):
     assert ws.column_dimensions["A"].width >= 10
 
 
-async def test_tranche_column_lists_each_tranche_with_its_own_date(db_session):
+async def test_tranche_column_lists_each_tranche_with_its_raised_date(db_session):
     """Ageing must key off the tranche, not the file — so every unpaid
-    tranche is named with its own date, one per line."""
-    await _pending_with_tranches(db_session)
+    tranche is named with the date IT was raised, one per line."""
+    req = await _pending_with_tranches(db_session)
+    # Distinct raised dates, so a tentative date could not pass by accident.
+    found = await db_session.execute(
+        select(PaymentTranche).where(PaymentTranche.deposit_request_id == req.id)
+    )
+    by_number = {t.tranche_number: t for t in found.scalars().all()}
+    by_number[1].created_at = datetime(2026, 4, 27, 9, 0, tzinfo=timezone.utc)
+    by_number[2].created_at = datetime(2026, 6, 15, 9, 0, tzinfo=timezone.utc)
+    await db_session.flush()
+
     data, _ = await ReportService(db_session).pending_payments_report("excel")
     ws = _sheet(data)
     headers = [c.value for c in ws[1]]
-    cell = ws.cell(row=2, column=headers.index("Tranches (raised date)") + 1).value
+    col = headers.index("Tranches (raised date)") + 1
+    cell = ws.cell(row=2, column=col)
 
-    lines = cell.split("\n")
-    assert len(lines) == 2
-    # The app's own tranche label is used verbatim (e.g. "Deposit - Tranche 1").
-    assert "Tranche 1" in lines[0] and "Tranche 2" in lines[1]
-    assert (TODAY - timedelta(days=20)).strftime("%d-%b-%y") in lines[0]
-    assert (TODAY - timedelta(days=5)).strftime("%d-%b-%y") in lines[1]
+    lines = cell.value.split("\n")
+    assert lines == ["Tranche 1: 27-Apr-26", "Tranche 2: 15-Jun-26"]
+    # Without wrap_text Excel collapses the break and the lines are lost.
+    assert cell.alignment.wrap_text is True
+
+
+async def test_tranche_column_sits_directly_right_of_request_date(db_session):
+    """Where the client asked for it, on screen and in the sheet alike."""
+    await _pending_with_tranches(db_session)
+    data, _ = await ReportService(db_session).pending_payments_report("excel")
+    headers = [c.value for c in _sheet(data)[1]]
+    assert headers.index("Tranches (raised date)") == headers.index("Request Date") + 1
 
 
 async def test_delay_band_comes_from_the_earliest_tranche_due_date(db_session):
