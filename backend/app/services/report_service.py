@@ -190,7 +190,7 @@ class ReportService:
         so the ageing lines up with the Ageing tab.
         """
         from app.models.enums import TrancheStatus
-        from app.models.tranche import PaymentTranche, tranche_label
+        from app.models.tranche import PaymentTranche
         from app.services.analytics_service import AnalyticsService
 
         stmt = (
@@ -224,11 +224,13 @@ class ReportService:
             return min(dates) if dates else None
 
         headers = [
-            "Request #", "Request Date", "Sunshine Invoice No.",
+            "Request #", "Request Date",
+            # Per-tranche raised dates, one line each, directly right of the
+            # file's request date (5 Nov 2026) — same place as on screen.
+            "Tranches (raised date)",
+            "Sunshine Invoice No.",
             "Supplier", "Supplier Proforma Invoice No.",
             "Vertical/Category", "Customer", "Merchandiser",
-            # Per-tranche raised dates, one line each (client request).
-            "Tranches (raised date)",
             "Currency", "Amount Payable", "Deposit %", "Deposit Amount",
             "Tentative Payment", "Days Waiting", "Payment Delay",
             "Priority",
@@ -251,19 +253,20 @@ class ReportService:
             rows.append([
                 r.request_number,
                 r.created_at.date() if r.created_at else None,
+                # "Tranche 1: 27-Apr-26" per line — when each unpaid tranche
+                # was RAISED, so a multi-tranche file carries its own ageing
+                # rather than only the file's request date.
+                "\n".join(
+                    f"Tranche {t.tranche_number}: "
+                    f"{t.created_at.date().strftime('%d-%b-%y') if t.created_at else 'no date'}"
+                    for t in pend
+                ),
                 r.sunshine_invoice_number or "",
                 r.supplier.name if r.supplier else "",
                 r.supplier_invoice_number or "",
                 r.vertical.name if r.vertical else "",
                 r.customer.name if r.customer else "",
                 r.creator.full_name if r.creator else "",
-                # "Tranche 1: 27-Apr-26" per line — the ageing reference the
-                # client asked for, at tranche level rather than file level.
-                "\n".join(
-                    f"{tranche_label(t.tranche_number)}: "
-                    f"{t.tentative_payment_date.strftime('%d-%b-%y') if t.tentative_payment_date else 'no date'}"
-                    for t in pend
-                ),
                 r.currency.value if r.currency else "",
                 sum((Decimal(str(t.amount)) for t in pend), Decimal("0")),
                 round(Decimal(str(pct)), 2) if pct is not None else None,
@@ -276,7 +279,7 @@ class ReportService:
             ])
 
         return self._render("Pending Payments", headers, rows, fmt,
-                            col_widths=[7, 7, 9, 11, 9, 8, 9, 9, 12, 5, 8, 5, 8, 7, 6, 8, 5])
+                            col_widths=[7, 7, 14, 9, 11, 9, 8, 9, 9, 5, 8, 5, 8, 7, 6, 8, 5])
 
     async def ageing_report(
         self,

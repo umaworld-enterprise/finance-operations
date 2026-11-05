@@ -83,9 +83,13 @@ def build_excel(title: str, headers: list[str], rows: list[list[Any]]) -> bytes:
             if fmt:
                 cell.number_format = fmt
             # Text wraps at the column width instead of bleeding sideways.
+            # wrap_text is also what makes an embedded newline render as a
+            # real second line (the per-tranche dates column) rather than
+            # collapsing into one — without it Excel ignores the break.
             cell.alignment = Alignment(
                 horizontal="right" if fmt and fmt != DATE_FORMAT else "left",
                 vertical="top",
+                wrap_text=isinstance(value, str) and "\n" in value,
             )
             cell.border = CELL_BORDER
 
@@ -100,7 +104,10 @@ def build_excel(title: str, headers: list[str], rows: list[list[Any]]) -> bytes:
                     else v.strftime("%d-%b-%y") if isinstance(v, (datetime, date))
                     else str(v if v is not None else "")
                 )
-                longest = max(longest, len(shown))
+                # A multi-line cell is as wide as its widest LINE, not as
+                # wide as every line joined — otherwise one 3-tranche row
+                # would stretch the column to the clamp.
+                longest = max(longest, *(len(line) for line in shown.split("\n")))
         ws.column_dimensions[get_column_letter(idx)].width = max(
             MIN_WIDTH, min(longest + 3, MAX_WIDTH)
         )

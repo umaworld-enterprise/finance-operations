@@ -2276,3 +2276,44 @@ unaffected.
 394 backend tests green; app boots.
 Deploy order: run the preview → database backup → deploy with
 `VERTICAL_MERGE_CONFIRM=1` → unset it again.
+
+---
+
+## Pending Payment — per-tranche raised dates on screen (5 Nov 2026)
+
+Reported: the Tranches column asked for on 5 Nov was not visible in the
+Pending Payment tab. It had only ever been added to the Excel extract, and
+there it sat after Merchandiser rather than beside the request date. It was
+also mislabelled: the header read "raised date" while the cells were filled
+from `tentative_payment_date`. Confirmed with the client that **raised
+date** means the date the tranche itself was raised.
+
+**Tranches (raised)** now sits directly right of Request Date in the
+Accounts → Pending Payment table, listing one line per UNPAID tranche —
+`Tranche 1: 27-Apr-26` — from the tranche's own `created_at`. It is sortable
+like every other header (on the earliest unpaid tranche's raised date,
+undated files sinking), appears in the mobile card list, and the per-currency
+totals row and skeleton spans moved with it. `unpaidTrancheRaisedDates()` in
+`lib/utils.ts` is the single source, shared by the table and the sort
+accessor.
+
+The extract now matches the screen: same column, same position, same raised
+dates, same `Tranche N: DD-Mon-YY` wording (previously the longer
+`Deposit - Tranche N` label).
+
+Two defects in `reports/excel_builder.py` would have broken the multi-line
+cell and were fixed with it:
+
+- Body cells never set `wrap_text`, despite a comment claiming they wrapped.
+  Excel ignores an embedded newline without it, so the per-tranche lines
+  would have collapsed into one. Now set for any value containing a newline,
+  leaving single-line cells unchanged.
+- The column auto-fit measured the whole joined string, so one three-tranche
+  row would have stretched the column to the 46-char clamp. It now measures
+  the widest single line.
+
+395 backend tests green (two rewritten/added in
+`test_pending_and_ageing_reports.py` — raised dates with `wrap_text`, and
+the column's position next to Request Date); `npx tsc --noEmit` clean.
+No migration: `created_at` already exists on every tranche and is already
+exposed by the API.

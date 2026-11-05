@@ -138,6 +138,20 @@ export function nextTentativeDate(req: {
   return dates[0] ?? null;
 }
 
+/** The UNPAID tranches with the date each was RAISED (5 Nov 2026, client
+ * request) — the Pending tab and its export both list one line per tranche,
+ * "Tranche 1: 27-Apr-26", so a multi-tranche file shows its own ageing
+ * rather than only the file's request date. */
+export function unpaidTrancheRaisedDates(req: {
+  tranches?: { tranche_number: number; status: string; created_at?: string | null }[] | null;
+}): { number: number; raised: string | null }[] {
+  return (req.tranches ?? [])
+    .filter((t) => t.status === "unpaid")
+    .slice()
+    .sort((a, b) => a.tranche_number - b.tranche_number)
+    .map((t) => ({ number: t.tranche_number, raised: t.created_at ?? null }));
+}
+
 /** Days past that date — negative while the payment is not yet due, null
  * when no unpaid tranche carries a date. */
 export function paymentDelayDays(req: { tranches?: TrancheLike[] | null }): number | null {
