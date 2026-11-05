@@ -88,6 +88,8 @@ export function SortableHead({
   state,
   className,
   align,
+  style,
+  children,
 }: {
   /** Plain text or richer content (e.g. a label with a help tooltip). */
   label: React.ReactNode;
@@ -95,12 +97,18 @@ export function SortableHead({
   state: ColumnSortState;
   className?: string;
   align?: "left" | "right";
+  /** Fixed width etc. — used by the resizable Bank Ledger (5 Nov 2026). */
+  style?: React.CSSProperties;
+  /** Extra content inside the header, e.g. a drag-to-resize handle. It is
+   * responsible for stopping its own click from triggering the sort. */
+  children?: React.ReactNode;
 }) {
   const active = state.sort?.key === sortKey;
   const direction = active ? state.sort!.direction : null;
   return (
     <TableHead
-      className={cn("cursor-pointer select-none", className)}
+      className={cn("cursor-pointer select-none relative", className)}
+      style={style}
       aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none"}
       onClick={() => state.toggle(sortKey)}
       title={typeof label === "string" ? `Sort by ${label}` : "Sort"}
@@ -121,6 +129,7 @@ export function SortableHead({
           <ArrowUpDown className="h-3 w-3 shrink-0 opacity-35" />
         )}
       </span>
+      {children}
     </TableHead>
   );
 }

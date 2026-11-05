@@ -40,6 +40,20 @@ const REPORT_TYPES = [
     columns: ["Supplier", "Total Requests", "Total Deposit Amount", "Active Defaults", "Outstanding Amount", "Default Reason", "Flagged Date", "Resolved Date"],
   },
   {
+    // Pending Payments + Ageing added 5 Nov 2026 so the two live views can
+    // be pulled as formatted extracts.
+    value: "pending-payments",
+    label: "Pending Payments",
+    desc: "Everything on the Accounts Pending tab, with each tranche's own raised date and its ageing band",
+    columns: ["Request #", "Request Date", "Sunshine Invoice No.", "Supplier", "Supplier Proforma Invoice No.", "Vertical/Category", "Customer", "Merchandiser", "Tranches (raised date)", "Currency", "Amount Payable", "Deposit %", "Deposit Amount", "Tentative Payment", "Days Waiting", "Payment Delay", "Priority"],
+  },
+  {
+    value: "ageing",
+    label: "Ageing",
+    desc: "The Analytics ageing grid — deposit value by 15-day band, currency columns, with totals",
+    columns: ["Delay Bucket / Customer", "USD", "CNY", "EUR", "Total row"],
+  },
+  {
     value: "delays",
     label: "Delay Report",
     desc: "Overdue shipments and ETD breaches",

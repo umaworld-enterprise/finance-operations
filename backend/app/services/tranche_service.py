@@ -363,7 +363,10 @@ class TrancheService:
         # check here (the DB trigger still validates the status pair).
         if request.current_status == RequestStatus.PENDING_PAYMENT:
             remaining = await self._repo.list_for_request(request_id)
-            live = [t for t in remaining if t.status != TrancheStatus.REJECTED]
+            live = [
+                t for t in remaining
+                if t.status not in (TrancheStatus.REJECTED, TrancheStatus.CANCELLED)
+            ]
             if live and all(t.status == TrancheStatus.PAID for t in live):
                 old_status = request.current_status
                 await self._request_repo.update(
@@ -587,6 +590,70 @@ class TrancheService:
         )
         # The rejected amount stops counting — deposit_amount re-derives from
         # the live tranches only.
+        await self._sync_request_totals(request, user_id, ip_address, user_agent)
+        return tranche
+
+    async def cancel_tranche(
+        self,
+        request_id: UUID,
+        tranche_id: UUID,
+        reason: str,
+        user_id: UUID,
+        role: UserRole,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> PaymentTranche:
+        """Merchandiser cancels an UNPAID tranche with a reason (5 Nov 2026).
+
+        The counterpart to the Accounts rejection, raised from the
+        merchandiser's side. Unlike DELETE it keeps the row — visible on the
+        file and in the audit trail — so it also works once Accounts have
+        started on that tranche, and it is not blocked by the
+        "a request must keep at least one tranche" rule, since the row stays.
+        The amount stops counting toward the deposit total and the invoice
+        ceiling, so replacement tranches can be added.
+        """
+        if role not in _REQUEST_AUTHOR_ROLES:
+            raise AuthorizationError("Only merchandisers can cancel a tranche.")
+        if not reason or not reason.strip():
+            raise ValidationError("A reason is mandatory when cancelling a tranche.")
+
+        request = await self._get_request_or_404(request_id)
+        if request.current_status in _TERMINAL_STATUSES:
+            raise ConflictError(
+                "Tranches cannot be cancelled on a cancelled or rejected request."
+            )
+
+        tranche = await self._get_tranche_locked(request_id, tranche_id)
+        if tranche.status == TrancheStatus.PAID:
+            raise ConflictError(
+                f"{tranche.label} is already paid and cannot be cancelled. "
+                "Use the Adjust Invoices module to reallocate paid value."
+            )
+        if tranche.status == TrancheStatus.CANCELLED:
+            raise ConflictError(f"{tranche.label} is already cancelled.")
+        if tranche.status == TrancheStatus.REJECTED:
+            raise ConflictError(
+                f"{tranche.label} was rejected by Accounts — it is already out of the queue."
+            )
+
+        previous = tranche.status.value
+        tranche = await self._repo.update(
+            tranche,
+            status=TrancheStatus.CANCELLED,
+            rejection_reason=reason.strip(),
+            rejected_at=datetime.now(timezone.utc),
+            rejected_by=user_id,
+        )
+        await self._audit.record_update(
+            "payment_tranches", tranche.id, user_id,
+            field_name="status",
+            old_value=previous,
+            new_value=f"{TrancheStatus.CANCELLED.value} — {reason.strip()}",
+            ip_address=ip_address, user_agent=user_agent,
+        )
+        # Cancelled value stops counting — deposit_amount re-derives from the
+        # live tranches only.
         await self._sync_request_totals(request, user_id, ip_address, user_agent)
         return tranche
 

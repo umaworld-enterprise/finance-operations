@@ -32,7 +32,7 @@ import { SortableHead, sortByColumn, useColumnSortState, type ColumnAccessors } 
 import { differenceInDays } from "date-fns";
 import { needsRelease } from "@/components/tranches/TrancheList";
 import { ExportButton } from "@/components/ui/ExportButton";
-import { bankLedgerEntries, exportBankLedgerToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
+import { bankLedgerEntries, downloadPendingPaymentsReport, exportBankLedgerToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
 import { BankLedgerTable } from "@/components/tables/BankLedgerTable";
 import { filterParams, matchesRequestFilters, RequestFilterBar, type RequestFilterValues } from "@/components/filters/RequestFilterBar";
 import { BulkPayDialog, nextPayableTranche } from "@/components/accounts/BulkPayDialog";
@@ -41,6 +41,7 @@ import { UnseenDot } from "@/components/ui/UnseenDot";
 import { usePresence } from "@/hooks/usePresence";
 import { useUnseenRequests } from "@/hooks/useUnseenRequests";
 import { Clock, CheckCircle, AlertTriangle, BookOpen, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
+import { toast } from "sonner";
 import Link from "next/link";
 import type { DepositRequest } from "@/types";
 
@@ -698,6 +699,13 @@ export default function AccountsDashboard() {
   // executives' Excel ledger rows — UNPAID tranches only (the "1323" fix:
   // paid tranches never belong in a pending payments sheet), oldest first.
   const ledgerEntries = bankLedgerEntries(filteredQueue, { unpaidOnly: true });
+  // How many distinct requests those tranche rows belong to — surfaced on the
+  // tile so the tranche count never looks like a discrepancy.
+  const ledgerRequestCount = new Set(
+    filteredQueue
+      .filter((r) => (r.tranches ?? []).some((t) => t.status === "unpaid"))
+      .map((r) => r.id),
+  ).size;
 
   const { data: holdData, isLoading: holdLoading } = useRequestsPaginated(holdPage, PAGE_SIZE, {
     status: ["hold_by_accounts", "hold_by_merchandiser"],
@@ -807,20 +815,27 @@ export default function AccountsDashboard() {
         {/* FY-to-date KPIs (April–March), incl. Rejected and Cancelled heads
             (UAT Aug 2026, items 5, 17, 19). */}
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+          {/* Counts the LIVE queue, which is exactly what the Pending tab
+              below lists (5 Nov 2026). It previously showed an FY-to-date
+              figure while the tab and the Bank Ledger tile were all-time,
+              so the three never agreed. */}
           <StatCard
             label="Pending Payment"
-            value={kpis?.pending_payment ?? queue.length}
+            value={queue.length}
             icon={Clock}
-            subtext={fySubtext}
+            subtext="Live — requests awaiting payment"
             onClick={() => goToTab("pending")}
           />
           {/* Executive request (4 Sep 2026): the pending queue viewable in
               the Excel bank-ledger layout without downloading. */}
+          {/* Tranches, not requests — a file with two unpaid tranches is two
+              ledger rows. Spelling the relationship out stops the two tiles
+              reading as a mismatch when they are simply different units. */}
           <StatCard
             label="Pending Payments (Bank Ledger)"
             value={ledgerEntries.length}
             icon={BookOpen}
-            subtext="Live — one row per unpaid tranche"
+            subtext={`Live — unpaid tranches across ${ledgerRequestCount} ${ledgerRequestCount === 1 ? "request" : "requests"}`}
             onClick={() => goToTab("bank-ledger")}
           />
           <StatCard
@@ -949,7 +964,15 @@ export default function AccountsDashboard() {
               )}
               <ExportButton
                 count={filteredQueue.length}
-                onExport={() => exportRequestsToExcel(filteredQueue, "pending-payments.xlsx")}
+                onExport={async () => {
+                  // Server-built so the sheet carries real numbers/dates and
+                  // a styled header (5 Nov 2026 client feedback).
+                  try {
+                    await downloadPendingPaymentsReport();
+                  } catch {
+                    toast.error("Could not build the Pending Payments export.");
+                  }
+                }}
                 onExportLedger={() => exportBankLedgerToExcel(filteredQueue, "pending-payments-bank-ledger.xlsx", { unpaidOnly: true })}
               />
             </div>

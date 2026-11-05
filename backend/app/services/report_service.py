@@ -1,6 +1,7 @@
 """Report generation service — builds Excel/CSV/PDF for all 5 report types."""
 
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
@@ -10,7 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.analytics import AnalyticsSnapshot
 from app.models.deposit_request import DepositRequest
-from app.models.enums import UserRole
+from app.models.enums import RequestStatus, UserRole
 from app.models.payment import PaymentDetails
 from app.reports.csv_builder import build_csv
 from app.reports.excel_builder import build_excel
@@ -26,6 +27,16 @@ def _parse_date(value: str | None) -> date | None:
         return None
     try:
         return datetime.fromisoformat(value).date()
+    except ValueError:
+        return None
+
+
+def _as_date(value: str | None) -> date | None:
+    """ISO string from the query layer → date, ignoring anything unparseable."""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value[:10])
     except ValueError:
         return None
 
@@ -161,6 +172,144 @@ class ReportService:
         ]
         return self._render("Bank Ledger Report", headers, rows, fmt,
                             col_widths=[10, 8, 8, 10, 4, 6])
+
+    async def pending_payments_report(
+        self,
+        fmt: ReportFormat,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> tuple[bytes, str]:
+        """Pending Payments extract (5 Nov 2026) — every column the Accounts
+        Pending tab shows, so the download and the screen agree.
+
+        Two client points are addressed here. Amounts and dates are written
+        as real numbers and dates (the builder formats them), and the
+        ageing no longer keys off the FILE's request date: a Tranches column
+        lists each unpaid tranche with its own raised date, one per line, and
+        the delay band is computed from the tranche's tentative payment date
+        so the ageing lines up with the Ageing tab.
+        """
+        from app.models.enums import TrancheStatus
+        from app.models.tranche import PaymentTranche, tranche_label
+        from app.services.analytics_service import AnalyticsService
+
+        stmt = (
+            select(DepositRequest)
+            .where(
+                DepositRequest.is_deleted == False,  # noqa: E712
+                DepositRequest.current_status == RequestStatus.PENDING_PAYMENT,
+            )
+            .options(
+                selectinload(DepositRequest.supplier),
+                selectinload(DepositRequest.customer),
+                selectinload(DepositRequest.vertical),
+                selectinload(DepositRequest.creator),
+                selectinload(DepositRequest.tranches),
+            )
+            .order_by(DepositRequest.created_at.asc())
+        )
+        stmt = self._apply_date_range(stmt, DepositRequest.created_at, date_from, date_to)
+        requests = list((await self._session.execute(stmt)).scalars().all())
+
+        today = date.today()
+
+        def unpaid(r: DepositRequest) -> list[PaymentTranche]:
+            return sorted(
+                (t for t in (r.tranches or []) if t.status == TrancheStatus.UNPAID),
+                key=lambda t: t.tranche_number,
+            )
+
+        def next_due(r: DepositRequest):
+            dates = [t.tentative_payment_date for t in unpaid(r) if t.tentative_payment_date]
+            return min(dates) if dates else None
+
+        headers = [
+            "Request #", "Request Date", "Sunshine Invoice No.",
+            "Supplier", "Supplier Proforma Invoice No.",
+            "Vertical/Category", "Customer", "Merchandiser",
+            # Per-tranche raised dates, one line each (client request).
+            "Tranches (raised date)",
+            "Currency", "Amount Payable", "Deposit %", "Deposit Amount",
+            "Tentative Payment", "Days Waiting", "Payment Delay",
+            "Priority",
+        ]
+
+        rows = []
+        for r in requests:
+            pend = unpaid(r)
+            due = next_due(r)
+            waiting = (today - due).days if due else None
+            pct = (
+                r.deposit_percentage
+                if r.deposit_percentage is not None
+                else (
+                    (Decimal(str(r.deposit_amount)) / Decimal(str(r.total_supplier_invoice_amount)) * 100)
+                    if r.total_supplier_invoice_amount
+                    else None
+                )
+            )
+            rows.append([
+                r.request_number,
+                r.created_at.date() if r.created_at else None,
+                r.sunshine_invoice_number or "",
+                r.supplier.name if r.supplier else "",
+                r.supplier_invoice_number or "",
+                r.vertical.name if r.vertical else "",
+                r.customer.name if r.customer else "",
+                r.creator.full_name if r.creator else "",
+                # "Tranche 1: 27-Apr-26" per line — the ageing reference the
+                # client asked for, at tranche level rather than file level.
+                "\n".join(
+                    f"{tranche_label(t.tranche_number)}: "
+                    f"{t.tentative_payment_date.strftime('%d-%b-%y') if t.tentative_payment_date else 'no date'}"
+                    for t in pend
+                ),
+                r.currency.value if r.currency else "",
+                sum((Decimal(str(t.amount)) for t in pend), Decimal("0")),
+                round(Decimal(str(pct)), 2) if pct is not None else None,
+                r.deposit_amount,
+                due,
+                waiting,
+                "Not due" if waiting is not None and waiting < 0
+                else (AnalyticsService._ageing_band(waiting) if waiting is not None else ""),
+                "High" if any(t.priority == "high" for t in pend) else "Normal",
+            ])
+
+        return self._render("Pending Payments", headers, rows, fmt,
+                            col_widths=[7, 7, 9, 11, 9, 8, 9, 9, 12, 5, 8, 5, 8, 7, 6, 8, 5])
+
+    async def ageing_report(
+        self,
+        fmt: ReportFormat,
+        basis: str = "shipment",
+        cut: str = "currency",
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> tuple[bytes, str]:
+        """The Analytics Ageing grid as a download (5 Nov 2026) — same
+        service, so the sheet and the screen always agree."""
+        from app.services.analytics_service import AnalyticsService
+
+        grid = await AnalyticsService(self._session).get_ageing(
+            basis=basis,
+            cut=cut,
+            date_from=_as_date(date_from),
+            date_to=_as_date(date_to),
+        )
+        currencies = grid["currencies"]
+        label = "Customer" if cut == "customer" else "Delay Bucket"
+        headers = [label, *currencies]
+        rows = [
+            [row["label"], *[row["amounts"].get(c, 0) for c in currencies]]
+            for row in grid["rows"]
+        ]
+        # Column totals travel with the sheet — currencies are never summed
+        # across, so there is no grand total cell.
+        rows.append(["Total", *[grid["totals"].get(c, 0) for c in currencies]])
+
+        title = f"Ageing ({'Payment' if basis == 'payment' else 'Shipment'} delay)"
+        return self._render(title, headers, rows, fmt,
+                            col_widths=[14, *[8] * len(currencies)])
 
     async def payment_report(
         self, fmt: ReportFormat, date_from: str | None = None, date_to: str | None = None

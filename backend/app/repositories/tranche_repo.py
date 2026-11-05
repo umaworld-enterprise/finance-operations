@@ -43,14 +43,17 @@ class TrancheRepository(BaseRepository[PaymentTranche]):
         return result.scalar_one_or_none()
 
     async def sum_amounts_for_request(self, deposit_request_id: UUID) -> Decimal:
-        """Sum of the request's LIVE tranches. REJECTED tranches are excluded
-        (Aug 2026): their amount stops counting toward the invoice-total
-        ceiling and the derived deposit_amount, which is what lets the
-        merchandiser add replacement tranches after a rejection."""
+        """Sum of the request's LIVE tranches. REJECTED (Aug 2026) and
+        CANCELLED (5 Nov 2026) tranches are excluded: their amount stops
+        counting toward the invoice-total ceiling and the derived
+        deposit_amount, which is what lets the merchandiser add replacement
+        tranches after a rejection or a cancellation."""
         result = await self._session.execute(
             select(func.coalesce(func.sum(PaymentTranche.amount), 0)).where(
                 PaymentTranche.deposit_request_id == deposit_request_id,
-                PaymentTranche.status != TrancheStatus.REJECTED,
+                PaymentTranche.status.notin_(
+                    [TrancheStatus.REJECTED, TrancheStatus.CANCELLED]
+                ),
             )
         )
         return Decimal(str(result.scalar_one()))

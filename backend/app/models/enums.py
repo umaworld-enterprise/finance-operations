@@ -96,6 +96,11 @@ class TrancheStatus(str, enum.Enum):
     # for record-keeping but excluded from totals/ceilings — the merchandiser
     # adds replacement tranches until the sum matches again.
     REJECTED = "rejected"
+    # Cancelled by the merchandiser with a reason (5 Nov 2026). Like
+    # REJECTED it stays visible for the record and is excluded from totals
+    # and ceilings, but it is raised from the merchandiser's side and works
+    # even where delete is refused.
+    CANCELLED = "cancelled"
 
 
 class AdjustmentStatus(str, enum.Enum):

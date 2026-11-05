@@ -2082,3 +2082,197 @@ reported on the dashboard. Only the blocking behaviour is now opt-in.
 `test_projections.py` gained `test_lock_is_off_by_default` and
 `test_lock_can_be_disarmed_again`; the two blocking tests now arm the switch
 first. 350 backend tests green; tsc clean; production build compiles.
+
+## Analytics: new Ageing tab (5 Nov 2026)
+
+A currency matrix of deposit value by age band, with two cuts and two ageing
+bases (both confirmed choices; cells carry the deposit amount).
+
+**Cuts** — a `View` selector: *Currency-wise* puts the delay buckets down the
+left and USD / CNY / EUR across the top; *Customer-wise* puts customers down
+the left against the same currency columns. Both end in a per-currency
+**Total** row. Currencies are never added together, so there is deliberately
+no single grand total.
+
+**Bases** — an `Aged by` selector:
+* *Shipment delay* — deposits already PAID OUT whose goods have not shipped,
+  aged from the original Est ETD. Identical population, bands and boundary
+  rule (`low < days <= high`) to the Delay Buckets tab, so the two reconcile.
+* *Payment delay* — unpaid TRANCHES aged from their tentative payment date,
+  i.e. money still owed and how late it is. Amounts are the unpaid tranche
+  values, not the whole request, and a leading **Not yet due** row holds
+  everything not yet overdue.
+
+The tab also carries the standard staff / vertical / customer filters and the
+page's global date range. Column headers sort; band rows keep their ladder
+order unless the user sorts deliberately, and customer rows with nothing
+outstanding are omitted while band rows are kept so the ladder reads
+continuously.
+
+`GET /analytics/ageing?basis=&cut=&…` behind a new `ageing` permission
+section, defaulting to all roles. `_check_section_access` already falls back
+to the defaults for a section missing from a stored `analytics_permissions`
+row, so a server with older saved permissions cannot lock the new tab out.
+The admin Analytics Access page gained toggles for `ageing` **and**
+`outstanding_tracker` — the latter was gated server-side but had never been
+listed, so it could not be toggled at all.
+
+`tests/unit/test_ageing_grid.py` — 7 tests (band/currency placement, the
+shipped and unpaid exclusions, future ETDs ignored, payment-basis ageing and
+Not-yet-due, customer cut, empty customers omitted). 368 backend tests green;
+tsc clean; production build compiles. No migration.
+
+**Note:** this session's venv was a month stale (fastapi 0.115 against the
+0.133 now pinned), which surfaced as a bogus `Depends() got an unexpected
+keyword argument 'scope'` on boot. `pip install -r requirements.txt` fixed
+it — worth doing after pulling.
+
+## Batch (5 Nov 2026) — tranche cancel, formatted exports, ageing reports, MoM, searchable files, resizable ledger
+
+**Excel exports were raw (client complaint).** `build_excel` wrote every cell
+as `str(v)`, so amounts and dates arrived as text — not right-aligned, no
+separators, `SUM()` returned nothing. It now preserves real types with number
+formats (`#,##0.00`, `#,##0`, `DD-MMM-YY`), styles and freezes the header,
+adds an autofilter, borders and fitted columns. Every report benefits.
+
+**Pending Payments extract** (`GET /reports/pending-payments`, also on the
+Reports tab) carries every column the Accounts Pending tab shows, and fixes
+the ageing complaint: a **Tranches (raised date)** column lists each unpaid
+tranche with its own date, one per line, and Days Waiting / Payment Delay are
+computed from the earliest tranche's tentative date — not the file's request
+date — so the extract agrees with the Ageing tab. The Pending tab's Export
+button now downloads this server-built file instead of the unstyled
+client-side one (SheetJS cannot colour a header or set number formats).
+
+**Ageing report** (`GET /reports/ageing`) is the Analytics grid as a
+download, same service so screen and sheet agree, with the per-currency total
+row included. Both new reports appear in the Reports tab.
+
+**Merchandiser can cancel a tranche** (**migration 0039**, new `cancelled`
+value on the `tranche_status` enum, added in an autocommit block;
+downgrade maps cancelled → rejected and rebuilds the type). Cancel keeps the
+row visible with a mandatory reason, unlike delete which removes it — so it
+works once Accounts have touched the tranche AND on a file's last remaining
+tranche, both of which delete refuses. Cancelled value leaves the deposit
+total and the invoice ceiling, so replacements can be added. Cancelled is
+now treated like rejected everywhere it matters: totals, the
+"all tranches paid" check and the bank ledger rows.
+
+**Requests raised, month on month** (`GET /analytics/monthly-requests`) on
+the Overview tab: value raised per month in a chosen currency with the
+MoM change and a trailing 3-month average. The average stays blank until
+three whole months exist — a partial window reads as a dip that never
+happened. Cancelled/rejected files never count as raised.
+
+**Searchable file picker** — new `SearchableSelect` component; the Modify
+Request file list shows the most recent files and filters as you type a file
+or request number, with keyboard navigation.
+
+**Bank Ledger columns are resizable** and the widths persist per user per
+device (localStorage, confirmed choice), with a "Reset column widths" link.
+The table switches to fixed layout only once a width is set. Ledger export
+dates are now real Excel dates (`cellDates`), so the destination sheet
+formats them; the on-screen format stays 27-Apr-26 as requested.
+
+387 backend tests green (new: 8 cancel, 6 pending/ageing reports, 5 monthly
+raised); tsc clean; production build compiles.
+Deploy: `alembic upgrade head` (0039), backend + frontend together.
+
+**Still open:** the Bank Ledger "one column is short" point — I could not
+tell which column is missing against the client's sheet, so nothing was
+changed there; and the 29 Oct format reference was never in the repo, so the
+export styling follows the app's own report format pending comparison.
+
+## Dashboard tile mismatch + Google sign-in bounce (5 Nov 2026)
+
+**The 63 vs 64 was not a missing record.** The two tiles counted different
+things in two ways: Pending Payment showed an FY-to-date count of REQUESTS
+(`/requests/queue-kpis`, created since 1 April), while Pending Payments
+(Bank Ledger) showed all-time UNPAID TRANCHE rows. A file with two unpaid
+tranches is two ledger rows, and a pending file raised before 1 April was
+absent from the first number entirely — yet the Pending tile links to the
+Pending tab, which lists the all-time live queue, so the tile disagreed with
+its own list.
+
+Fixed by making the tile describe what it opens: Pending Payment now counts
+the live queue (subtext "Live — requests awaiting payment"), and the ledger
+tile spells out the unit — "Live — unpaid tranches across N requests" — so
+any remaining difference is self-explaining rather than looking like data
+loss. The other tiles keep their deliberate YTD framing.
+
+**Google sign-in sometimes bounced back to /login.** Three contributors,
+all fixed:
+* **Two navigations per login.** `handleAuthCode` pushed "/" and let RootPage
+  bounce again via `window.location`, so every sign-in re-ran the middleware
+  and `/auth/me` twice — doubling the window for a transient failure. It now
+  goes straight to the role home in a single `window.location.replace`, which
+  also keeps /login out of the back history.
+* **The middleware judged expiry on its own.** It compared the JWT `exp` to
+  the BROWSER clock with no tolerance, so a machine running slightly fast saw
+  a freshly issued token as expired and redirected to /login; and `atob` was
+  handed unpadded base64url, where a throw also meant "logged out". It now
+  allows 2 minutes of clock skew, pads the base64 correctly, and treats a
+  present-but-unreadable token as a live session — the backend authorises
+  every call anyway, so a parsing quirk must never cause a login loop.
+* **A transient `/auth/me` failure read as a logout.** It is now retried once
+  on 429 / 5xx / network errors, and RoleGuard no longer redirects to /login
+  when the failure was a service error — it shows "Could not reach the
+  server" with a retry instead.
+
+`ROLE_HOME` was duplicated in three files and is now one shared
+`lib/role-home.ts`. 387 backend tests green; tsc clean; build compiles.
+Frontend only, no migration.
+
+## Vertical master clean-up (5 Nov 2026) — migration 0040
+
+26 accumulated categories collapse into the client's 12 canonical verticals.
+Confirmed decisions: names stored CLEAN (no "01." prefix); BOTH spellings of
+Machinery/Machinary go to Hardware (the sheet sent them to different targets,
+which was a slip); "Forwarder Expense" is retired with any stragglers moved
+to Sundry first; and where a merge puts two projections on the same month,
+their amounts are SUMMED.
+
+`app/domain/vertical_mapping.py` is the single definition of the mapping —
+the migration, the preview script and the tests all read it, so they cannot
+drift. Fan-in: Sundry 8, Hardware 6, Textile 2, Electronic Goods 2, the rest
+1:1. **Frippery** has no source and is created empty.
+
+**The migration repoints, it does not drop.** Every `deposit_requests` and
+`projections` row moves to its canonical vertical before the old row is
+deleted; verticals NOT named in the mapping are deliberately left untouched.
+
+**It is genuinely reversible.** Everything is journalled into
+`vertical_merge_journal_0040` — the old vertical rows, every repointed
+request and projection, every absorbed projection with its full amounts, and
+the ids of verticals the migration created. The downgrade replays that
+journal: it recreates the old verticals with their original ids, repoints
+each row back, subtracts the summed amounts and restores the absorbed
+projection rows, then removes the verticals it invented and drops the
+journal. The journal table is intentionally LEFT BEHIND after upgrade — it is
+the only record of the pre-merge assignment.
+
+**Run the dry run first:** `python scripts/preview_vertical_merge.py` reports
+what will move (requests and projections per vertical), which projection
+periods would be summed, what gets created or deleted, and — importantly —
+any vertical in the database that the mapping does not cover, changing
+nothing. The frontend has no hardcoded vertical names, so no UI change was
+needed.
+
+`tests/unit/test_vertical_mapping.py` (7) guards the map: every target is
+canonical, 12 distinct canonical names, sources unique case-insensitively
+(the DB has a UNIQUE index on LOWER(name)), both Machinery spellings land on
+Hardware, and no canonical name carries a numeric prefix.
+
+**Migration 0040 is GATED ON PRODUCTION ONLY.** The host's `deploy.sh` runs
+`alembic upgrade head` automatically, so on production a routine deploy
+would otherwise rewrite every affected request's vertical before anyone had
+seen the dry run. On `APP_ENV=production` it refuses unless
+`VERTICAL_MERGE_CONFIRM=1` is set, failing with instructions — a failed
+migration stops the deploy and the previous containers keep serving.
+**Staging and development apply it normally**, so the merge can be exercised
+end to end on staging with no extra setup. Every other migration is
+unaffected.
+
+394 backend tests green; app boots.
+Deploy order: run the preview → database backup → deploy with
+`VERTICAL_MERGE_CONFIRM=1` → unset it again.

@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/table";
 import { Pagination } from "@/components/ui/Pagination";
 import { TableControls } from "@/components/ui/TableControls";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { byString, useClientTable } from "@/hooks/useClientTable";
 import {
   makeColumnCompare,
@@ -512,27 +513,29 @@ export default function FileRemarksPage() {
                   </Label>
                   {/* File number only (19 Aug 2026) — no supplier appended;
                       includes files born from approved splits / invoice
-                      changes, chainable to any depth. */}
-                  <select
-                    id="fr-request"
-                    value={fileKey}
-                    onChange={(e) => setFileKey(e.target.value)}
-                    className={`mt-1 ${inputCls}`}
-                  >
-                    <option value="">
-                      {selectableFiles.length === 0
-                        ? "No payment-completed files"
-                        : "Select file"}
-                    </option>
-                    {selectableFiles.map((f) => (
-                      <option
-                        key={`${f.deposit_request_id}||${f.file_number}`}
-                        value={`${f.deposit_request_id}||${f.file_number}`}
-                      >
-                        {f.file_number}
-                      </option>
-                    ))}
-                  </select>
+                      changes, chainable to any depth. Searchable since
+                      5 Nov 2026: the list outgrew a plain dropdown, so it
+                      now shows the most recent files and filters as you
+                      type a file or request number. */}
+                  <div className="mt-1">
+                    <SearchableSelect
+                      id="fr-request"
+                      value={fileKey}
+                      onChange={setFileKey}
+                      disabled={selectableFiles.length === 0}
+                      placeholder={
+                        selectableFiles.length === 0
+                          ? "No eligible files"
+                          : "Type a file or request number\u2026"
+                      }
+                      emptyMessage="No file matches that number."
+                      options={selectableFiles.map((f) => ({
+                        value: `${f.deposit_request_id}||${f.file_number}`,
+                        label: f.file_number,
+                        hint: `${f.request_number}${f.currency ? ` \u00b7 ${f.currency}` : ""} \u00b7 ${Number(f.amount).toLocaleString()}`,
+                      }))}
+                    />
+                  </div>
                 </div>
               </div>
 
