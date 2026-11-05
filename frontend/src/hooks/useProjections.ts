@@ -33,6 +33,32 @@ export function useSubmitProjections() {
   });
 }
 
+/** Advisory reminder for the request form (5 Nov 2026). Cheap and shared —
+ * fetched once for every vertical rather than per selection. */
+export function useProjectionReminders(enabled = true) {
+  return useQuery({
+    queryKey: [...PROJECTIONS_KEY, "reminders"],
+    queryFn: projectionService.reminders,
+    enabled,
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** The confirmation form's 3-month trend for one vertical. */
+export function useProjectionTrend(
+  verticalId: string | null,
+  year?: number,
+  month?: number,
+) {
+  return useQuery({
+    queryKey: [...PROJECTIONS_KEY, "trend", verticalId, year, month],
+    queryFn: () => projectionService.trend(verticalId as string, year, month),
+    enabled: !!verticalId,
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useProjectionSettings() {
   return useQuery({
     queryKey: [...PROJECTIONS_KEY, "settings"],

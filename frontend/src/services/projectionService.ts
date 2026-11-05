@@ -58,6 +58,62 @@ export interface ProjectionLockSetting {
   lock_enabled: boolean;
 }
 
+/** Projection reminder (5 Nov 2026) — ADVISORY ONLY. Shown on the request
+ * form when the chosen vertical still owes a projection; it never blocks. */
+export interface ProjectionReminder {
+  year: number;
+  month: number;
+  /** "October 2026" */
+  period_label: string;
+  /** "31 October 2026" */
+  deadline_label: string;
+  deadline: string;
+  pending: { vertical_id: string; name: string }[];
+}
+
+/** One month of the confirmation form's trend. */
+export interface ProjectionTrendRow {
+  year: number;
+  month: number;
+  /** "Oct 2026" */
+  label: string;
+  filled: boolean;
+  proposed_usd: number;
+  proposed_eur: number;
+  proposed_cny: number;
+  actual_usd: number;
+  actual_eur: number;
+  actual_cny: number;
+  /** Proposed − actual: positive = over-estimated, negative = under. */
+  variance_usd: number;
+  variance_eur: number;
+  variance_cny: number;
+}
+
+export interface ProjectionTrend {
+  vertical_id: string;
+  vertical: string;
+  year: number;
+  month: number;
+  /** "November 2026" */
+  label: string;
+  /** Newest month first, as the client's sheet is laid out. */
+  rows: ProjectionTrendRow[];
+  /** Average of the ACTUALS over the trend window — the suggested figure. */
+  suggested_usd: number;
+  suggested_eur: number;
+  suggested_cny: number;
+  confirmed: boolean;
+  confirmed_usd: number | null;
+  confirmed_eur: number | null;
+  confirmed_cny: number | null;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  /** Editing stays open to the last day of the month being projected. */
+  editable: boolean;
+  editable_until: string;
+}
+
 const projectionService = {
   settings: async (): Promise<ProjectionLockSetting> => {
     const { data } = await api.get<ProjectionLockSetting>("/projections/settings");
@@ -67,6 +123,22 @@ const projectionService = {
   setLockEnabled: async (lockEnabled: boolean): Promise<ProjectionLockSetting> => {
     const { data } = await api.put<ProjectionLockSetting>("/projections/settings", {
       lock_enabled: lockEnabled,
+    });
+    return data;
+  },
+
+  reminders: async (): Promise<ProjectionReminder> => {
+    const { data } = await api.get<ProjectionReminder>("/projections/reminders");
+    return data;
+  },
+
+  trend: async (
+    verticalId: string,
+    year?: number,
+    month?: number,
+  ): Promise<ProjectionTrend> => {
+    const { data } = await api.get<ProjectionTrend>("/projections/trend", {
+      params: { vertical_id: verticalId, year, month },
     });
     return data;
   },

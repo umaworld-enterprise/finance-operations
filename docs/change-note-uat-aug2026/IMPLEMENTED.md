@@ -2317,3 +2317,89 @@ cell and were fixed with it:
 the column's position next to Request Date); `npx tsc --noEmit` clean.
 No migration: `created_at` already exists on every tranche and is already
 exposed by the API.
+
+---
+
+## Projections — reminder, confirmation form, audit trail (5 Nov 2026)
+
+### What was already there
+
+Two of the four bullets needed no work. The lock has been **per-vertical,
+not per-merchandiser** since 7 Oct: any merchandiser may file for any
+vertical and `assert_vertical_open` applies to every role, HoM included.
+And **Analytics → Requests Raised — month on month** (value per month, vs
+last month %, trailing 3-month average, currency selector) shipped in the
+earlier 5 Nov batch; it reached staging the same morning this was asked for
+again, which is why it looked missing.
+
+Steps 1 and 2 of the attached sheet — sorting verticals to the Tally list
+and realigning transactional data — are the vertical master clean-up that
+shipped as migration 0040. Step 3, the trend, is the new work below.
+
+### The contradiction
+
+Bullet 1 ("no new deposit request allowed for that month") and bullet 3
+("not filling up shall result into lock") ask for a hard block; bullet 4
+("there should be no blockers in creating requests as it hampers work")
+forbids one; and the disclaimer's own deadline — file October's projection
+"on or before 31st October" — puts the deadline a month after blocking
+would start. Asked, and the answers came back contradictory too: *never
+block*, but *arm the lock*.
+
+Resolved as **reminder only, lock left OFF**, on the strength of the
+instruction being given three times (bullet 4, the 5 Nov quick fix that
+disarmed the lock after management were locked out, and the behaviour
+answer). The switch is untouched and a Super Admin can arm it from
+Projections whenever projections are actually flowing.
+
+### Reminder (advisory)
+
+`GET /projections/reminders` returns the period being chased, its deadline
+and the verticals still owing one. `reminder_period()` is the next month
+from the 25th and the running month before that — so one continuous
+"October 2026" reminder from 25 Sep to 31 Oct, exactly the client's example.
+
+`ProjectionReminderAlert` sits directly under the Vertical field on the
+request form and reads "Please update projection for the month October 2026
+on or before 31 October 2026". It appears only for a vertical that still
+owes one, disappears the moment it is filed, has no override and no
+blocking path, and says in so many words that the request is not blocked.
+
+### Confirmation form (the attached sheet)
+
+`ProjectionService.trend()` and `GET /projections/trend` return, per
+vertical, the three months before the target: what was **proposed**, what
+was **actually requested** (live requests dated in that month, the same
+basis as the projection dashboard), and the gap — positive where the
+projection over-estimated. The suggested figure is the average of the
+**actuals**, not of the past projections, which reproduces the sheet's
+266,667 from 250k/300k/250k rather than 275,000 from the proposed column.
+
+**Projections → Confirm projection by vertical** renders it: pick a
+vertical and currency, read the trend, then confirm the average or type
+your own figure. Confirming one currency leaves the other two as they were.
+
+### Edit window widened
+
+A projection for month M was fileable only from the 25th of M-1 to the end
+of M-1. The client asked for "edit option for that month (till end of the
+month)", so `period_editable()` now runs from the 25th of M-1 to the **last
+day of M** — October stays correctable through 31 October, matching the
+disclaimer's own deadline. Outside that window it is still Super Admin only.
+
+### Audit trail
+
+"All changes should be audit logged": `submit()` now writes through
+`AuditService` — a CREATE row carrying vertical, period and all three
+amounts for a new projection, and an UPDATE row per currency that actually
+moved, recorded before the mutation so the old value is real. `record_update`
+drops no-op fields itself.
+
+402 backend tests green (7 added/rewritten: the widened window including
+the year wrap, reminder period continuity, the trend against the client's
+own numbers, the reminder clearing per vertical, the reminder never
+blocking, and the audit rows); `npx tsc --noEmit` clean. No migration —
+projections, verticals and audit_logs all already exist.
+
+**The lock switch remains OFF.** Arming it is a one-line config change from
+Projections → the lock card, or `PUT /projections/settings`.

@@ -80,6 +80,34 @@ async def projection_status(current_user: User, db: DB) -> dict:
     return await ProjectionService(db).get_status(current_user.id)
 
 
+@router.get("/reminders")
+async def projection_reminders(current_user: User, db: DB) -> dict:
+    """Verticals still owing a projection for the period being chased, for
+    the disclaimer on the request form (5 Nov 2026). ADVISORY ONLY — it never
+    blocks a request, whatever the lock switch says."""
+    return await ProjectionService(db).reminders()
+
+
+@router.get("/trend")
+async def projection_trend(
+    current_user: User,
+    db: DB,
+    vertical_id: UUID = Query(...),
+    year: int = Query(default=None),
+    month: int = Query(default=None, ge=1, le=12),
+    months: int = Query(default=3, ge=1, le=12),
+) -> dict:
+    """Projected vs actually-requested for the three months before the target
+    period, with the average of the actuals as the suggested figure. Drives
+    the confirmation form; defaults to the period currently being chased."""
+    from app.services.projection_service import reminder_period
+
+    r_year, r_month = reminder_period(date.today())
+    return await ProjectionService(db).trend(
+        vertical_id, year or r_year, month or r_month, months=months
+    )
+
+
 @router.post("")
 async def submit_projections(
     body: ProjectionSubmit, current_user: User, db: DB
