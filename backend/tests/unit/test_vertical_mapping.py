@@ -6,9 +6,12 @@ a typo here is a data defect. These checks are cheap insurance.
 
 from app.domain.vertical_mapping import (
     CANONICAL_VERTICALS,
+    NUMBERED_VERTICALS,
     RETIRED_VERTICALS,
     VERTICAL_MERGE_MAP,
+    bare_name,
     canonical_for,
+    numbered_name,
 )
 
 
@@ -48,6 +51,39 @@ def test_lookup_is_case_and_space_insensitive():
     assert canonical_for("Something New") is None
 
 
-def test_canonical_names_carry_no_numeric_prefix():
-    """Client chose clean names over the sheet's 01./02. numbering."""
-    assert all(not v[:2].isdigit() for v in CANONICAL_VERTICALS)
+def test_stored_names_carry_the_sheet_numbering():
+    """6 Nov 2026: the client reversed the 5 Nov decision — the ordinal is
+    part of the stored name, so it shows in every dropdown and export."""
+    assert NUMBERED_VERTICALS[0] == "01.Commodity"
+    assert NUMBERED_VERTICALS[-1] == "12.Personal/Project"
+    assert NUMBERED_VERTICALS == [
+        f"{i:02d}.{v}" for i, v in enumerate(CANONICAL_VERTICALS, start=1)
+    ]
+
+
+def test_numbered_names_sort_into_the_clients_order():
+    """The list endpoint orders on LOWER(name) only; the numbering is what
+    keeps Commodity first and Personal/Project last."""
+    assert sorted(NUMBERED_VERTICALS, key=str.casefold) == NUMBERED_VERTICALS
+
+
+def test_numbering_round_trips():
+    for bare, numbered in zip(CANONICAL_VERTICALS, NUMBERED_VERTICALS):
+        assert numbered_name(bare) == numbered
+        assert bare_name(numbered) == bare
+        # Idempotent — applying it twice must not stack prefixes.
+        assert numbered_name(numbered) == numbered
+
+
+def test_numbering_leaves_everything_else_alone():
+    assert numbered_name("Something New") == "Something New"
+    assert bare_name("Something New") == "Something New"
+    # A name that merely starts with digits is not a prefix.
+    assert bare_name("3M Supplies") == "3M Supplies"
+
+
+def test_lookup_accepts_an_already_numbered_name():
+    """So the dry run and the mapping stay correct against a database
+    migration 0041 has already renamed."""
+    assert canonical_for("01.Commodity") == "Commodity"
+    assert canonical_for("11.Electronic Goods") == "Electronic Goods"

@@ -2403,3 +2403,60 @@ projections, verticals and audit_logs all already exist.
 
 **The lock switch remains OFF.** Arming it is a one-line config change from
 Projections → the lock card, or `PUT /projections/settings`.
+
+---
+
+## Numbered vertical names (6 Nov 2026) — migration 0041
+
+The client sent the vertical list back with the sheet's numbering attached
+and asked for it to be kept that way:
+
+```
+01.Commodity   02.Food       03.Sundry     04.Textile
+05.Agriculture 06.Automobile 07.Frippery   08.Frozen
+09.Medicine    10.Hardware   11.Electronic Goods
+12.Personal/Project
+```
+
+This reverses the 5 Nov decision recorded in `vertical_mapping.py` that
+names would be stored clean. The ordinal is now **part of the stored name**,
+so it appears wherever the vertical appears — the request form dropdown,
+Accounts, Payments, the projection screens and every Excel export — with no
+per-screen formatting. It also fixes the ordering for free: the verticals
+endpoint sorts on `LOWER(name)`, which previously gave alphabetical order
+and now gives the client's intended order.
+
+### Why a separate migration from 0040
+
+0040 merges 26 verticals into 12 and journals every repointed row so the
+merge can be undone. It has already run on staging with clean names, and
+rewriting it would invalidate that journal. 0041 is therefore a **rename
+only** — no request, projection or vertical id changes hands, nothing needs
+journalling, and the downgrade simply strips the prefix. On production,
+where 0040 is still held back behind `VERTICAL_MERGE_CONFIRM=1`, the two
+apply back to back and land in the same state as staging.
+
+The rename skips any vertical whose numbered name is already taken: the
+table has a UNIQUE index on `LOWER(name)`, and failing a whole deploy over a
+name someone typed by hand would be the worse outcome.
+
+### Supporting changes
+
+* `vertical_mapping.py` gains `numbered_name()`, `bare_name()` and
+  `NUMBERED_VERTICALS`. `numbered_name()` is idempotent, so the prefix
+  cannot stack.
+* `canonical_for()` now accepts an already-numbered name, and resolves a
+  canonical name that is nobody's merge source (Hardware, Frippery,
+  Electronic Goods, Personal/Project, Commodity) to itself. Before this it
+  returned `None` for those, which made `preview_vertical_merge.py` report
+  them as "not in mapping" when run against an already-merged database.
+* `preview_vertical_merge.py` shows the final stored name in its
+  `→ CANONICAL` column, so the dry run reads the way the screen will.
+* `scripts/seed.py` seeded the old 26-name list, which on a fresh database
+  would have re-created verticals 0040 had just consolidated. It now seeds
+  `NUMBERED_VERTICALS`.
+
+406 backend tests green (5 added, 1 inverted — the old test asserted names
+carry *no* numeric prefix). The rename and its downgrade were round-tripped
+against a throwaway database, including an unmapped vertical left untouched.
+No frontend change: vertical names are rendered as they arrive.
