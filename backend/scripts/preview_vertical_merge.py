@@ -19,9 +19,11 @@ from sqlalchemy import text  # noqa: E402
 from app.core.database import AsyncSessionFactory  # noqa: E402
 from app.domain.vertical_mapping import (  # noqa: E402
     CANONICAL_VERTICALS,
+    bare_name,
     RETIRED_VERTICALS,
     VERTICAL_MERGE_MAP,
     canonical_for,
+    numbered_name,
 )
 
 
@@ -35,8 +37,8 @@ async def main() -> int:
         ))).fetchall()
 
         print(f"\n{len(rows)} verticals in the database\n")
-        print(f"{'EXISTING':<34} {'→ CANONICAL':<20} {'REQUESTS':>9} {'PROJ':>6}")
-        print("-" * 74)
+        print(f"{'EXISTING':<34} {'→ CANONICAL':<24} {'REQUESTS':>9} {'PROJ':>6}")
+        print("-" * 78)
 
         moving_reqs = moving_projs = 0
         unmapped: list[tuple[str, int, int]] = []
@@ -46,14 +48,17 @@ async def main() -> int:
             target = canonical_for(name)
             if target is None:
                 unmapped.append((name, reqs, projs))
-                print(f"{name:<34} {'— not in mapping —':<20} {reqs:>9} {projs:>6}")
+                print(f"{name:<34} {'— not in mapping —':<24} {reqs:>9} {projs:>6}")
                 continue
             by_target.setdefault(target, []).append(name)
-            same = name.strip().casefold() == target.casefold()
+            # Compare bare, so a database 0041 has already renamed reads clean.
+            same = bare_name(name).casefold() == target.casefold()
             if not same:
                 moving_reqs += reqs
                 moving_projs += projs
-            print(f"{name:<34} {('(stays) ' + target) if same else ('→ ' + target):<20} {reqs:>9} {projs:>6}")
+            # 0041 renames the survivors, so show the name that will be stored.
+            final = numbered_name(target)
+            print(f"{name:<34} {('(stays) ' + final) if same else ('→ ' + final):<24} {reqs:>9} {projs:>6}")
 
         # Projection clashes: two sources holding the same period for one target.
         print("\nProjection periods that would be SUMMED on merge:")
@@ -71,13 +76,15 @@ async def main() -> int:
         summed = {k: v for k, v in grouped.items() if v > 1}
         if summed:
             for (target, year, month), n in sorted(summed.items()):
-                print(f"  {target} {year}-{month:02d}: {n} rows → 1 (amounts added together)")
+                print(f"  {numbered_name(target)} {year}-{month:02d}: "
+                      f"{n} rows → 1 (amounts added together)")
         else:
             print("  none")
 
         created = [c for c in CANONICAL_VERTICALS
-                   if not any(c.casefold() == r[1].strip().casefold() for r in rows)]
-        print(f"\nWill be CREATED: {', '.join(created) if created else 'none'}")
+                   if not any(c.casefold() == bare_name(r[1]).casefold() for r in rows)]
+        print(f"\nWill be CREATED: "
+              f"{', '.join(numbered_name(c) for c in created) if created else 'none'}")
 
         retired_present = [
             r for r in rows
