@@ -41,9 +41,10 @@ import {
 import {
   useProjectionDashboard,
   useProjectionStatus,
+  useProjectionTrend,
   useSubmitProjections,
 } from "@/hooks/useProjections";
-import { formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import type { ProjectionSubmitItem } from "@/services/projectionService";
 
 const MONTHS = [
@@ -95,6 +96,190 @@ function toItems(verticalIds: string[], draft: Draft): ProjectionSubmitItem[] {
     amount_eur: Number(draft[id]?.eur) || 0,
     amount_cny: Number(draft[id]?.cny) || 0,
   }));
+}
+
+// ── Confirm by vertical: the 3-month trend form (5 Nov 2026) ────────────────
+// The client's sheet, as a form. Pick a vertical, see what was projected
+// against what was actually requested for the last three months and the gap
+// between them, then confirm the suggested figure — the average of the
+// ACTUALS, not of the past guesses — or type your own. Editable to the last
+// day of the month; every change is audit logged.
+
+const TREND_CURRENCIES = ["usd", "eur", "cny"] as const;
+type TrendCurrency = (typeof TREND_CURRENCIES)[number];
+
+function ConfirmByVerticalForm() {
+  const { data: status } = useProjectionStatus();
+  const [verticalId, setVerticalId] = useState<string>("");
+  const [currency, setCurrency] = useState<TrendCurrency>("usd");
+  const [edited, setEdited] = useState<string | null>(null);
+  const { data: trend, isLoading } = useProjectionTrend(verticalId || null);
+  const submit = useSubmitProjections();
+
+  // A new vertical or currency drops any half-typed override.
+  const reset = (fn: () => void) => { fn(); setEdited(null); };
+
+  const suggested = trend ? trend[`suggested_${currency}` as const] : 0;
+  const confirmedValue = trend ? trend[`confirmed_${currency}` as const] : null;
+  const value = edited ?? String(confirmedValue ?? suggested ?? 0);
+
+  const doConfirm = async () => {
+    if (!trend) return;
+    const amount = Number(value) || 0;
+    try {
+      await submit.mutateAsync({
+        year: trend.year,
+        month: trend.month,
+        // Only the currency on screen changes; the other two keep whatever
+        // was already confirmed, so confirming USD cannot wipe EUR.
+        items: [{
+          vertical_id: trend.vertical_id,
+          amount_usd: currency === "usd" ? amount : (trend.confirmed_usd ?? 0),
+          amount_eur: currency === "eur" ? amount : (trend.confirmed_eur ?? 0),
+          amount_cny: currency === "cny" ? amount : (trend.confirmed_cny ?? 0),
+        }],
+      });
+      toast.success(`${trend.vertical} — ${trend.label} projection confirmed.`);
+      setEdited(null);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to confirm the projection.");
+    }
+  };
+
+  return (
+    <Card>
+      <CardContent className="p-5 md:p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <CalendarClock className="h-4 w-4 text-muted-foreground" />
+          <h2 className="font-semibold text-foreground text-sm">
+            Confirm projection by vertical
+          </h2>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Three months of projected against actually requested. The suggested figure is the
+          average of what was <span className="font-medium">actually requested</span> — confirm
+          it or type your own.
+        </p>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            className={selectCls}
+            value={verticalId}
+            onChange={(e) => reset(() => setVerticalId(e.target.value))}
+            aria-label="Vertical"
+          >
+            <option value="">Select a vertical…</option>
+            {(status?.verticals ?? []).map((v) => (
+              <option key={v.vertical_id} value={v.vertical_id}>{v.name}</option>
+            ))}
+          </select>
+          <select
+            className={selectCls}
+            value={currency}
+            onChange={(e) => reset(() => setCurrency(e.target.value as TrendCurrency))}
+            aria-label="Currency"
+          >
+            {TREND_CURRENCIES.map((c) => (
+              <option key={c} value={c}>{c.toUpperCase()}</option>
+            ))}
+          </select>
+        </div>
+
+        {!verticalId ? (
+          <p className="text-sm text-muted-foreground">
+            Pick a vertical to see its trend.
+          </p>
+        ) : isLoading || !trend ? (
+          <TableSkeleton rows={4} cols={4} />
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Month</TableHead>
+                    <TableHead className="text-right">Proposed</TableHead>
+                    <TableHead className="text-right">Advance payment requested</TableHead>
+                    <TableHead className="text-right">Over / under estimated</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {trend.rows.map((r) => {
+                    const variance = r[`variance_${currency}` as const];
+                    return (
+                      <TableRow key={r.label}>
+                        <TableCell className="font-medium text-sm whitespace-nowrap">
+                          {r.label}
+                          {!r.filled && (
+                            <span className="text-amber-700 text-xs ml-1.5">(not projected)</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm">
+                          {fmt(r[`proposed_${currency}` as const])}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm">
+                          {fmt(r[`actual_${currency}` as const])}
+                        </TableCell>
+                        <TableCell className={cn(
+                          "text-right tabular-nums text-sm",
+                          variance === 0 ? "text-muted-foreground"
+                            : variance > 0 ? "text-amber-700" : "text-red-700",
+                        )}>
+                          {fmt(variance)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  <TableRow className="bg-muted/60 hover:bg-muted/60 font-semibold">
+                    <TableCell colSpan={2} className="text-sm">
+                      {trend.label} — average of last three months
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-sm">
+                      {fmt(suggested)}
+                    </TableCell>
+                    <TableCell />
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-1">
+              <label className="inline-flex items-center gap-2 text-sm text-foreground">
+                {trend.label} confirmed projection ({currency.toUpperCase()})
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={value}
+                  onChange={(e) => setEdited(e.target.value)}
+                  disabled={!trend.editable}
+                  className={inputCls}
+                />
+              </label>
+              <Button onClick={doConfirm} disabled={!trend.editable || submit.isPending}>
+                {submit.isPending ? "Saving…"
+                  : trend.confirmed ? "Update confirmation" : "Confirm"}
+              </Button>
+              {edited !== null && (
+                <Button type="button" variant="outline" onClick={() => setEdited(null)}>
+                  Reset to average
+                </Button>
+              )}
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              {trend.confirmed && trend.confirmed_by
+                ? `Confirmed by ${trend.confirmed_by}. `
+                : ""}
+              {trend.editable
+                ? `Editable until ${formatDate(trend.editable_until)}. Every change is audit logged.`
+                : `The window for ${trend.label} has closed — only the Super Admin can change it now.`}
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 // ── Merchandiser: my projections form ────────────────────────────────────────
@@ -524,6 +709,10 @@ export default function ProjectionsPage() {
             </span>
           </p>
         )}
+        {/* Confirm-by-vertical (5 Nov 2026) leads: it shows the trend the
+            figures should be based on. The all-verticals grid below stays
+            for filling several at once. */}
+        {(isMerchandiser || isSuperAdmin) && <ConfirmByVerticalForm />}
         {isMerchandiser && <MyProjectionsForm />}
         {isSuperAdmin && <LockSwitchCard />}
         {isSuperAdmin && <OnBehalfForm />}

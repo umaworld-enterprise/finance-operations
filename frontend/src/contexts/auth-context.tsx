@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, ApiHttpError } from "@/lib/api";
 import { getToken, setToken, clearToken } from "@/lib/auth-token";
 import { loadGoogleIdentity } from "@/lib/google-identity";
+import { homeFor } from "@/lib/role-home";
 import type { AppUser } from "@/types";
 
 const DEV_USER: AppUser = {
@@ -63,7 +64,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const { data } = await api.get<AppUser>("/auth/me");
+      // One retry on a TRANSIENT failure (429 from the rate limiter, a 5xx,
+      // or a network blip). Without it a single hiccup right after sign-in
+      // left user=null and the guards bounced the user back to /login —
+      // the reported "throws back to the login screen" (5 Nov 2026).
+      let data: AppUser;
+      try {
+        ({ data } = await api.get<AppUser>("/auth/me"));
+      } catch (first: unknown) {
+        const transient =
+          !(first instanceof ApiHttpError) ||
+          first.status === 429 ||
+          first.status >= 500 ||
+          first.status === 0;
+        if (!transient) throw first;
+        await new Promise((r) => setTimeout(r, 600));
+        ({ data } = await api.get<AppUser>("/auth/me"));
+      }
       setUser(data);
       setAuthError(null);
     } catch (err: unknown) {
@@ -100,7 +117,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         fetchedRef.current = true;
         setUser(data.user);
         setAuthError(null);
-        router.push("/"); // RootPage routes to the user's role home
+        // Go straight to the user's home in ONE navigation. Routing via "/"
+        // meant a client push followed by a full reload from RootPage, and
+        // every extra hop re-ran the middleware and /auth/me — the window in
+        // which a transient failure threw the user back to the login screen.
+        // replace() also keeps /login out of the back-button history.
+        window.location.replace(homeFor(data.user));
       } catch (err: unknown) {
         setUser(null);
         if (err instanceof ApiHttpError && err.status === 403) {

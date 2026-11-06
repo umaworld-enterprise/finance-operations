@@ -184,7 +184,7 @@ export type FontSize = "default" | "large" | "xlarge";
 
 // ── Advance Payment Tranches ───────────────────────────────────────────────────
 
-export type TrancheStatus = "unpaid" | "paid" | "rejected";
+export type TrancheStatus = "unpaid" | "paid" | "rejected" | "cancelled";
 
 export interface PaymentTranche {
   id: string;

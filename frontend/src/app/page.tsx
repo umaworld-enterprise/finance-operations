@@ -7,14 +7,7 @@ import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AlertTriangle, ShieldOff, WifiOff } from "lucide-react";
-
-const ROLE_HOME: Record<string, string> = {
-  merchandiser: "/merchandiser",
-  accounts_team: "/accounts",
-  finance_admin: "/finance",
-  super_admin: "/admin",
-  head_of_merchandiser: "/hom",
-};
+import { homeFor } from "@/lib/role-home";
 
 export default function RootPage() {
   const { user, loading, authError, signOut } = useAuth();
@@ -26,9 +19,7 @@ export default function RootPage() {
       return;
     }
     if (user) {
-      window.location.href = user.onboarding_completed
-        ? (ROLE_HOME[user.role] ?? "/analytics")
-        : "/onboarding";
+      window.location.replace(homeFor(user));
     }
   }, [user, loading, authError]);
 

@@ -54,6 +54,30 @@ def month_bounds(year: int, month: int) -> tuple[date, date]:
     return date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
 
 
+# ── Editable window (5 Nov 2026) ─────────────────────────────────────────────
+# A projection for month M may be filed or edited from the 25th of M-1 through
+# the LAST DAY of M — "Please update projection for the month October 2026 on
+# or before 31st October". It previously closed at the end of M-1, which left
+# a merchandiser no way to correct a figure once the month was under way.
+
+def window_opens_for(year: int, month: int) -> date:
+    """The 25th of the month BEFORE the one being projected."""
+    py, pm = (year - 1, 12) if month == 1 else (year, month - 1)
+    return date(py, pm, WINDOW_OPENS_ON)
+
+
+def period_editable(year: int, month: int, today: date) -> bool:
+    return window_opens_for(year, month) <= today <= month_bounds(year, month)[1]
+
+
+def reminder_period(today: date) -> tuple[int, int]:
+    """The period the requester is nagged about. From the 25th it is NEXT
+    month (its window has just opened); before that it is the month already
+    running, which stays editable to its last day. The effect is one
+    continuous reminder for October from 25 September to 31 October."""
+    return next_period(today) if window_open(today) else (today.year, today.month)
+
+
 # ── Feature switch: the per-vertical request lock (9 Oct 2026) ───────────────
 # The lock shipped ON and stopped management raising requests for verticals
 # with no projection. It is now OPT-IN and defaults to OFF: with no stored
@@ -207,6 +231,146 @@ class ProjectionService:
             "locked_verticals": [v.name for v in verticals if v.id in locked],
         }
 
+    async def _actuals(self, vertical_id: UUID, start: date, end: date) -> dict[str, Decimal]:
+        """Advance payment actually REQUESTED for one vertical in a date range
+        — the deposit amounts of live requests raised in that window. Same
+        basis as the projection dashboard, so the two never disagree."""
+        row = (
+            await self._session.execute(
+                select(
+                    func.coalesce(func.sum(case(
+                        (DepositRequest.currency == CurrencyCode.USD, DepositRequest.deposit_amount),
+                        else_=0)), 0).label("usd"),
+                    func.coalesce(func.sum(case(
+                        (DepositRequest.currency == CurrencyCode.EUR, DepositRequest.deposit_amount),
+                        else_=0)), 0).label("eur"),
+                    func.coalesce(func.sum(case(
+                        (DepositRequest.currency == CurrencyCode.CNY, DepositRequest.deposit_amount),
+                        else_=0)), 0).label("cny"),
+                ).where(
+                    DepositRequest.is_deleted == False,  # noqa: E712
+                    DepositRequest.vertical_id == vertical_id,
+                    DepositRequest.current_status.notin_(_EXCLUDED_STATUSES),
+                    func.date(DepositRequest.created_at) >= start,
+                    func.date(DepositRequest.created_at) <= end,
+                )
+            )
+        ).one()
+        return {c: Decimal(str(getattr(row, c) or 0)) for c in ("usd", "eur", "cny")}
+
+    async def trend(
+        self, vertical_id: UUID, year: int, month: int, months: int = 3
+    ) -> dict:
+        """The confirmation form's trend (5 Nov 2026, executive request).
+
+        For the `months` periods BEFORE (year, month), each row carries what
+        was projected, what was actually requested, and the gap between them
+        — positive where the projection was an over-estimate. The suggested
+        figure is the average of the ACTUALS, not of the past projections:
+        the point of the exercise is to anchor next month on what the
+        vertical really spends, not on what it previously guessed.
+        """
+        vertical = await self._session.get(Vertical, vertical_id)
+        if vertical is None or not vertical.is_active:
+            raise ValidationError("Unknown or inactive vertical.")
+
+        periods: list[tuple[int, int]] = []
+        y, m = year, month
+        for _ in range(months):
+            y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+            periods.append((y, m))
+
+        rows = []
+        for py, pm in periods:
+            start, end = month_bounds(py, pm)
+            proj = (
+                await self._session.execute(
+                    select(Projection).where(
+                        Projection.vertical_id == vertical_id,
+                        Projection.year == py,
+                        Projection.month == pm,
+                    )
+                )
+            ).scalar_one_or_none()
+            actual = await self._actuals(vertical_id, start, end)
+            row = {
+                "year": py,
+                "month": pm,
+                "label": start.strftime("%b %Y"),
+                "filled": proj is not None,
+            }
+            for cur in ("usd", "eur", "cny"):
+                proposed = Decimal(str(getattr(proj, f"amount_{cur}"))) if proj else Decimal("0")
+                row[f"proposed_{cur}"] = float(proposed)
+                row[f"actual_{cur}"] = float(actual[cur])
+                # Over-estimate positive, under-estimate negative — the
+                # sheet's "Overestimated/Underestimated Projections".
+                row[f"variance_{cur}"] = float(proposed - actual[cur])
+            rows.append(row)
+
+        suggested = {}
+        for cur in ("usd", "eur", "cny"):
+            total = sum(Decimal(str(r[f"actual_{cur}"])) for r in rows)
+            avg = (total / Decimal(len(rows))) if rows else Decimal("0")
+            suggested[f"suggested_{cur}"] = float(round(avg, 2))
+
+        existing = (
+            await self._session.execute(
+                select(Projection)
+                .where(
+                    Projection.vertical_id == vertical_id,
+                    Projection.year == year,
+                    Projection.month == month,
+                )
+                .options(selectinload(Projection.submitter))
+            )
+        ).scalar_one_or_none()
+
+        _, closes = month_bounds(year, month)
+        today = date.today()
+        return {
+            "vertical_id": str(vertical_id),
+            "vertical": vertical.name,
+            "year": year,
+            "month": month,
+            "label": month_bounds(year, month)[0].strftime("%B %Y"),
+            # Newest month first, as the sheet is laid out.
+            "rows": rows,
+            **suggested,
+            "confirmed": existing is not None,
+            "confirmed_usd": float(existing.amount_usd) if existing else None,
+            "confirmed_eur": float(existing.amount_eur) if existing else None,
+            "confirmed_cny": float(existing.amount_cny) if existing else None,
+            "confirmed_by": (
+                existing.submitter.full_name if existing and existing.submitter else None
+            ),
+            "confirmed_at": existing.updated_at.isoformat() if existing else None,
+            # Editing stays open to the last day of the month being projected.
+            "editable": period_editable(year, month, today),
+            "editable_until": closes.isoformat(),
+        }
+
+    async def reminders(self, today: date | None = None) -> dict:
+        """Which verticals still owe a projection for the period currently
+        being chased, for the disclaimer on the request form (5 Nov 2026).
+
+        Advisory only — it never blocks. The request form shows the banner
+        when the vertical the requester picked appears in `pending`.
+        """
+        today = today or date.today()
+        r_year, r_month = reminder_period(today)
+        start, closes = month_bounds(r_year, r_month)
+        missing = await self.missing_verticals(r_year, r_month)
+        return {
+            "year": r_year,
+            "month": r_month,
+            "period_label": start.strftime("%B %Y"),
+            # "on or before 31st October" — the client's wording.
+            "deadline_label": f"{closes.day} {closes.strftime('%B %Y')}",
+            "deadline": closes.isoformat(),
+            "pending": [{"vertical_id": str(v.id), "name": v.name} for v in missing],
+        }
+
     async def submit(
         self,
         user_id: UUID,
@@ -226,15 +390,18 @@ class ProjectionService:
         """
         today = today or date.today()
         if role == UserRole.MERCHANDISER:
-            t_year, t_month = next_period(today)
-            if (year, month) != (t_year, t_month):
+            # Open from the 25th of the previous month to the LAST DAY of the
+            # month being projected (5 Nov 2026) — the client asked for an
+            # edit option "till end of the month", so a figure can be
+            # corrected while the month is still running.
+            if not period_editable(year, month, today):
+                opens = window_opens_for(year, month)
+                closes = month_bounds(year, month)[1]
                 raise BusinessRuleError(
-                    "Merchandisers can only file the NEXT month's projections."
-                )
-            if not window_open(today):
-                raise BusinessRuleError(
-                    f"The projection window opens on the {WINDOW_OPENS_ON}th of the "
-                    "month. After the deadline, only the Super Admin can add them."
+                    f"{month_bounds(year, month)[0].strftime('%B %Y')} projections can be "
+                    f"filed or edited between {opens.strftime('%d %b %Y')} and "
+                    f"{closes.strftime('%d %b %Y')}. Outside that window only the "
+                    "Super Admin can change them."
                 )
         elif role != UserRole.SUPER_ADMIN:
             raise AuthorizationError(
@@ -243,6 +410,9 @@ class ProjectionService:
         if not items:
             raise ValidationError("No projection rows supplied.")
 
+        from app.services.audit_service import AuditService
+
+        audit = AuditService(self._session)
         count = 0
         for item in items:
             vertical = await self._session.get(Vertical, item["vertical_id"])
@@ -266,6 +436,18 @@ class ProjectionService:
                 )
             ).scalar_one_or_none()
             if existing:
+                # Audit BEFORE mutating — "all changes should be audit
+                # logged" (5 Nov 2026). One row per currency that moved;
+                # record_update drops no-op fields on its own.
+                for field, value in amounts.items():
+                    await audit.record_update(
+                        entity_name="projection",
+                        entity_id=existing.id,
+                        changed_by=user_id,
+                        field_name=f"{field} {year}-{month:02d} {vertical.name}",
+                        old_value=str(getattr(existing, field)),
+                        new_value=str(value),
+                    )
                 for field, value in amounts.items():
                     setattr(existing, field, value)
                 # No vertical owner any more — the row belongs to whoever
@@ -273,15 +455,25 @@ class ProjectionService:
                 existing.user_id = user_id
                 existing.submitted_by = user_id
             else:
-                self._session.add(
-                    Projection(
-                        vertical_id=vertical.id,
-                        user_id=user_id,
-                        year=year,
-                        month=month,
-                        submitted_by=user_id,
-                        **amounts,
-                    )
+                fresh = Projection(
+                    vertical_id=vertical.id,
+                    user_id=user_id,
+                    year=year,
+                    month=month,
+                    submitted_by=user_id,
+                    **amounts,
+                )
+                self._session.add(fresh)
+                # Flushed here so the audit row can carry the real id.
+                await self._session.flush()
+                await audit.record_create(
+                    entity_name="projection",
+                    entity_id=fresh.id,
+                    changed_by=user_id,
+                    new_value=(
+                        f"{vertical.name} {year}-{month:02d}: "
+                        + ", ".join(f"{k[-3:].upper()} {v}" for k, v in amounts.items())
+                    ),
                 )
             count += 1
         await self._session.flush()

@@ -28,10 +28,12 @@ function statusLabel(value: string): string {
 // from https://cdn.sheetjs.com — the fixed builds are not published to npm.
 async function writeSheet(data: Record<string, unknown>[], filename: string, sheet: string) {
   const XLSX = await import("xlsx");
-  const ws = XLSX.utils.json_to_sheet(data);
+  // cellDates keeps JS Dates as real date cells instead of stringifying
+  // them (5 Nov 2026); dateNF is the format Excel shows them in.
+  const ws = XLSX.utils.json_to_sheet(data, { cellDates: true, dateNF: "dd-mmm-yy" });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheet);
-  XLSX.writeFile(wb, filename);
+  XLSX.writeFile(wb, filename, { cellDates: true });
 }
 
 export async function exportRequestsToExcel(
@@ -92,7 +94,8 @@ export function bankLedgerEntries(
 ): BankLedgerEntry[] {
   const entries = rows.flatMap((r) =>
     (r.tranches ?? [])
-      .filter((t) => t.status !== "rejected")
+      // Rejected and cancelled tranches are dead records — never ledger rows.
+      .filter((t) => t.status !== "rejected" && t.status !== "cancelled")
       .filter((t) => (opts?.unpaidOnly ? t.status === "unpaid" : true))
       .map((t) => ({
         date:
@@ -118,7 +121,9 @@ export async function exportBankLedgerToExcel(
 ): Promise<void> {
   await writeSheet(
     bankLedgerEntries(rows, opts).map((e) => ({
-      "Date": formatDateSheet(e.date),
+      // A real Date, not text: Excel then sorts and formats it itself
+      // (5 Nov 2026). The display format is applied below.
+      "Date": e.date ? new Date(`${e.date.slice(0, 10)}T00:00:00`) : "",
       "Supplier": e.supplier,
       "Supplier Proforma Invoice #": e.supplier_invoice,
       "File Nos.": e.file_nos,
@@ -154,4 +159,23 @@ export async function exportPendingReleaseToExcel(
     filename,
     "Yet to be Released",
   );
+}
+
+// Styled server-side Pending Payments extract (5 Nov 2026). The client-side
+// SheetJS path cannot colour a header or write real number/date cells — the
+// backend builds it with openpyxl instead, so the download matches the tab
+// and the figures are summable in Excel.
+export async function downloadPendingPaymentsReport(): Promise<void> {
+  const { api } = await import("@/lib/api");
+  const res = await api.get("/reports/pending-payments?fmt=excel", { responseType: "blob" });
+  const url = window.URL.createObjectURL(
+    new Blob([res.data as BlobPart], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+  );
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `pending-payments-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.click();
+  window.URL.revokeObjectURL(url);
 }

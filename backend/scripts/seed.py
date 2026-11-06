@@ -19,6 +19,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+from app.domain.vertical_mapping import NUMBERED_VERTICALS
 from app.models.enums import CurrencyCode, UserRole
 from app.models.masters import Customer, Supplier, SystemConfig, User, Vertical
 
@@ -27,20 +28,10 @@ settings = get_settings()
 
 # ── Seed data definitions ─────────────────────────────────────────────────────
 
-VERTICALS = [
-    "Frozen",
-    "Hardware - Raw Material",
-    "Hardware - Building Material",
-    "Hardware - Engine & Generator",
-    "White Goods",
-    "Textile",
-    "Food",
-    "Sundry",
-    "Automobile",
-    "Agriculture",
-    "Machinery",
-    "Commodities",
-]
+# The 12 canonical verticals, numbered as they are stored (6 Nov 2026).
+# Taken from the merge mapping so a fresh database seeds the same names
+# migrations 0040/0041 leave behind, rather than the 26 they consolidated.
+VERTICALS = NUMBERED_VERTICALS
 
 # Customers — extend this list with actual values from the business
 CUSTOMERS = [

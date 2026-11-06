@@ -333,6 +333,15 @@ export function usePayTranche(requestId: string) {
   });
 }
 
+export function useCancelTranche(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ trancheId, reason }: { trancheId: string; reason: string }) =>
+      requestService.cancelTranche(requestId, trancheId, reason),
+    onSuccess: () => invalidateRequestAndTranches(qc, requestId),
+  });
+}
+
 export function useRejectTranche(requestId: string) {
   const qc = useQueryClient();
   return useMutation({

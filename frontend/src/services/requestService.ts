@@ -273,6 +273,16 @@ const requestService = {
     return data;
   },
 
+  // Merchandiser cancels an unpaid tranche (5 Nov 2026) — the row stays on
+  // the file as a cancelled record, unlike delete which removes it.
+  cancelTranche: async (id: string, trancheId: string, reason: string): Promise<PaymentTranche> => {
+    const { data } = await api.post<PaymentTranche>(
+      `/requests/${id}/tranches/${trancheId}/cancel`,
+      { reason },
+    );
+    return data;
+  },
+
   rejectTranche: async (id: string, trancheId: string, reason: string): Promise<PaymentTranche> => {
     const { data } = await api.post<PaymentTranche>(
       `/requests/${id}/tranches/${trancheId}/reject`,

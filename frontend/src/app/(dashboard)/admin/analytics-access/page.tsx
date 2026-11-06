@@ -18,6 +18,10 @@ const SECTIONS: { key: string; label: string; description: string }[] = [
   { key: "by_merchandiser", label: "By Merchandiser",   description: "Overdue amounts, contribution %, avg delay, and notional gain grouped by staff member" },
   { key: "by_vertical",     label: "By Vertical",       description: "Same breakdown grouped by product category / vertical" },
   { key: "by_customer",     label: "By Customer",       description: "Customer-wise breakdown with max delay days and ETD pending count" },
+  // outstanding_tracker was gated server-side but missing from this list, so
+  // it could never be toggled; added alongside ageing (5 Nov 2026).
+  { key: "outstanding_tracker", label: "Outstanding",   description: "Unpaid requested tranche value grouped by week, merchandiser, customer or vertical" },
+  { key: "ageing",          label: "Ageing",            description: "Deposit value aged into 15-day bands as a currency matrix \u2014 by delay bucket or by customer" },
 ];
 
 const ROLES: { value: string; label: string }[] = [

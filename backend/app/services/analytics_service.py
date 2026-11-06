@@ -69,6 +69,7 @@ ANALYTICS_SECTIONS = [
     "by_vertical",
     "by_customer",
     "outstanding_tracker",
+    "ageing",
 ]
 
 # 4 Sep 2026 (client decision): analytics open to ALL roles by default —
@@ -76,6 +77,14 @@ ANALYTICS_SECTIONS = [
 # can restrict again if ever needed. (A stored `analytics_permissions`
 # system_config row overrides these defaults — clear it or flip the toggles
 # if a server was previously restricted.)
+# Cancelled / rejected files never represent money raised (5 Nov 2026).
+_EXCLUDED_FROM_RAISED = (
+    RequestStatus.CANCELLED_BY_MERCHANDISER,
+    RequestStatus.CANCELLED_BY_ACCOUNTS,
+    RequestStatus.REJECTED_BY_HOM,
+    RequestStatus.REJECTED_BY_ACCOUNTS,
+)
+
 _ALL_ROLES = [
     "super_admin", "finance_admin", "accounts_team",
     "merchandiser", "head_of_merchandiser",
@@ -440,6 +449,294 @@ class AnalyticsService:
             "yet_to_ship":      row.yet_to_ship or 0,
             "total_active":     row.total_active or 0,
         }
+
+    async def get_monthly_requests_raised(
+        self, currency: str = "USD", months: int = 12
+    ) -> list[dict]:
+        """Value of requests RAISED per month in one currency, month over
+        month, with a trailing 3-month average (5 Nov 2026).
+
+        Counted on the request date, over live requests only (cancelled and
+        rejected files never represent money raised). The average is the mean
+        of the month and the two before it, so the first two months of the
+        window report None rather than a figure computed from missing data.
+        """
+        today = Date.today()
+        # Walk back `months` whole months, then forward again so the series
+        # is contiguous even where a month has no requests at all.
+        start_year, start_month = today.year, today.month
+        for _ in range(months - 1):
+            start_month -= 1
+            if start_month == 0:
+                start_month, start_year = 12, start_year - 1
+        window_start = Date(start_year, start_month, 1)
+
+        rows = (
+            await self._session.execute(
+                select(
+                    extract("year", DepositRequest.created_at).label("y"),
+                    extract("month", DepositRequest.created_at).label("m"),
+                    func.coalesce(func.sum(DepositRequest.deposit_amount), 0).label("total"),
+                    func.count(DepositRequest.id).label("cases"),
+                )
+                .where(
+                    DepositRequest.is_deleted == False,  # noqa: E712
+                    DepositRequest.current_status.notin_(_EXCLUDED_FROM_RAISED),
+                    DepositRequest.currency == currency,
+                    func.date(DepositRequest.created_at) >= window_start,
+                )
+                .group_by("y", "m")
+            )
+        ).all()
+        by_period = {(int(r.y), int(r.m)): (float(r.total or 0), int(r.cases)) for r in rows}
+
+        MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        series: list[dict] = []
+        y, m = start_year, start_month
+        for _ in range(months):
+            total, cases = by_period.get((y, m), (0.0, 0))
+            series.append({
+                "year": y,
+                "month": m,
+                "label": f"{MONTHS[m - 1]} {str(y)[2:]}",
+                "currency": currency,
+                "total": round(total, 2),
+                "requests": cases,
+            })
+            m += 1
+            if m == 13:
+                m, y = 1, y + 1
+
+        for i, point in enumerate(series):
+            window = series[max(0, i - 2): i + 1]
+            # Only a full three months gets an average — a partial one would
+            # read as a dip that never happened.
+            point["avg_3m"] = (
+                round(sum(p["total"] for p in window) / 3, 2) if i >= 2 else None
+            )
+            prev = series[i - 1]["total"] if i else None
+            point["mom_change"] = (
+                round(point["total"] - prev, 2) if prev is not None else None
+            )
+            point["mom_pct"] = (
+                round((point["total"] - prev) / prev * 100, 1)
+                if prev not in (None, 0)
+                else None
+            )
+        return series
+
+    # ── Ageing grid (5 Nov 2026, executive request) ──────────────────────
+    # A matrix of deposit value by age band, cut either by CURRENCY columns
+    # against delay-bucket rows, or by CURRENCY columns against customer
+    # rows. Two ageing bases, chosen by the caller:
+    #
+    #   shipment — money already PAID OUT sitting against goods that have not
+    #              shipped, aged from the original Est ETD. Identical
+    #              population and bands to the Delay Buckets tab, so the two
+    #              reconcile to the cent.
+    #   payment  — money we still OWE: unpaid tranches aged from their
+    #              tentative payment date. Amounts are the unpaid tranche
+    #              values, not the whole request.
+
+    _AGEING_BANDS: list[tuple[str, int | None, int | None]] = [
+        ("0-15 Days", None, 15),
+        ("15-30 Days", 15, 30),
+        ("30-45 Days", 30, 45),
+        ("45-60 Days", 45, 60),
+        ("60-75 Days", 60, 75),
+        ("75-90 Days", 75, 90),
+        ("90-105 Days", 90, 105),
+        ("105-120 Days", 105, 120),
+        ("120-135 Days", 120, 135),
+        ("135-150 Days", 135, 150),
+        (">150 Days", 150, None),
+    ]
+
+    async def get_ageing(
+        self,
+        basis: str = "shipment",
+        cut: str = "currency",
+        date_from: Date | None = None,
+        date_to: Date | None = None,
+        staff_id: UUID | None = None,
+        vertical_id: UUID | None = None,
+        customer_id: UUID | None = None,
+    ) -> dict:
+        """Deposit value aged into bands, as a currency matrix.
+
+        Returns {currencies, rows:[{label, amounts:{CUR: value}}], totals}.
+        Column totals are per currency — different currencies are never
+        added together.
+        """
+        rows_src = (
+            await self._ageing_payment_rows(
+                date_from, date_to, staff_id, vertical_id, customer_id
+            )
+            if basis == "payment"
+            else await self._ageing_shipment_rows(
+                date_from, date_to, staff_id, vertical_id, customer_id
+            )
+        )
+
+        # Currency columns: the familiar three first, then anything else that
+        # actually carries value, so nothing is silently dropped.
+        preferred = ["USD", "CNY", "EUR"]
+        present = {r["currency"] for r in rows_src if r["currency"]}
+        currencies = [c for c in preferred if c in present] + sorted(
+            c for c in present if c not in preferred
+        )
+
+        if cut == "customer":
+            order = []
+            seen = set()
+            for r in sorted(rows_src, key=lambda r: (r["customer"] or "").lower()):
+                if r["customer"] not in seen:
+                    seen.add(r["customer"])
+                    order.append(r["customer"])
+            key = lambda r: r["customer"]  # noqa: E731
+            labels = order
+        else:
+            key = lambda r: r["band"]  # noqa: E731
+            labels = [b[0] for b in self._AGEING_BANDS]
+            if basis == "payment":
+                labels = ["Not yet due", *labels]
+
+        grid: dict[str, dict[str, float]] = {
+            label: {c: 0.0 for c in currencies} for label in labels
+        }
+        for r in rows_src:
+            label, cur = key(r), r["currency"]
+            if label not in grid or cur not in currencies:
+                continue
+            grid[label][cur] += float(r["amount"])
+
+        out_rows = [
+            {"label": label, "amounts": grid[label]}
+            for label in labels
+            # Customer rows with nothing in them are noise; band rows are kept
+            # so the ladder reads continuously even where a band is empty.
+            if cut != "customer" or any(grid[label].values())
+        ]
+        totals = {
+            c: round(sum(row["amounts"][c] for row in out_rows), 2) for c in currencies
+        }
+        for row in out_rows:
+            row["amounts"] = {c: round(v, 2) for c, v in row["amounts"].items()}
+
+        return {
+            "basis": basis,
+            "cut": cut,
+            "currencies": currencies,
+            "rows": out_rows,
+            "totals": totals,
+        }
+
+    async def _ageing_shipment_rows(
+        self, date_from, date_to, staff_id, vertical_id, customer_id
+    ) -> list[dict]:
+        """Paid-but-unshipped deposits past their Est ETD — the same rows and
+        the same banding the Delay Buckets tab uses."""
+        from app.models.masters import Customer
+
+        stmt = (
+            select(
+                DepositRequest.estimated_etd,
+                PaymentDetails.payment_date,
+                PaymentDetails.ship_date,
+                DepositRequest.deposit_amount,
+                DepositRequest.currency,
+                Customer.name.label("customer_name"),
+            )
+            .select_from(AnalyticsSnapshot)
+            .join(DepositRequest, AnalyticsSnapshot.deposit_request_id == DepositRequest.id)
+            .join(Customer, Customer.id == DepositRequest.customer_id)
+            .outerjoin(PaymentDetails, PaymentDetails.deposit_request_id == DepositRequest.id)
+            .where(DepositRequest.is_deleted == False)  # noqa: E712
+            .where(DepositRequest.current_status.notin_(_DASH_EXCLUDED_STATUSES))
+        )
+        stmt = self._ageing_filters(
+            stmt, date_from, date_to, staff_id, vertical_id, customer_id
+        )
+        today = Date.today()
+        out: list[dict] = []
+        for r in (await self._session.execute(stmt)).fetchall():
+            # Graced/Delayed only: paid, not shipped, ETD already passed.
+            if r.payment_date is None or r.ship_date is not None:
+                continue
+            if r.estimated_etd is None or r.estimated_etd >= today:
+                continue
+            days = (today - r.estimated_etd).days
+            out.append({
+                "band": self._ageing_band(days),
+                "customer": r.customer_name,
+                "currency": r.currency.value if hasattr(r.currency, "value") else str(r.currency),
+                "amount": r.deposit_amount or 0,
+            })
+        return out
+
+    async def _ageing_payment_rows(
+        self, date_from, date_to, staff_id, vertical_id, customer_id
+    ) -> list[dict]:
+        """Unpaid tranches aged from their tentative payment date — what we
+        still owe, and how late it is."""
+        from app.models.enums import TrancheStatus
+        from app.models.masters import Customer
+        from app.models.tranche import PaymentTranche
+
+        stmt = (
+            select(
+                PaymentTranche.amount,
+                PaymentTranche.tentative_payment_date,
+                DepositRequest.currency,
+                Customer.name.label("customer_name"),
+            )
+            .select_from(PaymentTranche)
+            .join(DepositRequest, DepositRequest.id == PaymentTranche.deposit_request_id)
+            .join(Customer, Customer.id == DepositRequest.customer_id)
+            .where(DepositRequest.is_deleted == False)  # noqa: E712
+            .where(DepositRequest.current_status.notin_(_DASH_EXCLUDED_STATUSES))
+            .where(PaymentTranche.status == TrancheStatus.UNPAID)
+        )
+        stmt = self._ageing_filters(
+            stmt, date_from, date_to, staff_id, vertical_id, customer_id
+        )
+        today = Date.today()
+        out: list[dict] = []
+        for r in (await self._session.execute(stmt)).fetchall():
+            due = r.tentative_payment_date
+            days = None if due is None else (today - due).days
+            out.append({
+                "band": "Not yet due" if days is None or days < 0 else self._ageing_band(days),
+                "customer": r.customer_name,
+                "currency": r.currency.value if hasattr(r.currency, "value") else str(r.currency),
+                "amount": r.amount or 0,
+            })
+        return out
+
+    @staticmethod
+    def _ageing_filters(stmt, date_from, date_to, staff_id, vertical_id, customer_id):
+        if date_from:
+            stmt = stmt.where(DepositRequest.created_at >= date_from)
+        if date_to:
+            stmt = stmt.where(DepositRequest.created_at <= date_to)
+        if staff_id:
+            stmt = stmt.where(DepositRequest.created_by == staff_id)
+        if vertical_id:
+            stmt = stmt.where(DepositRequest.vertical_id == vertical_id)
+        if customer_id:
+            stmt = stmt.where(DepositRequest.customer_id == customer_id)
+        return stmt
+
+    @classmethod
+    def _ageing_band(cls, days: int) -> str:
+        """Same boundary rule as the Delay Buckets tab: low < days <= high."""
+        for label, low, high in cls._AGEING_BANDS:
+            if low is not None and days <= low:
+                continue
+            if high is None or days <= high:
+                return label
+        return ">150 Days"
 
     async def get_delay_buckets(
         self,

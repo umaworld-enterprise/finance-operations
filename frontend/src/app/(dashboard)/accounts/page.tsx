@@ -27,12 +27,12 @@ import { SearchInput } from "@/components/ui/SearchInput";
 import { SortSelect, type RequestSort } from "@/components/ui/SortSelect";
 // nextTentativeDate / paymentDelay* are shared with the export and the
 // merchandiser list, so every surface ages a file identically.
-import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, formatDateSheet, cn, hasHighPriorityUnpaid, nextTentativeDate, paymentDelayBucket, paymentDelayDays, requestDisplayNumber, requestMatchesSearch, sortRequests } from "@/lib/utils";
+import { amountPayable, currencyDisplayLabel, formatCurrency, formatDate, formatDateSheet, cn, hasHighPriorityUnpaid, nextTentativeDate, paymentDelayBucket, paymentDelayDays, requestDisplayNumber, requestMatchesSearch, sortRequests, unpaidTrancheRaisedDates } from "@/lib/utils";
 import { SortableHead, sortByColumn, useColumnSortState, type ColumnAccessors } from "@/components/ui/SortableHead";
 import { differenceInDays } from "date-fns";
 import { needsRelease } from "@/components/tranches/TrancheList";
 import { ExportButton } from "@/components/ui/ExportButton";
-import { bankLedgerEntries, exportBankLedgerToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
+import { bankLedgerEntries, downloadPendingPaymentsReport, exportBankLedgerToExcel, exportRequestsToExcel, latestPaymentDate } from "@/lib/exportExcel";
 import { BankLedgerTable } from "@/components/tables/BankLedgerTable";
 import { filterParams, matchesRequestFilters, RequestFilterBar, type RequestFilterValues } from "@/components/filters/RequestFilterBar";
 import { BulkPayDialog, nextPayableTranche } from "@/components/accounts/BulkPayDialog";
@@ -41,6 +41,7 @@ import { UnseenDot } from "@/components/ui/UnseenDot";
 import { usePresence } from "@/hooks/usePresence";
 import { useUnseenRequests } from "@/hooks/useUnseenRequests";
 import { Clock, CheckCircle, AlertTriangle, BookOpen, ClipboardList, ArrowRight, XCircle, Ban } from "lucide-react";
+import { toast } from "sonner";
 import Link from "next/link";
 import type { DepositRequest } from "@/types";
 
@@ -107,6 +108,8 @@ function depositPct(req: DepositRequest): string {
 const PENDING_ACCESSORS: ColumnAccessors<DepositRequest> = {
   request:      (r) => requestDisplayNumber(r),
   request_date: (r) => r.created_at,
+  // Earliest unpaid tranche's raised date — undated files sink either way.
+  tranche_raised: (r) => unpaidTrancheRaisedDates(r).map((t) => t.raised).filter(Boolean).sort()[0] ?? null,
   invoice:      (r) => r.sunshine_invoice_number,
   supplier:     (r) => r.supplier?.name,
   proforma:     (r) => r.supplier_invoice_number,
@@ -250,6 +253,11 @@ function PendingTable({
             </div>
             <div className="text-xs text-muted-foreground font-mono">Invoice # {req.sunshine_invoice_number || "—"}</div>
             <div className="text-xs text-muted-foreground">Requested: {formatDateSheet(req.created_at) || "—"}</div>
+            {unpaidTrancheRaisedDates(req).map((t) => (
+              <div key={t.number} className="text-xs text-muted-foreground">
+                Tranche {t.number} raised: {formatDateSheet(t.raised) || "—"}
+              </div>
+            ))}
             <div className="text-sm font-semibold text-foreground">{req.supplier.name}</div>
             <div className="text-xs text-muted-foreground">{req.customer.name}</div>
             <div className="text-xs text-muted-foreground">
@@ -299,6 +307,9 @@ function PendingTable({
               {/* Asc/desc on every header (16 Sep 2026, executive request). */}
               <SortableHead label="Request #" sortKey="request" state={colSort} />
               <SortableHead label="Request Date" sortKey="request_date" state={colSort} />
+              {/* Per-tranche raised dates (5 Nov 2026, client request) —
+                  one line each, directly right of the file's request date. */}
+              <SortableHead label="Tranches (raised)" sortKey="tranche_raised" state={colSort} />
               <SortableHead label="Invoice #" sortKey="invoice" state={colSort} />
               <SortableHead label="Supplier" sortKey="supplier" state={colSort} />
               {/* 4 Sep 2026: proforma # after Supplier; Vertical before Customer. */}
@@ -317,9 +328,9 @@ function PendingTable({
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableSkeleton rows={5} cols={selectable ? 16 : 15} />
+              <TableSkeleton rows={5} cols={selectable ? 17 : 16} />
             ) : rows.length === 0 ? (
-              <tr><td colSpan={selectable ? 16 : 15}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
+              <tr><td colSpan={selectable ? 17 : 16}><EmptyState icon={CheckCircle} title="Queue is clear" description="No pending payments in this bucket." /></td></tr>
             ) : rows.map((req) => (
               <TableRow key={req.id}>
                 {selectable && (
@@ -351,6 +362,15 @@ function PendingTable({
                 {/* DD-Mon-YY (16 Sep 2026) — copy-paste lands in the
                     executives' sheet already in its date format. */}
                 <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{formatDateSheet(req.created_at) || "—"}</TableCell>
+                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                  {unpaidTrancheRaisedDates(req).length === 0 ? "—" : (
+                    <div className="space-y-0.5">
+                      {unpaidTrancheRaisedDates(req).map((t) => (
+                        <div key={t.number}>Tranche {t.number}: {formatDateSheet(t.raised) || "—"}</div>
+                      ))}
+                    </div>
+                  )}
+                </TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.sunshine_invoice_number || "—"}</TableCell>
                 <TableCell className="text-foreground font-medium">{req.supplier.name}</TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{req.supplier_invoice_number || "—"}</TableCell>
@@ -374,7 +394,7 @@ function PendingTable({
               totalRows.map(([cur, t]) => (
                 <TableRow key={`total-${cur}`} className="bg-muted/60 hover:bg-muted/60 font-semibold">
                   {selectable && <TableCell className="w-8" />}
-                  <TableCell colSpan={8} className="text-sm">
+                  <TableCell colSpan={9} className="text-sm">
                     Total ({cur})
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
@@ -698,6 +718,13 @@ export default function AccountsDashboard() {
   // executives' Excel ledger rows — UNPAID tranches only (the "1323" fix:
   // paid tranches never belong in a pending payments sheet), oldest first.
   const ledgerEntries = bankLedgerEntries(filteredQueue, { unpaidOnly: true });
+  // How many distinct requests those tranche rows belong to — surfaced on the
+  // tile so the tranche count never looks like a discrepancy.
+  const ledgerRequestCount = new Set(
+    filteredQueue
+      .filter((r) => (r.tranches ?? []).some((t) => t.status === "unpaid"))
+      .map((r) => r.id),
+  ).size;
 
   const { data: holdData, isLoading: holdLoading } = useRequestsPaginated(holdPage, PAGE_SIZE, {
     status: ["hold_by_accounts", "hold_by_merchandiser"],
@@ -807,20 +834,27 @@ export default function AccountsDashboard() {
         {/* FY-to-date KPIs (April–March), incl. Rejected and Cancelled heads
             (UAT Aug 2026, items 5, 17, 19). */}
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+          {/* Counts the LIVE queue, which is exactly what the Pending tab
+              below lists (5 Nov 2026). It previously showed an FY-to-date
+              figure while the tab and the Bank Ledger tile were all-time,
+              so the three never agreed. */}
           <StatCard
             label="Pending Payment"
-            value={kpis?.pending_payment ?? queue.length}
+            value={queue.length}
             icon={Clock}
-            subtext={fySubtext}
+            subtext="Live — requests awaiting payment"
             onClick={() => goToTab("pending")}
           />
           {/* Executive request (4 Sep 2026): the pending queue viewable in
               the Excel bank-ledger layout without downloading. */}
+          {/* Tranches, not requests — a file with two unpaid tranches is two
+              ledger rows. Spelling the relationship out stops the two tiles
+              reading as a mismatch when they are simply different units. */}
           <StatCard
             label="Pending Payments (Bank Ledger)"
             value={ledgerEntries.length}
             icon={BookOpen}
-            subtext="Live — one row per unpaid tranche"
+            subtext={`Live — unpaid tranches across ${ledgerRequestCount} ${ledgerRequestCount === 1 ? "request" : "requests"}`}
             onClick={() => goToTab("bank-ledger")}
           />
           <StatCard
@@ -949,7 +983,15 @@ export default function AccountsDashboard() {
               )}
               <ExportButton
                 count={filteredQueue.length}
-                onExport={() => exportRequestsToExcel(filteredQueue, "pending-payments.xlsx")}
+                onExport={async () => {
+                  // Server-built so the sheet carries real numbers/dates and
+                  // a styled header (5 Nov 2026 client feedback).
+                  try {
+                    await downloadPendingPaymentsReport();
+                  } catch {
+                    toast.error("Could not build the Pending Payments export.");
+                  }
+                }}
                 onExportLedger={() => exportBankLedgerToExcel(filteredQueue, "pending-payments-bank-ledger.xlsx", { unpaidOnly: true })}
               />
             </div>

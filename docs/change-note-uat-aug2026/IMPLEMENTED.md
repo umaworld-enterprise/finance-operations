@@ -2082,3 +2082,381 @@ reported on the dashboard. Only the blocking behaviour is now opt-in.
 `test_projections.py` gained `test_lock_is_off_by_default` and
 `test_lock_can_be_disarmed_again`; the two blocking tests now arm the switch
 first. 350 backend tests green; tsc clean; production build compiles.
+
+## Analytics: new Ageing tab (5 Nov 2026)
+
+A currency matrix of deposit value by age band, with two cuts and two ageing
+bases (both confirmed choices; cells carry the deposit amount).
+
+**Cuts** — a `View` selector: *Currency-wise* puts the delay buckets down the
+left and USD / CNY / EUR across the top; *Customer-wise* puts customers down
+the left against the same currency columns. Both end in a per-currency
+**Total** row. Currencies are never added together, so there is deliberately
+no single grand total.
+
+**Bases** — an `Aged by` selector:
+* *Shipment delay* — deposits already PAID OUT whose goods have not shipped,
+  aged from the original Est ETD. Identical population, bands and boundary
+  rule (`low < days <= high`) to the Delay Buckets tab, so the two reconcile.
+* *Payment delay* — unpaid TRANCHES aged from their tentative payment date,
+  i.e. money still owed and how late it is. Amounts are the unpaid tranche
+  values, not the whole request, and a leading **Not yet due** row holds
+  everything not yet overdue.
+
+The tab also carries the standard staff / vertical / customer filters and the
+page's global date range. Column headers sort; band rows keep their ladder
+order unless the user sorts deliberately, and customer rows with nothing
+outstanding are omitted while band rows are kept so the ladder reads
+continuously.
+
+`GET /analytics/ageing?basis=&cut=&…` behind a new `ageing` permission
+section, defaulting to all roles. `_check_section_access` already falls back
+to the defaults for a section missing from a stored `analytics_permissions`
+row, so a server with older saved permissions cannot lock the new tab out.
+The admin Analytics Access page gained toggles for `ageing` **and**
+`outstanding_tracker` — the latter was gated server-side but had never been
+listed, so it could not be toggled at all.
+
+`tests/unit/test_ageing_grid.py` — 7 tests (band/currency placement, the
+shipped and unpaid exclusions, future ETDs ignored, payment-basis ageing and
+Not-yet-due, customer cut, empty customers omitted). 368 backend tests green;
+tsc clean; production build compiles. No migration.
+
+**Note:** this session's venv was a month stale (fastapi 0.115 against the
+0.133 now pinned), which surfaced as a bogus `Depends() got an unexpected
+keyword argument 'scope'` on boot. `pip install -r requirements.txt` fixed
+it — worth doing after pulling.
+
+## Batch (5 Nov 2026) — tranche cancel, formatted exports, ageing reports, MoM, searchable files, resizable ledger
+
+**Excel exports were raw (client complaint).** `build_excel` wrote every cell
+as `str(v)`, so amounts and dates arrived as text — not right-aligned, no
+separators, `SUM()` returned nothing. It now preserves real types with number
+formats (`#,##0.00`, `#,##0`, `DD-MMM-YY`), styles and freezes the header,
+adds an autofilter, borders and fitted columns. Every report benefits.
+
+**Pending Payments extract** (`GET /reports/pending-payments`, also on the
+Reports tab) carries every column the Accounts Pending tab shows, and fixes
+the ageing complaint: a **Tranches (raised date)** column lists each unpaid
+tranche with its own date, one per line, and Days Waiting / Payment Delay are
+computed from the earliest tranche's tentative date — not the file's request
+date — so the extract agrees with the Ageing tab. The Pending tab's Export
+button now downloads this server-built file instead of the unstyled
+client-side one (SheetJS cannot colour a header or set number formats).
+
+**Ageing report** (`GET /reports/ageing`) is the Analytics grid as a
+download, same service so screen and sheet agree, with the per-currency total
+row included. Both new reports appear in the Reports tab.
+
+**Merchandiser can cancel a tranche** (**migration 0039**, new `cancelled`
+value on the `tranche_status` enum, added in an autocommit block;
+downgrade maps cancelled → rejected and rebuilds the type). Cancel keeps the
+row visible with a mandatory reason, unlike delete which removes it — so it
+works once Accounts have touched the tranche AND on a file's last remaining
+tranche, both of which delete refuses. Cancelled value leaves the deposit
+total and the invoice ceiling, so replacements can be added. Cancelled is
+now treated like rejected everywhere it matters: totals, the
+"all tranches paid" check and the bank ledger rows.
+
+**Requests raised, month on month** (`GET /analytics/monthly-requests`) on
+the Overview tab: value raised per month in a chosen currency with the
+MoM change and a trailing 3-month average. The average stays blank until
+three whole months exist — a partial window reads as a dip that never
+happened. Cancelled/rejected files never count as raised.
+
+**Searchable file picker** — new `SearchableSelect` component; the Modify
+Request file list shows the most recent files and filters as you type a file
+or request number, with keyboard navigation.
+
+**Bank Ledger columns are resizable** and the widths persist per user per
+device (localStorage, confirmed choice), with a "Reset column widths" link.
+The table switches to fixed layout only once a width is set. Ledger export
+dates are now real Excel dates (`cellDates`), so the destination sheet
+formats them; the on-screen format stays 27-Apr-26 as requested.
+
+387 backend tests green (new: 8 cancel, 6 pending/ageing reports, 5 monthly
+raised); tsc clean; production build compiles.
+Deploy: `alembic upgrade head` (0039), backend + frontend together.
+
+**Still open:** the Bank Ledger "one column is short" point — I could not
+tell which column is missing against the client's sheet, so nothing was
+changed there; and the 29 Oct format reference was never in the repo, so the
+export styling follows the app's own report format pending comparison.
+
+## Dashboard tile mismatch + Google sign-in bounce (5 Nov 2026)
+
+**The 63 vs 64 was not a missing record.** The two tiles counted different
+things in two ways: Pending Payment showed an FY-to-date count of REQUESTS
+(`/requests/queue-kpis`, created since 1 April), while Pending Payments
+(Bank Ledger) showed all-time UNPAID TRANCHE rows. A file with two unpaid
+tranches is two ledger rows, and a pending file raised before 1 April was
+absent from the first number entirely — yet the Pending tile links to the
+Pending tab, which lists the all-time live queue, so the tile disagreed with
+its own list.
+
+Fixed by making the tile describe what it opens: Pending Payment now counts
+the live queue (subtext "Live — requests awaiting payment"), and the ledger
+tile spells out the unit — "Live — unpaid tranches across N requests" — so
+any remaining difference is self-explaining rather than looking like data
+loss. The other tiles keep their deliberate YTD framing.
+
+**Google sign-in sometimes bounced back to /login.** Three contributors,
+all fixed:
+* **Two navigations per login.** `handleAuthCode` pushed "/" and let RootPage
+  bounce again via `window.location`, so every sign-in re-ran the middleware
+  and `/auth/me` twice — doubling the window for a transient failure. It now
+  goes straight to the role home in a single `window.location.replace`, which
+  also keeps /login out of the back history.
+* **The middleware judged expiry on its own.** It compared the JWT `exp` to
+  the BROWSER clock with no tolerance, so a machine running slightly fast saw
+  a freshly issued token as expired and redirected to /login; and `atob` was
+  handed unpadded base64url, where a throw also meant "logged out". It now
+  allows 2 minutes of clock skew, pads the base64 correctly, and treats a
+  present-but-unreadable token as a live session — the backend authorises
+  every call anyway, so a parsing quirk must never cause a login loop.
+* **A transient `/auth/me` failure read as a logout.** It is now retried once
+  on 429 / 5xx / network errors, and RoleGuard no longer redirects to /login
+  when the failure was a service error — it shows "Could not reach the
+  server" with a retry instead.
+
+`ROLE_HOME` was duplicated in three files and is now one shared
+`lib/role-home.ts`. 387 backend tests green; tsc clean; build compiles.
+Frontend only, no migration.
+
+## Vertical master clean-up (5 Nov 2026) — migration 0040
+
+26 accumulated categories collapse into the client's 12 canonical verticals.
+Confirmed decisions: names stored CLEAN (no "01." prefix); BOTH spellings of
+Machinery/Machinary go to Hardware (the sheet sent them to different targets,
+which was a slip); "Forwarder Expense" is retired with any stragglers moved
+to Sundry first; and where a merge puts two projections on the same month,
+their amounts are SUMMED.
+
+`app/domain/vertical_mapping.py` is the single definition of the mapping —
+the migration, the preview script and the tests all read it, so they cannot
+drift. Fan-in: Sundry 8, Hardware 6, Textile 2, Electronic Goods 2, the rest
+1:1. **Frippery** has no source and is created empty.
+
+**The migration repoints, it does not drop.** Every `deposit_requests` and
+`projections` row moves to its canonical vertical before the old row is
+deleted; verticals NOT named in the mapping are deliberately left untouched.
+
+**It is genuinely reversible.** Everything is journalled into
+`vertical_merge_journal_0040` — the old vertical rows, every repointed
+request and projection, every absorbed projection with its full amounts, and
+the ids of verticals the migration created. The downgrade replays that
+journal: it recreates the old verticals with their original ids, repoints
+each row back, subtracts the summed amounts and restores the absorbed
+projection rows, then removes the verticals it invented and drops the
+journal. The journal table is intentionally LEFT BEHIND after upgrade — it is
+the only record of the pre-merge assignment.
+
+**Run the dry run first:** `python scripts/preview_vertical_merge.py` reports
+what will move (requests and projections per vertical), which projection
+periods would be summed, what gets created or deleted, and — importantly —
+any vertical in the database that the mapping does not cover, changing
+nothing. The frontend has no hardcoded vertical names, so no UI change was
+needed.
+
+`tests/unit/test_vertical_mapping.py` (7) guards the map: every target is
+canonical, 12 distinct canonical names, sources unique case-insensitively
+(the DB has a UNIQUE index on LOWER(name)), both Machinery spellings land on
+Hardware, and no canonical name carries a numeric prefix.
+
+**Migration 0040 is GATED ON PRODUCTION ONLY.** The host's `deploy.sh` runs
+`alembic upgrade head` automatically, so on production a routine deploy
+would otherwise rewrite every affected request's vertical before anyone had
+seen the dry run. On `APP_ENV=production` it refuses unless
+`VERTICAL_MERGE_CONFIRM=1` is set, failing with instructions — a failed
+migration stops the deploy and the previous containers keep serving.
+**Staging and development apply it normally**, so the merge can be exercised
+end to end on staging with no extra setup. Every other migration is
+unaffected.
+
+394 backend tests green; app boots.
+Deploy order: run the preview → database backup → deploy with
+`VERTICAL_MERGE_CONFIRM=1` → unset it again.
+
+---
+
+## Pending Payment — per-tranche raised dates on screen (5 Nov 2026)
+
+Reported: the Tranches column asked for on 5 Nov was not visible in the
+Pending Payment tab. It had only ever been added to the Excel extract, and
+there it sat after Merchandiser rather than beside the request date. It was
+also mislabelled: the header read "raised date" while the cells were filled
+from `tentative_payment_date`. Confirmed with the client that **raised
+date** means the date the tranche itself was raised.
+
+**Tranches (raised)** now sits directly right of Request Date in the
+Accounts → Pending Payment table, listing one line per UNPAID tranche —
+`Tranche 1: 27-Apr-26` — from the tranche's own `created_at`. It is sortable
+like every other header (on the earliest unpaid tranche's raised date,
+undated files sinking), appears in the mobile card list, and the per-currency
+totals row and skeleton spans moved with it. `unpaidTrancheRaisedDates()` in
+`lib/utils.ts` is the single source, shared by the table and the sort
+accessor.
+
+The extract now matches the screen: same column, same position, same raised
+dates, same `Tranche N: DD-Mon-YY` wording (previously the longer
+`Deposit - Tranche N` label).
+
+Two defects in `reports/excel_builder.py` would have broken the multi-line
+cell and were fixed with it:
+
+- Body cells never set `wrap_text`, despite a comment claiming they wrapped.
+  Excel ignores an embedded newline without it, so the per-tranche lines
+  would have collapsed into one. Now set for any value containing a newline,
+  leaving single-line cells unchanged.
+- The column auto-fit measured the whole joined string, so one three-tranche
+  row would have stretched the column to the 46-char clamp. It now measures
+  the widest single line.
+
+395 backend tests green (two rewritten/added in
+`test_pending_and_ageing_reports.py` — raised dates with `wrap_text`, and
+the column's position next to Request Date); `npx tsc --noEmit` clean.
+No migration: `created_at` already exists on every tranche and is already
+exposed by the API.
+
+---
+
+## Projections — reminder, confirmation form, audit trail (5 Nov 2026)
+
+### What was already there
+
+Two of the four bullets needed no work. The lock has been **per-vertical,
+not per-merchandiser** since 7 Oct: any merchandiser may file for any
+vertical and `assert_vertical_open` applies to every role, HoM included.
+And **Analytics → Requests Raised — month on month** (value per month, vs
+last month %, trailing 3-month average, currency selector) shipped in the
+earlier 5 Nov batch; it reached staging the same morning this was asked for
+again, which is why it looked missing.
+
+Steps 1 and 2 of the attached sheet — sorting verticals to the Tally list
+and realigning transactional data — are the vertical master clean-up that
+shipped as migration 0040. Step 3, the trend, is the new work below.
+
+### The contradiction
+
+Bullet 1 ("no new deposit request allowed for that month") and bullet 3
+("not filling up shall result into lock") ask for a hard block; bullet 4
+("there should be no blockers in creating requests as it hampers work")
+forbids one; and the disclaimer's own deadline — file October's projection
+"on or before 31st October" — puts the deadline a month after blocking
+would start. Asked, and the answers came back contradictory too: *never
+block*, but *arm the lock*.
+
+Resolved as **reminder only, lock left OFF**, on the strength of the
+instruction being given three times (bullet 4, the 5 Nov quick fix that
+disarmed the lock after management were locked out, and the behaviour
+answer). The switch is untouched and a Super Admin can arm it from
+Projections whenever projections are actually flowing.
+
+### Reminder (advisory)
+
+`GET /projections/reminders` returns the period being chased, its deadline
+and the verticals still owing one. `reminder_period()` is the next month
+from the 25th and the running month before that — so one continuous
+"October 2026" reminder from 25 Sep to 31 Oct, exactly the client's example.
+
+`ProjectionReminderAlert` sits directly under the Vertical field on the
+request form and reads "Please update projection for the month October 2026
+on or before 31 October 2026". It appears only for a vertical that still
+owes one, disappears the moment it is filed, has no override and no
+blocking path, and says in so many words that the request is not blocked.
+
+### Confirmation form (the attached sheet)
+
+`ProjectionService.trend()` and `GET /projections/trend` return, per
+vertical, the three months before the target: what was **proposed**, what
+was **actually requested** (live requests dated in that month, the same
+basis as the projection dashboard), and the gap — positive where the
+projection over-estimated. The suggested figure is the average of the
+**actuals**, not of the past projections, which reproduces the sheet's
+266,667 from 250k/300k/250k rather than 275,000 from the proposed column.
+
+**Projections → Confirm projection by vertical** renders it: pick a
+vertical and currency, read the trend, then confirm the average or type
+your own figure. Confirming one currency leaves the other two as they were.
+
+### Edit window widened
+
+A projection for month M was fileable only from the 25th of M-1 to the end
+of M-1. The client asked for "edit option for that month (till end of the
+month)", so `period_editable()` now runs from the 25th of M-1 to the **last
+day of M** — October stays correctable through 31 October, matching the
+disclaimer's own deadline. Outside that window it is still Super Admin only.
+
+### Audit trail
+
+"All changes should be audit logged": `submit()` now writes through
+`AuditService` — a CREATE row carrying vertical, period and all three
+amounts for a new projection, and an UPDATE row per currency that actually
+moved, recorded before the mutation so the old value is real. `record_update`
+drops no-op fields itself.
+
+402 backend tests green (7 added/rewritten: the widened window including
+the year wrap, reminder period continuity, the trend against the client's
+own numbers, the reminder clearing per vertical, the reminder never
+blocking, and the audit rows); `npx tsc --noEmit` clean. No migration —
+projections, verticals and audit_logs all already exist.
+
+**The lock switch remains OFF.** Arming it is a one-line config change from
+Projections → the lock card, or `PUT /projections/settings`.
+
+---
+
+## Numbered vertical names (6 Nov 2026) — migration 0041
+
+The client sent the vertical list back with the sheet's numbering attached
+and asked for it to be kept that way:
+
+```
+01.Commodity   02.Food       03.Sundry     04.Textile
+05.Agriculture 06.Automobile 07.Frippery   08.Frozen
+09.Medicine    10.Hardware   11.Electronic Goods
+12.Personal/Project
+```
+
+This reverses the 5 Nov decision recorded in `vertical_mapping.py` that
+names would be stored clean. The ordinal is now **part of the stored name**,
+so it appears wherever the vertical appears — the request form dropdown,
+Accounts, Payments, the projection screens and every Excel export — with no
+per-screen formatting. It also fixes the ordering for free: the verticals
+endpoint sorts on `LOWER(name)`, which previously gave alphabetical order
+and now gives the client's intended order.
+
+### Why a separate migration from 0040
+
+0040 merges 26 verticals into 12 and journals every repointed row so the
+merge can be undone. It has already run on staging with clean names, and
+rewriting it would invalidate that journal. 0041 is therefore a **rename
+only** — no request, projection or vertical id changes hands, nothing needs
+journalling, and the downgrade simply strips the prefix. On production,
+where 0040 is still held back behind `VERTICAL_MERGE_CONFIRM=1`, the two
+apply back to back and land in the same state as staging.
+
+The rename skips any vertical whose numbered name is already taken: the
+table has a UNIQUE index on `LOWER(name)`, and failing a whole deploy over a
+name someone typed by hand would be the worse outcome.
+
+### Supporting changes
+
+* `vertical_mapping.py` gains `numbered_name()`, `bare_name()` and
+  `NUMBERED_VERTICALS`. `numbered_name()` is idempotent, so the prefix
+  cannot stack.
+* `canonical_for()` now accepts an already-numbered name, and resolves a
+  canonical name that is nobody's merge source (Hardware, Frippery,
+  Electronic Goods, Personal/Project, Commodity) to itself. Before this it
+  returned `None` for those, which made `preview_vertical_merge.py` report
+  them as "not in mapping" when run against an already-merged database.
+* `preview_vertical_merge.py` shows the final stored name in its
+  `→ CANONICAL` column, so the dry run reads the way the screen will.
+* `scripts/seed.py` seeded the old 26-name list, which on a fresh database
+  would have re-created verticals 0040 had just consolidated. It now seeds
+  `NUMBERED_VERTICALS`.
+
+406 backend tests green (5 added, 1 inverted — the old test asserted names
+carry *no* numeric prefix). The rename and its downgrade were round-tripped
+against a throwaway database, including an unmapped vertical left untouched.
+No frontend change: vertical names are rendered as they arrive.
